@@ -2,6 +2,14 @@
 .env*
 !.env.example
 
+# Next.js / Web
+node_modules/
+.next/
+out/
+build/
+.vercel
+*.log
+
 # IDEs
 .vscode/
 .idea/
