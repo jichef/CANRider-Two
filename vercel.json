@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd web-portal && npm install && npm run build",
-  "outputDirectory": "web-portal/.next",
-  "installCommand": "cd web-portal && npm install"
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install"
 }
