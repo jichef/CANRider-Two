@@ -43,6 +43,7 @@ bool sendTelemetry(const TelemetryData& data) {
 
         String request = "POST " + path + " HTTP/1.1\r\n";
         request += "Host: " + host + "\r\n";
+        request += "User-Agent: ESP32-SIM7000\r\n";
         request += "Content-Type: application/json\r\n";
         request += "x-api-key: " + String(TELEMETRY_SECRET) + "\r\n";
         request += "Content-Length: " + String(body.length()) + "\r\n";
@@ -51,17 +52,24 @@ bool sendTelemetry(const TelemetryData& data) {
 
         secureClient.print(request);
 
-        // Esperar respuesta brevemente
+        // Esperar respuesta y loguear la primera línea
         unsigned long timeout = millis();
-        while (secureClient.connected() && millis() - timeout < 5000) {
+        while (secureClient.connected() && millis() - timeout < 8000) {
             if (secureClient.available()) {
                 String line = secureClient.readStringUntil('\n');
-                if (line.indexOf("200 OK") != -1) {
-                    success = true;
+                line.trim();
+                if (line.length() > 0) {
+                    logMsg(LOG_DEBUG, "TELEMETRY_RESP", line);
+                    if (line.indexOf("200 OK") != -1) {
+                        success = true;
+                    }
+                    if (line.indexOf("HTTP/") != -1 && line.indexOf("200") == -1) {
+                        logMsg(LOG_WARN, "TELEMETRY", "HTTP Error: " + line);
+                    }
+                    break; // Leída la primera línea de estado, salimos
                 }
-                // Podríamos leer el resto pero con el 200 nos vale
-                if (line == "\r") break;
             }
+            vTaskDelay(10);
         }
         secureClient.stop();
     } else {
