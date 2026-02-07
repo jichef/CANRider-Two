@@ -120,7 +120,7 @@ export default function DashboardContent() {
   const stats = [
     { 
       label: 'BATERÍA', 
-      value: telemetry?.battery_level ? `${telemetry.battery_level}%` : (loading ? '---' : '85%'), 
+      value: telemetry?.battery_level !== undefined ? `${telemetry.battery_level}%` : '---', 
       icon: Battery, 
       color: 'text-emerald-400', 
       glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
@@ -128,8 +128,8 @@ export default function DashboardContent() {
     },
     { 
       label: 'VELOCIDAD', 
-      value: telemetry?.speed !== undefined ? Math.round(telemetry.speed) : (loading ? '---' : '0'), 
-      unit: 'km/h',
+      value: telemetry?.speed !== undefined ? Math.round(telemetry.speed) : '---', 
+      unit: telemetry?.speed !== undefined ? 'km/h' : '',
       icon: Navigation, 
       color: 'text-cyan-400', 
       glow: 'shadow-[0_0_15px_rgba(34,211,238,0.3)]',
@@ -137,16 +137,16 @@ export default function DashboardContent() {
     },
     { 
       label: 'SISTEMA', 
-      value: telemetry ? (telemetry.is_charging ? 'CHARGING' : 'READY') : 'READY', 
+      value: telemetry ? (telemetry.is_charging ? 'CHARGING' : 'READY') : '---', 
       icon: ShieldCheck, 
-      color: telemetry?.is_charging ? 'text-amber-400' : 'text-indigo-400', 
+      color: telemetry?.is_charging ? 'text-amber-400' : (telemetry ? 'text-indigo-400' : 'text-zinc-600'), 
       glow: telemetry?.is_charging ? 'shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]',
       border: 'border-indigo-500/20'
     },
     { 
       label: 'SEÑAL', 
-      value: telemetry?.signal_strength || (loading ? '---' : '-75'), 
-      unit: 'dBm',
+      value: telemetry?.signal_strength !== undefined ? telemetry.signal_strength : '---', 
+      unit: telemetry?.signal_strength !== undefined ? 'dBm' : '',
       icon: Signal, 
       color: 'text-fuchsia-400', 
       glow: 'shadow-[0_0_15px_rgba(232,121,249,0.3)]',
@@ -272,66 +272,70 @@ export default function DashboardContent() {
             </div>
             
             <div className="space-y-4">
-              {/* Si no hay viajes reales y estamos offline, mostramos datos de prueba */}
-              {(trips.length > 0 ? trips : [
-                { id: '1', start_time: new Date().toISOString(), distance: 12.4, duration: '25M', consumption: 15 },
-                { id: '2', start_time: new Date(Date.now() - 86400000).toISOString(), distance: 8.2, duration: '18M', consumption: 8 },
-                { id: '3', start_time: new Date(Date.now() - 172800000).toISOString(), distance: 22.1, duration: '45M', consumption: 28 },
-              ]).map((trip) => {
-                const date = new Date(trip.start_time).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
-                const isSelected = selectedTrip === trip.id;
-                const batteryUsed = trip.consumption || (trip.start_battery_level && trip.end_battery_level ? trip.start_battery_level - trip.end_battery_level : null);
-                
-                return (
-                  <button 
-                    key={trip.id} 
-                    onClick={() => setSelectedTrip(isSelected ? null : trip.id)}
-                    className={`w-full group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
-                      isSelected 
-                        ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]' 
-                        : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
-                    }`}
-                  >
-                    <div className="space-y-1 text-left">
-                      <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
-                        isSelected ? 'text-cyan-400' : 'text-zinc-500'
-                      }`}>
-                        {date}
-                      </span>
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                          <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />
-                          {trip.distance} KM
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
-                          <Clock size={12} />
-                          {trip.duration || trip.time || 'N/A'}
-                        </div>
-                        {batteryUsed && (
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500/80">
-                            <Battery size={12} />
-                            -{batteryUsed}%
+              {trips.length > 0 ? (
+                trips.map((trip) => {
+                  const date = new Date(trip.start_time).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
+                  const isSelected = selectedTrip === trip.id;
+                  const batteryUsed = trip.consumption || (trip.start_battery_level && trip.end_battery_level ? trip.start_battery_level - trip.end_battery_level : null);
+                  
+                  return (
+                    <button 
+                      key={trip.id} 
+                      onClick={() => setSelectedTrip(isSelected ? null : trip.id)}
+                      className={`w-full group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
+                        isSelected 
+                          ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]' 
+                          : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
+                      }`}
+                    >
+                      <div className="space-y-1 text-left">
+                        <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
+                          isSelected ? 'text-cyan-400' : 'text-zinc-500'
+                        }`}>
+                          {date}
+                        </span>
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                            <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />
+                            {trip.distance} KM
                           </div>
-                        )}
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
+                            <Clock size={12} />
+                            {trip.duration || trip.time || 'N/A'}
+                          </div>
+                          {batteryUsed && (
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500/80">
+                              <Battery size={12} />
+                              -{batteryUsed}%
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className={`p-2 rounded-xl transition-all ${
-                      isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
-                    }`}>
-                      <Zap size={14} fill={isSelected ? "currentColor" : "none"} />
-                    </div>
-                  </button>
-                );
-              })}
+                      <div className={`p-2 rounded-xl transition-all ${
+                        isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
+                      }`}>
+                        <Zap size={14} fill={isSelected ? "currentColor" : "none"} />
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="py-12 flex flex-col items-center justify-center text-zinc-600 border border-dashed border-white/5 rounded-3xl">
+                  <RouteIcon size={32} className="mb-2 opacity-20" />
+                  <p className="text-[10px] font-black tracking-widest uppercase">No data found</p>
+                </div>
+              )}
             </div>
 
-            <div className="mt-8 p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-transparent border border-indigo-500/20">
-              <p className="text-[10px] font-bold text-indigo-400 mb-1 tracking-widest uppercase">Battery Health</p>
-              <div className="flex items-end justify-between">
-                <span className="text-2xl font-black text-white font-mono">98%</span>
-                <span className="text-[10px] text-zinc-500 mb-1 italic">Optimal Performance</span>
+            {telemetry?.battery_health && (
+              <div className="mt-8 p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-transparent border border-indigo-500/20">
+                <p className="text-[10px] font-bold text-indigo-400 mb-1 tracking-widest uppercase">Battery Health</p>
+                <div className="flex items-end justify-between">
+                  <span className="text-2xl font-black text-white font-mono">{telemetry.battery_health}%</span>
+                  <span className="text-[10px] text-zinc-500 mb-1 italic">Optimal Performance</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
