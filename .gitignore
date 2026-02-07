@@ -1,0 +1,20 @@
+# Local env files
+.env*
+!.env.example
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Hardware/Build
+/main/build/
+/main/sketch/
+*.bin
+*.elf
+*.o
+
+# OS files
+.DS_Store
+Thumbs.db

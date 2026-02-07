@@ -3,27 +3,7 @@
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { useEffect } from 'react';
-
-// Icono por defecto (Azul)
-const StartIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-// Icono de Fin (Rojo)
-const EndIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
+import { useEffect, useState } from 'react';
 
 // Componente para seguir la posición en tiempo real
 function LiveFollower({ center }: { center: [number, number] }) {
@@ -52,6 +32,37 @@ interface MapProps {
 }
 
 export default function Map({ center, zoom = 15, path }: MapProps) {
+  const [icons, setIcons] = useState<{ start: L.Icon, end: L.Icon } | null>(null);
+
+  useEffect(() => {
+    // Crear iconos solo en el cliente
+    const startIcon = L.icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
+    });
+
+    const endIcon = L.icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
+    });
+
+    setIcons({ start: startIcon, end: endIcon });
+  }, []);
+
+  if (!icons) return (
+    <div className="h-full w-full bg-zinc-900 flex items-center justify-center">
+      <span className="text-zinc-500 font-mono text-[10px] tracking-widest">LOADING_ASSETS...</span>
+    </div>
+  );
+
   const bounds = path && path.length > 0 ? L.latLngBounds(path) : undefined;
 
   return (
@@ -68,7 +79,7 @@ export default function Map({ center, zoom = 15, path }: MapProps) {
       
       {!path && (
         <>
-          <Marker position={center} icon={StartIcon}>
+          <Marker position={center} icon={icons.start}>
             <Popup>Ubicación actual</Popup>
           </Marker>
           <LiveFollower center={center} />
@@ -78,12 +89,12 @@ export default function Map({ center, zoom = 15, path }: MapProps) {
       {path && path.length > 0 && (
         <>
           {/* Marcador de INICIO */}
-          <Marker position={path[0]} icon={StartIcon}>
+          <Marker position={path[0]} icon={icons.start}>
             <Popup>Punto de inicio</Popup>
           </Marker>
 
           {/* Marcador de FIN */}
-          <Marker position={path[path.length - 1]} icon={EndIcon}>
+          <Marker position={path[path.length - 1]} icon={icons.end}>
             <Popup>Punto de destino</Popup>
           </Marker>
 
