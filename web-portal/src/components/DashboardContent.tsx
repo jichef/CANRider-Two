@@ -32,9 +32,26 @@ export default function DashboardContent() {
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isConfigured, setIsConfigured] = useState(true);
+  const [isStale, setIsStale] = useState(false);
 
   // Madrid por defecto si no hay datos
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
+
+  useEffect(() => {
+    // Comprobar si los datos son antiguos (más de 2 minutos)
+    const checkStale = () => {
+      if (telemetry?.timestamp) {
+        const diff = Date.now() - new Date(telemetry.timestamp).getTime();
+        setIsStale(diff > 120000); // 2 minutos
+      } else {
+        setIsStale(true);
+      }
+    };
+
+    const interval = setInterval(checkStale, 30000);
+    checkStale();
+    return () => clearInterval(interval);
+  }, [telemetry]);
 
   useEffect(() => {
     // Si el cliente no se pudo crear, estamos en modo offline
@@ -167,15 +184,15 @@ export default function DashboardContent() {
           
           <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
             <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
-              isConfigured && telemetry 
+              isConfigured && telemetry && !isStale 
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
                 : 'bg-red-500/10 text-red-400 border-red-500/20'
             }`}>
               <div className={`w-2 h-2 rounded-full ${
-                isConfigured && telemetry ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
+                isConfigured && telemetry && !isStale ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
               }`} />
               <span className="text-xs font-bold uppercase tracking-wider">
-                {isConfigured && telemetry ? 'Online' : 'Offline'}
+                {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
               </span>
             </div>
             <div className="pr-4 text-xs font-mono text-zinc-500">
