@@ -43,21 +43,25 @@ void setup() {
 
   // === CAN Bus ===
   initCAN();
+  esp_task_wdt_reset();
   xTaskCreatePinnedToCore(taskCANProcessing, "CANTask", 4096, NULL, 2, NULL, 0);
 
   // === Módem ===
   initModem();
+  esp_task_wdt_reset();
   modemMutex = xSemaphoreCreateMutex();
   dataMutex = xSemaphoreCreateMutex();
 
   // Conexión GPRS
   if (connectGPRS()) {
+    esp_task_wdt_reset();
     logMsg(LOG_INFO, "GPRS", "Conectado y listo");
     
     // Tareas principales
     xTaskCreatePinnedToCore(taskGPSUpdate, "GPSTask", 6144, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(taskTelemetryLoop, "TelemetryTask", 8192, NULL, 3, NULL, 1);
   } else {
+    esp_task_wdt_reset();
     logMsg(LOG_ERROR, "GPRS", "Fallo de red inicial. El sistema intentará operar.");
     // Podríamos lanzar las tareas igual y que fallen hasta que haya red
     xTaskCreatePinnedToCore(taskGPSUpdate, "GPSTask", 6144, NULL, 2, NULL, 1);

@@ -9,6 +9,7 @@
 extern "C" {
   #include "freertos/FreeRTOS.h"
   #include "freertos/task.h"
+  #include "esp_task_wdt.h"
 }
 
 // ===================== Shim de logging local =====================
@@ -52,20 +53,21 @@ static int s_tlsVersion = 3;  // 3=TLS1.2, fallback a 4 si probe falla
 static void modemPowerPulse() {
   pinMode(PWR_PIN, OUTPUT);
   digitalWrite(PWR_PIN, HIGH);
-  delay(100);
+  vTaskDelay(pdMS_TO_TICKS(100));
   digitalWrite(PWR_PIN, LOW);     // PWRKEY a LOW ~1.5s
-  delay(1500);
+  vTaskDelay(pdMS_TO_TICKS(1500));
   digitalWrite(PWR_PIN, HIGH);
-  delay(3000);
+  vTaskDelay(pdMS_TO_TICKS(3000));
 }
 
 // Espera respuesta AT “OK” hasta ms
 static bool waitForAT(unsigned long ms) {
   unsigned long t0 = millis();
   while (millis() - t0 < ms) {
+    esp_task_wdt_reset();
     modem.sendAT();
     if (modem.waitResponse(500, "OK") == 1) return true;
-    delay(200);
+    vTaskDelay(pdMS_TO_TICKS(200));
   }
   return false;
 }
@@ -201,6 +203,7 @@ static bool readCCLKOnce(int &hour, int &minute, uint16_t wait_ms) {
         hour = h; minute = m;
         return true;
       }
+      vTaskDelay(1); // alimentar WDT
     }
   }
   return false;
@@ -210,7 +213,7 @@ bool getTimeFromModem(int &hour, int &minute) {
   if (!readCCLKOnce(hour, minute, 2500)) return false;
 
   if (hour == 0 && minute == 0) {
-    delay(200);
+    vTaskDelay(pdMS_TO_TICKS(200));
     int h2=0, m2=0;
     if (readCCLKOnce(h2, m2, 1200)) {
       if (!(h2 == 0 && m2 == 0)) { hour = h2; minute = m2; }
@@ -289,11 +292,16 @@ bool connectGPRS() {
   applyDnsPdpAndTls(APN);
 
   Serial.println("⏳ Esperando red...");
-  if (!modem.waitForNetwork(180000L)) {
-    Serial.println("❌ No hay red (registrado)");
-    return false;
+  unsigned long netStart = millis();
+  while (!modem.waitForNetwork(5000)) {
+    esp_task_wdt_reset();
+    if (millis() - netStart > 180000L) {
+      Serial.println("❌ No hay red (timeout)");
+      return false;
+    }
   }
 
+  Serial.println("✅ Red detectada. Conectando GPRS...");
   if (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
     Serial.println("❌ GPRS falló");
     return false;
