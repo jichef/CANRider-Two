@@ -121,11 +121,15 @@ void taskTelemetryLoop(void *pvParameters) {
       
       sendData.soc = soc; // Soc se actualiza por CAN en otra tarea
 
-      // Solo enviar si tenemos posición válida (o forzar para demo)
-      if (sendData.lat != 0) {
-        sendTelemetry(sendData);
+      // Enviar telemetría (aunque no haya GPS, enviamos batería y estado)
+      if (sendTelemetry(sendData)) {
+        if (sendData.lat == 0) {
+          logMsg(LOG_DEBUG, "TELEMETRY", "Enviado (sin GPS todavía)");
+        } else {
+          logMsg(LOG_DEBUG, "TELEMETRY", "Enviado OK");
+        }
       } else {
-        logMsg(LOG_DEBUG, "TELEMETRY", "Esperando GPS válido para enviar...");
+        logMsg(LOG_WARN, "TELEMETRY", "Fallo al enviar");
       }
     } else {
         // Intentar reconectar si se pierde
