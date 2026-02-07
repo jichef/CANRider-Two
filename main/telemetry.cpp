@@ -32,19 +32,19 @@ bool sendTelemetry(const TelemetryData& data) {
     secureClient.stop();
     if (secureClient.connect(host.c_str(), 443)) {
         String body = "{";
-        body += "\"vehicleId\":\"" + String(VEHICLE_ID) + "\",";
-        body += "\"secret\":\"" + String(TELEMETRY_SECRET) + "\",";
-        body += "\"lat\":" + String(data.lat, 6) + ",";
-        body += "\"lng\":" + String(data.lng, 6) + ",";
+        body += "\"motorcycle_id\":\"" + String(VEHICLE_ID) + "\",";
+        body += "\"latitude\":" + String(data.lat, 6) + ",";
+        body += "\"longitude\":" + String(data.lng, 6) + ",";
         body += "\"speed\":" + String(data.speed, 1) + ",";
-        body += "\"soc\":" + String(data.soc) + ",";
-        body += "\"voltage\":" + String(data.voltage, 1) + ",";
-        body += "\"current\":" + String(data.current, 1);
+        body += "\"battery_level\":" + String(data.soc) + ",";
+        body += "\"battery_voltage\":" + String(data.voltage, 1) + ",";
+        body += "\"is_charging\":" + String(data.current > 0 ? "true" : "false");
         body += "}";
 
         String request = "POST " + path + " HTTP/1.1\r\n";
         request += "Host: " + host + "\r\n";
         request += "Content-Type: application/json\r\n";
+        request += "x-api-key: " + String(TELEMETRY_SECRET) + "\r\n";
         request += "Content-Length: " + String(body.length()) + "\r\n";
         request += "Connection: close\r\n\r\n";
         request += body;
