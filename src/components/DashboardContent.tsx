@@ -196,7 +196,7 @@ export default function DashboardContent() {
               </span>
             </div>
             <div className="pr-4 text-xs font-mono text-zinc-500">
-              ESP32_NODE_01
+              {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
             </div>
           </div>
         </header>
