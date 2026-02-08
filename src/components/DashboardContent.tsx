@@ -350,7 +350,7 @@ export default function DashboardContent() {
               {/* Gráfica de Batería */}
               <div className="relative">
                 <div className="absolute top-0 left-0 text-[10px] font-bold text-emerald-400/50 tracking-widest uppercase mb-4">
-                  Nivel de Baterías (%)
+                  Nivel de baterías CanRider y Vehículo (%)
                 </div>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={historyData}>
@@ -396,7 +396,7 @@ export default function DashboardContent() {
                     <Area 
                       type="monotone" 
                       dataKey="moto_battery" 
-                      name="Moto"
+                      name="Vehículo"
                       stroke="#facc15" 
                       fillOpacity={1} 
                       fill="url(#colorMoto)" 
