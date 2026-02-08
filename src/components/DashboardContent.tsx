@@ -167,7 +167,7 @@ export default function DashboardContent() {
   const stats = [
     { 
       label: 'BATERÍA CANRIDER', 
-      value: telemetry?.battery_level !== undefined ? `${telemetry.battery_level}%` : '---', 
+      value: (telemetry?.battery_level !== undefined && telemetry?.battery_level !== null) ? `${telemetry.battery_level}%` : '--%', 
       percent: telemetry?.battery_level || 0,
       icon: Battery, 
       color: (telemetry?.battery_level ?? 100) < 20 ? 'text-red-500' : 'text-emerald-400', 
@@ -176,7 +176,7 @@ export default function DashboardContent() {
     },
     { 
       label: 'BATERÍA MOTO', 
-      value: telemetry?.moto_battery !== undefined ? `${telemetry.moto_battery}%` : '---', 
+      value: (telemetry?.moto_battery !== undefined && telemetry?.moto_battery !== null) ? `${telemetry.moto_battery}%` : '--%', 
       percent: telemetry?.moto_battery || 0,
       icon: Zap, 
       color: 'text-yellow-400', 
@@ -185,9 +185,9 @@ export default function DashboardContent() {
     },
     { 
       label: 'VELOCIDAD', 
-      value: telemetry?.speed !== undefined ? Math.round(telemetry.speed) : '---', 
+      value: (telemetry?.speed !== undefined && telemetry?.speed !== null) ? Math.round(telemetry.speed) : '--', 
       percent: Math.min((telemetry?.speed || 0) * 0.8, 100), // Max 120km/h aprox
-      unit: telemetry?.speed !== undefined ? 'km/h' : '',
+      unit: (telemetry?.speed !== undefined && telemetry?.speed !== null) ? 'km/h' : '',
       icon: Navigation, 
       color: 'text-cyan-400', 
       glow: 'shadow-[0_0_15px_rgba(34,211,238,0.3)]',
@@ -204,9 +204,9 @@ export default function DashboardContent() {
     },
     { 
       label: 'SEÑAL', 
-      value: telemetry?.signal_strength !== undefined ? telemetry.signal_strength : '---', 
+      value: (telemetry?.signal_strength !== undefined && telemetry?.signal_strength !== null) ? telemetry.signal_strength : '--', 
       percent: Math.min(((telemetry?.signal_strength || 0) / 31) * 100, 100), // CSQ max es 31
-      unit: telemetry?.signal_strength !== undefined ? 'RSSI' : '',
+      unit: (telemetry?.signal_strength !== undefined && telemetry?.signal_strength !== null) ? 'RSSI' : '',
       icon: Signal, 
       color: 'text-fuchsia-400', 
       glow: 'shadow-[0_0_15px_rgba(232,121,249,0.3)]',
