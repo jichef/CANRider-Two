@@ -23,7 +23,7 @@ void decodeCANFrame(const twai_message_t &msg) {
   const uint8_t *data = msg.data;
 
   // Determinar si es Batería A o B (B-mode es ID + 1)
-  bool isBatB = (id % 2 != 0 && (id >= 505 && id <= 54F));
+  bool isBatB = (id % 2 != 0 && (id >= 0x505 && id <= 0x54F));
   BatteryData &bat = isBatB ? batB : batA;
   uint32_t baseId = isBatB ? id - 1 : id;
 
@@ -57,7 +57,7 @@ void decodeCANFrame(const twai_message_t &msg) {
 // debemos verificar los pines disponibles. 
 bool can_setup(int rx_pin, int tx_pin) {
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)tx_pin, (gpio_num_t)rx_pin, TWAI_MODE_NORMAL);
-  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS(); // Velocidad común
+  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS(); // Velocidad ajustada a 250k
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
   if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK) {
