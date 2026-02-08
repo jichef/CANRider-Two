@@ -65,7 +65,7 @@ export default function DashboardContent() {
 
       const { data } = await supabase
         .from('telemetry')
-        .select('timestamp, battery_level, signal_strength, speed')
+        .select('timestamp, battery_level, moto_battery, signal_strength, speed')
         .gt('timestamp', startTime.toISOString())
         .order('timestamp', { ascending: true });
 
@@ -350,7 +350,7 @@ export default function DashboardContent() {
               {/* Gráfica de Batería */}
               <div className="relative">
                 <div className="absolute top-0 left-0 text-[10px] font-bold text-emerald-400/50 tracking-widest uppercase mb-4">
-                  Nivel de Batería (%)
+                  Nivel de Baterías (%)
                 </div>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={historyData}>
@@ -358,6 +358,10 @@ export default function DashboardContent() {
                       <linearGradient id="colorBat" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
                         <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorMoto" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#facc15" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#facc15" stopOpacity={0}/>
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
@@ -378,14 +382,24 @@ export default function DashboardContent() {
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
-                      itemStyle={{ color: '#10b981' }}
+                      itemStyle={{ fontSize: '10px' }}
                     />
                     <Area 
                       type="monotone" 
                       dataKey="battery_level" 
+                      name="CanRider"
                       stroke="#10b981" 
                       fillOpacity={1} 
                       fill="url(#colorBat)" 
+                      strokeWidth={2}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="moto_battery" 
+                      name="Moto"
+                      stroke="#facc15" 
+                      fillOpacity={1} 
+                      fill="url(#colorMoto)" 
                       strokeWidth={2}
                     />
                   </AreaChart>
