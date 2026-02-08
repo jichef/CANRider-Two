@@ -141,9 +141,35 @@ String getCurrentISO8601() {
   return "";
 }
 
+float lbsLat = 0, lbsLon = 0;
+
+void updateLBS() {
+  // AT+CLBS=1,1 -> Obtener lat/lon desde la red
+  SerialAT.println("AT+CLBS=1,1");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 3000) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+  }
+  
+  // Formato esperado: +CLBS: <lat>,<lon>,<precision>,<date>,<time>
+  int index = res.indexOf("+CLBS: ");
+  if (index != -1) {
+    int firstComma = res.indexOf(",", index);
+    int secondComma = res.indexOf(",", firstComma + 1);
+    int thirdComma = res.indexOf(",", secondComma + 1);
+    if (secondComma != -1) {
+      lbsLat = res.substring(firstComma + 1, secondComma).toFloat();
+      lbsLon = res.substring(secondComma + 1, thirdComma).toFloat();
+      Serial.printf("\n[LBS] Posición por red: %f, %f\n", lbsLat, lbsLon);
+    }
+  }
+}
+
 void sendTelemetry() {
   int rssi = getRSSI();
   int bat = getBatteryLevel();
+  
   // ---------- HTTP CONFIG ----------
   sendAT("AT+HTTPTERM");
   sendAT("AT+HTTPINIT");
@@ -162,12 +188,25 @@ void sendTelemetry() {
   gps_update(); 
   can_update();
   
+  float finalLat = gps_get_lat();
+  float finalLon = gps_get_lon();
+  
+  String locType = "gps";
+  // Si no hay GPS, intentamos LBS
+  if (finalLat == 0) {
+    updateLBS();
+    finalLat = lbsLat;
+    finalLon = lbsLon;
+    locType = "lbs";
+  }
+  
   String timestamp = getCurrentISO8601();
 
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
-                ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(gps_get_lat(), 6) + 
-                ",\"longitude\":" + String(gps_get_lon(), 6) + 
-                ",\"signal_strength\":" + String(rssi);
+                ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(finalLat, 6) + 
+                ",\"longitude\":" + String(finalLon, 6) + 
+                ",\"signal_strength\":" + String(rssi) +
+                ",\"location_type\":\"" + locType + "\"";
   
   if (timestamp != "") {
     body += ",\"timestamp\":\"" + timestamp + "\"";
@@ -253,6 +292,8 @@ void setup() {
   sendAT("AT+NETOPEN", 5000);
   delay(2000);
   sendAT("AT+IPADDR");
+  sendAT("AT+CNTP=\"pool.ntp.org\",0"); // Opcional: Sincronizar NTP también
+  sendAT("AT+CLBSCFG=1,3");             // Configurar LBS para máxima precisión
   syncNetworkTime();
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
 
@@ -271,19 +312,23 @@ uint32_t lastCanTimeSend = 0;
 const uint32_t canTimeInterval = 200; // Enviar trama CAN cada 200ms
 uint32_t lastTimeSync = 0;
 const uint32_t syncInterval = 3600000; // Re-sincronizar hora cada 1 hora
+uint32_t lastCanActivity = 0;
 
-void enterDeepSleep(const char* reason) {
-  Serial.println("\n" + getTimestamp() + " [CRITICAL] " + reason);
-  Serial.println(getTimestamp() + " [SHUTDOWN] Entrando en modo ahorro para proteger batería moto...");
+void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
+  Serial.println("\n" + getTimestamp() + " [SLEEP] " + reason);
   
-  // Apagar módem
+  // Apagar módem de forma controlada
   sendAT("AT+CPOWD=1"); 
   delay(2000);
-  
-  // Apagar alimentación módem si es posible
   digitalWrite(BOARD_POWERON_PIN, LOW);
+
+  if (seconds > 0) {
+    Serial.printf("Despertando en %u segundos para reporte de seguridad...\n", seconds);
+    esp_sleep_enable_timer_wakeup(seconds * 1000000ULL);
+  } else {
+    Serial.println("Apagado total por batería crítica.");
+  }
   
-  // Dormir profundamente (despertará por reset de alimentación)
   esp_deep_sleep_start();
 }
 
@@ -291,9 +336,27 @@ void loop() {
   gps_update(); 
   can_update();
 
-  // --- PROTECCIÓN DE BATERÍA ---
+  if (batA.soc != -1 || batB.soc != -1) {
+    lastCanActivity = millis();
+  }
+
+  // 1. PROTECCIÓN CRÍTICA (Batería muerta, apagado total)
   if ((batA.soc != -1 && batA.soc <= 10) || (batB.soc != -1 && batB.soc <= 10)) {
-    enterDeepSleep("Batería moto baja (<10%)");
+    enterDeepSleep("Batería CRÍTICA (<10%) - Apagado total");
+  }
+  
+  // 2. DETECCIÓN DE MOVIMIENTO / ROBO
+  // Si la moto está apagada (no hay CAN) pero se está moviendo (GPS > 2km/h)
+  bool isMoving = gps_get_speed() > 2.0;
+  if (isMoving) {
+    lastCanActivity = millis(); // Resetear inactividad si hay movimiento
+  }
+
+  // 3. REPOSO INTELIGENTE (Inactividad de 5 minutos)
+  if (millis() > 300000 && (millis() - lastCanActivity > 300000)) {
+    // Si la batería está sana (>15%), despertamos cada 30 min para seguridad
+    uint32_t sleepTime = 1800; // 30 minutos
+    enterDeepSleep("Inactividad detectada - Modo Vigilancia", sleepTime);
   }
 
   // Re-sincronizar con la red GSM cada hora

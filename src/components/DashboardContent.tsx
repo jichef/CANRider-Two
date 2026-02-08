@@ -261,7 +261,9 @@ export default function DashboardContent() {
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-cyan-500 mb-1">
               <Activity size={18} className="animate-pulse" />
-              <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
+              <span className="text-xs font-black tracking-[0.2em] uppercase">
+                {telemetry?.location_type === 'lbs' ? 'GSM Cell Location (Approx)' : 'GPS Link Active'}
+              </span>
             </div>
             {telemetry?.timestamp && (
               <div className="flex items-center gap-2 text-zinc-500 font-mono text-[10px]">
