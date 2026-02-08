@@ -73,7 +73,7 @@ export default function DashboardContent() {
 
       if (telData) {
         setTelemetry(telData);
-        if (telData.latitude && telData.longitude) {
+        if (typeof telData.latitude === 'number' && typeof telData.longitude === 'number') {
           setCurrentPosition([telData.latitude, telData.longitude]);
         }
       }
@@ -103,7 +103,7 @@ export default function DashboardContent() {
         (payload) => {
           const newData = payload.new;
           setTelemetry(newData);
-          if (newData.latitude && newData.longitude) {
+          if (typeof newData.latitude === 'number' && typeof newData.longitude === 'number') {
             setCurrentPosition([newData.latitude, newData.longitude]);
           }
         }
