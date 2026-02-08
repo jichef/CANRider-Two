@@ -593,6 +593,7 @@ export default function DashboardContent() {
             <div className="flex-1 relative min-h-[450px]">
               <Map 
                 center={currentPosition} 
+                locationType={telemetry?.location_type}
                 path={trips.find(t => t.id === selectedTrip)?.path || (selectedTrip === '1' ? [[40.41678, -3.70379], [40.42, -3.71], [40.43, -3.72]] : undefined)} 
               />
               <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_2px,3px_100%] z-20 opacity-20" />
