@@ -79,6 +79,8 @@ void can_update() {
 bool can_send_time(uint8_t hour, uint8_t minute) {
   twai_message_t message;
   message.identifier = 0x5A1;
+  message.extd = 0;           // Trama estándar
+  message.rtr = 0;            // No es remota
   message.data_length_code = 8;
   message.data[0] = 0xA1;
   message.data[1] = 0x00;
