@@ -239,7 +239,7 @@ export default function DashboardContent() {
                 </div>
                 <div>
                   <span className="text-sm font-bold text-white block">
-                    {selectedTrip ? 'ROUTE_ANALYSIS' : 'LIVE_LOCATION'}
+                    {selectedTrip ? 'ANÁLISIS DE RUTA' : 'UBICACIÓN ACTUAL'}
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono uppercase">
                     {selectedTrip ? `Trip ID: ${selectedTrip.slice(0,8)}` : 
