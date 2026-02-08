@@ -75,4 +75,20 @@ void can_update() {
   }
 }
 
+bool can_send_time(uint8_t hour, uint8_t minute) {
+  twai_message_t message;
+  message.identifier = 0x5A1;
+  message.data_length_code = 8;
+  message.data[0] = 0xA1;
+  message.data[1] = 0x00;
+  message.data[2] = 0x01;
+  message.data[3] = 0x00;
+  message.data[4] = 0x70;
+  message.data[5] = hour;
+  message.data[6] = minute;
+  message.data[7] = 0x00;
+  
+  return twai_transmit(&message, pdMS_TO_TICKS(10)) == ESP_OK;
+}
+
 #endif

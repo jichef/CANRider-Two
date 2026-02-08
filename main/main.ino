@@ -178,12 +178,14 @@ void sendTelemetry() {
     body += ",\"bat_a_volts\":" + String(batA.voltage);
     body += ",\"bat_a_amps\":" + String(batA.current);
     body += ",\"bat_a_temp\":" + String(batA.temp);
+    body += ",\"is_charging\":" + String(batA.is_charging ? "true" : "false");
   }
   if (batB.soc != -1) {
     body += ",\"moto_battery_b\":" + String(batB.soc);
     body += ",\"bat_b_volts\":" + String(batB.voltage);
     body += ",\"bat_b_amps\":" + String(batB.current);
     body += ",\"bat_b_temp\":" + String(batB.temp);
+    body += ",\"is_charging_b\":" + String(batB.is_charging ? "true" : "false");
   }
   
   body += "}"; 
@@ -264,10 +266,55 @@ void setup() {
 }
 
 uint32_t lastSend = 0;
-const uint32_t sendInterval = 10000; // Enviar cada 10 segundos
+const uint32_t sendInterval = 10000; // Enviar telemetría cada 10 segundos
+uint32_t lastCanTimeSend = 0;
+const uint32_t canTimeInterval = 200; // Enviar trama CAN cada 200ms
+uint32_t lastTimeSync = 0;
+const uint32_t syncInterval = 3600000; // Re-sincronizar hora cada 1 hora
+
+void enterDeepSleep(const char* reason) {
+  Serial.println("\n" + getTimestamp() + " [CRITICAL] " + reason);
+  Serial.println(getTimestamp() + " [SHUTDOWN] Entrando en modo ahorro para proteger batería moto...");
+  
+  // Apagar módem
+  sendAT("AT+CPOWD=1"); 
+  delay(2000);
+  
+  // Apagar alimentación módem si es posible
+  digitalWrite(BOARD_POWERON_PIN, LOW);
+  
+  // Dormir profundamente (despertará por reset de alimentación)
+  esp_deep_sleep_start();
+}
 
 void loop() {
-  gps_update(); // Siempre leer GPS para no perder datos
+  gps_update(); 
+  can_update();
+
+  // --- PROTECCIÓN DE BATERÍA ---
+  if ((batA.soc != -1 && batA.soc <= 10) || (batB.soc != -1 && batB.soc <= 10)) {
+    enterDeepSleep("Batería moto baja (<10%)");
+  }
+
+  // Re-sincronizar con la red GSM cada hora
+  if (millis() - lastTimeSync > syncInterval) {
+    syncNetworkTime();
+    lastTimeSync = millis();
+  }
+
+  // Enviar trama CAN horaria cada 200ms
+  if (millis() - lastCanTimeSend > canTimeInterval) {
+    time_t now;
+    struct tm ti;
+    time(&now);
+    localtime_r(&now, &ti);
+    
+    // Solo enviamos si el reloj está sincronizado (año > 2020)
+    if (ti.tm_year > 120) {
+      can_send_time((uint8_t)ti.tm_hour, (uint8_t)ti.tm_min);
+    }
+    lastCanTimeSend = millis();
+  }
 
   if (millis() - lastSend > sendInterval) {
     sendTelemetry();

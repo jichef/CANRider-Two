@@ -179,7 +179,8 @@ export default function DashboardContent() {
       value: (telemetry?.moto_battery !== undefined && telemetry?.moto_battery !== null) ? `${telemetry.moto_battery}%` : '--%', 
       percent: telemetry?.moto_battery || 0,
       icon: Zap, 
-      color: 'text-yellow-400', 
+      is_charging: telemetry?.is_charging,
+      color: telemetry?.is_charging ? 'text-yellow-400 animate-pulse' : 'text-yellow-400', 
       glow: 'shadow-[0_0_15px_rgba(250,204,21,0.3)]',
       border: 'border-yellow-500/20'
     },
@@ -188,7 +189,8 @@ export default function DashboardContent() {
       value: (telemetry?.moto_battery_b !== undefined && telemetry?.moto_battery_b !== null) ? `${telemetry.moto_battery_b}%` : '--%', 
       percent: telemetry?.moto_battery_b || 0,
       icon: Zap, 
-      color: 'text-orange-400', 
+      is_charging: telemetry?.is_charging_b,
+      color: telemetry?.is_charging_b ? 'text-orange-400 animate-pulse' : 'text-orange-400', 
       glow: 'shadow-[0_0_15px_rgba(251,146,60,0.3)]',
       border: 'border-orange-500/20'
     },
@@ -204,11 +206,23 @@ export default function DashboardContent() {
     },
     { 
       label: 'ESTADO', 
-      value: !isStale && telemetry ? 'ONLINE' : 'OFFLINE', 
+      value: !isStale && telemetry 
+        ? 'ONLINE' 
+        : ((telemetry?.moto_battery !== null && telemetry?.moto_battery <= 10) || (telemetry?.moto_battery_b !== null && telemetry?.moto_battery_b <= 10))
+          ? 'REPOSO' 
+          : 'OFFLINE', 
       percent: !isStale && telemetry ? 100 : 0,
       icon: ShieldCheck, 
-      color: !isStale && telemetry ? 'text-indigo-400' : 'text-zinc-600', 
-      glow: !isStale && telemetry ? 'shadow-[0_0_15px_rgba(129,140,248,0.3)]' : '',
+      color: !isStale && telemetry 
+        ? 'text-indigo-400' 
+        : ((telemetry?.moto_battery !== null && telemetry?.moto_battery <= 10) || (telemetry?.moto_battery_b !== null && telemetry?.moto_battery_b <= 10))
+          ? 'text-amber-500' 
+          : 'text-zinc-600', 
+      glow: !isStale && telemetry 
+        ? 'shadow-[0_0_15px_rgba(129,140,248,0.3)]' 
+        : ((telemetry?.moto_battery !== null && telemetry?.moto_battery <= 10) || (telemetry?.moto_battery_b !== null && telemetry?.moto_battery_b <= 10))
+          ? 'shadow-[0_0_15px_rgba(245,158,11,0.3)]'
+          : '',
       border: 'border-indigo-500/20'
     },
     { 
@@ -311,9 +325,15 @@ export default function DashboardContent() {
                 )}
               </div>
               <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
-              <div className="flex items-baseline gap-1">
+              <div className="flex items-baseline gap-2">
                 <h3 className="text-3xl font-black text-white font-mono">{stat.value}</h3>
                 {stat.unit && <span className="text-xs font-bold text-zinc-600">{stat.unit}</span>}
+                {stat.is_charging && (
+                  <span className="flex items-center gap-1 text-[8px] font-black text-emerald-400 animate-pulse tracking-widest border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                    <Zap size={8} fill="currentColor" />
+                    CHARGING
+                  </span>
+                )}
               </div>
             </div>
           ))}
