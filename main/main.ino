@@ -2,6 +2,15 @@
 #include "AT/utilities.h"
 #include "config.h"
 #include "gps.h"
+#include "can_decoder.h"
+
+// Definir pines CAN si no están definidos
+#ifndef CAN_RX_PIN
+#define CAN_RX_PIN 32
+#endif
+#ifndef CAN_TX_PIN
+#define CAN_TX_PIN 33
+#endif
 
 /*
 config.h DEBE CONTENER:
@@ -91,11 +100,17 @@ void sendTelemetry() {
 
   // ---------- BODY ----------
   gps_update(); 
+  can_update();
   
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
                 ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(gps_get_lat(), 6) + 
                 ",\"longitude\":" + String(gps_get_lon(), 6) + 
-                ",\"signal_strength\":" + String(rssi) + "}"; 
+                ",\"signal_strength\":" + String(rssi);
+  
+  if (batA.soc != -1) body += ",\"moto_battery\":" + String(batA.soc);
+  if (batB.soc != -1) body += ",\"moto_battery_b\":" + String(batB.soc);
+  
+  body += "}"; 
 
   Serial.println(getTimestamp() + " [SEND] " + body);
 
@@ -134,6 +149,13 @@ void setup() {
 
   SerialAT.begin(MODEM_BAUDRATE, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
   gps_setup();
+  
+  if (can_setup(CAN_RX_PIN, CAN_TX_PIN)) {
+    Serial.println(getTimestamp() + " [CAN] Inicializado en pines RX:" + String(CAN_RX_PIN) + " TX:" + String(CAN_TX_PIN));
+  } else {
+    Serial.println(getTimestamp() + " [ERROR] Falló inicialización CAN");
+  }
+
   delay(8000);
 
   // ---------- AT SYNC ----------
