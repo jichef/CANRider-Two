@@ -268,7 +268,7 @@ void setup() {
   gps_setup();
   
   if (can_setup(CAN_RX_PIN, CAN_TX_PIN)) {
-    Serial.println(getTimestamp() + " [CAN] Inicializado en pines RX:" + String(CAN_RX_PIN) + " TX:" + String(CAN_TX_PIN));
+    Serial.printf("%s [CAN] OK (RX:%d, TX:%d)\n", getTimestamp().c_str(), CAN_RX_PIN, CAN_TX_PIN);
   } else {
     Serial.println(getTimestamp() + " [ERROR] Falló inicialización CAN");
   }
@@ -362,7 +362,8 @@ void sendTripSummary() {
 
   String url = String(SUPABASE_URL);
   url.replace("telemetry", "trips");
-  url += "?apikey=" + String(SUPABASE_KEY);
+  url += "?apikey=";
+  url += SUPABASE_KEY;
   String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
   sendAT(urlCmd.c_str());
 

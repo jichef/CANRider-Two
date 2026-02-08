@@ -23,7 +23,7 @@ void decodeCANFrame(const twai_message_t &msg) {
   const uint8_t *data = msg.data;
 
   // Determinar si es Batería A o B (B-mode es ID + 1)
-  bool isBatB = (id % 2 != 0 && (id >= 0x505 && id <= 0x54F));
+  bool isBatB = (id % 2 != 0 && id >= 0x505 && id <= 0x54F);
   BatteryData &bat = isBatB ? batB : batA;
   uint32_t baseId = isBatB ? id - 1 : id;
 
@@ -71,6 +71,7 @@ bool can_setup(int rx_pin, int tx_pin) {
 void can_update() {
   twai_message_t message;
   while (twai_receive(&message, 0) == ESP_OK) {
+    Serial.printf("[CAN] Recibido ID: 0x%03X | DLC: %d\n", message.identifier, message.data_length_code);
     decodeCANFrame(message);
   }
 }
