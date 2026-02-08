@@ -36,19 +36,24 @@ void sendAT(const char *cmd, uint32_t timeout = 3000) {
   Serial.println();
 }
 
-#define BOARD_BAT_ADC_PIN 35
-
 int getBatteryLevel() {
-  // El divisor de tensión en esta placa es 1:1 (2 x 100k)
-  // ADC mide 0-3.3V (0-4095). Multiplicamos por 2 para el voltaje real.
-  uint32_t raw = 0;
-  for(int i=0; i<10; i++) raw += analogRead(BOARD_BAT_ADC_PIN);
-  float voltage = (raw / 10.0) * (3.3 / 4095.0) * 2.0;
+  uint32_t mv = 0;
+  for(int i=0; i<10; i++) mv += analogReadMilliVolts(35);
+  mv /= 10;
   
-  // Mapeo simple: 4.2V = 100%, 3.2V = 0%
-  int percentage = (voltage - 3.2) * 100 / (4.2 - 3.2);
+  // Si no hay lectura en el 35, probar el 34
+  if (mv < 500) {
+    mv = 0;
+    for(int i=0; i<10; i++) mv += analogReadMilliVolts(34);
+    mv /= 10;
+  }
+  
+  float voltage = (mv / 1000.0) * 2.0;
+  int percentage = (voltage - 3.4) * 100 / (4.2 - 3.4);
   if (percentage > 100) percentage = 100;
   if (percentage < 0) percentage = 0;
+  
+  Serial.print(getTimestamp() + " [BAT] V:" + String(voltage) + "V (" + String(percentage) + "%)");
   return percentage;
 }
 
@@ -109,7 +114,12 @@ void sendTelemetry() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n" + getTimestamp() + " [BOOT] A7670G + SUPABASE HTTPS");
+
+  // Configuración ADC para batería
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+
+  Serial.println("\n" + getTimestamp() + " [BOOT] CanRiderONE");
 
   // ---------- POWER MODEM ----------
   pinMode(BOARD_POWERON_PIN, OUTPUT);

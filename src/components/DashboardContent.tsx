@@ -10,11 +10,21 @@ import {
   Route as RouteIcon,
   ShieldCheck,
   Activity,
-  Smartphone
+  Smartphone,
+  Calendar
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase';
+import { 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer 
+} from 'recharts';
 
 const Map = dynamic(() => import('@/components/Map'), { 
   ssr: false,
@@ -29,6 +39,8 @@ export default function DashboardContent() {
   const supabase = createClient();
   const [telemetry, setTelemetry] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [timeRange, setTimeRange] = useState('24h');
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isConfigured, setIsConfigured] = useState(true);
@@ -36,6 +48,40 @@ export default function DashboardContent() {
 
   // Madrid por defecto si no hay datos
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
+
+  // Cargar histórico cuando cambia el rango
+  useEffect(() => {
+    if (!supabase) return;
+
+    const fetchHistory = async () => {
+      const now = new Date();
+      let startTime = new Date();
+      
+      if (timeRange === '1h') startTime.setHours(now.getHours() - 1);
+      else if (timeRange === '6h') startTime.setHours(now.getHours() - 6);
+      else if (timeRange === '24h') startTime.setHours(now.getHours() - 24);
+      else if (timeRange === '7d') startTime.setDate(now.getDate() - 7);
+
+      const { data } = await supabase
+        .from('telemetry')
+        .select('timestamp, battery_level, signal_strength, speed')
+        .gt('timestamp', startTime.toISOString())
+        .order('timestamp', { ascending: true });
+
+      if (data) {
+        setHistoryData(data.map((d: any) => ({
+          ...d,
+          time: new Date(d.timestamp).toLocaleTimeString('es-ES', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            ...(timeRange === '7d' ? { day: '2-digit', month: '2-digit' } : {})
+          })
+        })));
+      }
+    };
+
+    fetchHistory();
+  }, [supabase, timeRange]);
 
   useEffect(() => {
     // Comprobar si los datos son antiguos (más de 2 minutos)
@@ -123,9 +169,9 @@ export default function DashboardContent() {
       value: telemetry?.battery_level !== undefined ? `${telemetry.battery_level}%` : '---', 
       percent: telemetry?.battery_level || 0,
       icon: Battery, 
-      color: 'text-emerald-400', 
-      glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
-      border: 'border-emerald-500/20'
+      color: (telemetry?.battery_level ?? 100) < 20 ? 'text-red-500' : 'text-emerald-400', 
+      glow: (telemetry?.battery_level ?? 100) < 20 ? 'shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
+      border: (telemetry?.battery_level ?? 100) < 20 ? 'border-red-500/20' : 'border-emerald-500/20'
     },
     { 
       label: 'VELOCIDAD', 
@@ -213,12 +259,17 @@ export default function DashboardContent() {
                 <div className={`p-3 rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
                   <stat.icon size={22} />
                 </div>
-                <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full bg-current ${stat.color} transition-all duration-500`} 
-                    style={{ width: `${stat.percent}%`, opacity: 0.5 + (stat.percent / 200) }}
-                  />
-                </div>
+                {stat.label !== 'ESTADO' && (
+                  <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full bg-current ${stat.color} transition-all duration-500`} 
+                      style={{ width: `${stat.percent}%`, opacity: 0.5 + (stat.percent / 200) }}
+                    />
+                  </div>
+                )}
+                {stat.label === 'ESTADO' && (
+                  <div className={`w-2 h-2 rounded-full ${stat.percent > 0 ? 'bg-indigo-400 animate-ping' : 'bg-zinc-600'}`} />
+                )}
               </div>
               <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
               <div className="flex items-baseline gap-1">
@@ -227,6 +278,146 @@ export default function DashboardContent() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Histórico y Gráficas */}
+        <div className="mb-10 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500">
+                <Activity size={18} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white uppercase tracking-wider">Histórico de Telemetría</h2>
+                <p className="text-[10px] text-zinc-500 font-mono">EVOLUCIÓN TEMPORAL DE LOS DATOS</p>
+              </div>
+            </div>
+
+            <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5">
+              {[
+                { id: '1h', label: '1H' },
+                { id: '6h', label: '6H' },
+                { id: '24h', label: '24H' },
+                { id: '7d', label: '7D' },
+              ].map((range) => (
+                <button
+                  key={range.id}
+                  onClick={() => setTimeRange(range.id)}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-widest transition-all ${
+                    timeRange === range.id 
+                      ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]' 
+                      : 'text-zinc-500 hover:text-white'
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 h-[300px]">
+            {/* Gráfica de Batería */}
+            <div className="relative">
+              <div className="absolute top-0 left-0 text-[10px] font-bold text-emerald-400/50 tracking-widest uppercase mb-4">
+                Nivel de Batería (%)
+              </div>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={historyData}>
+                  <defs>
+                    <linearGradient id="colorBat" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#ffffff20" 
+                    fontSize={10} 
+                    tickLine={false} 
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis 
+                    domain={[0, 100]} 
+                    stroke="#ffffff20" 
+                    fontSize={10} 
+                    tickLine={false} 
+                    axisLine={false}
+                  />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
+                    itemStyle={{ color: '#10b981' }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="battery_level" 
+                    stroke="#10b981" 
+                    fillOpacity={1} 
+                    fill="url(#colorBat)" 
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Gráfica de Señal y Velocidad */}
+            <div className="relative">
+              <div className="absolute top-0 left-0 text-[10px] font-bold text-cyan-400/50 tracking-widest uppercase mb-4">
+                Señal (RSSI) y Velocidad (km/h)
+              </div>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={historyData}>
+                  <defs>
+                    <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#ffffff20" 
+                    fontSize={10} 
+                    tickLine={false} 
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis 
+                    stroke="#ffffff20" 
+                    fontSize={10} 
+                    tickLine={false} 
+                    axisLine={false}
+                  />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="signal_strength" 
+                    name="Señal"
+                    stroke="#22d3ee" 
+                    fillOpacity={1} 
+                    fill="url(#colorSignal)" 
+                    strokeWidth={2}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="speed" 
+                    name="Velocidad"
+                    stroke="#818cf8" 
+                    fillOpacity={1} 
+                    fill="url(#colorSpeed)" 
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
@@ -238,8 +429,8 @@ export default function DashboardContent() {
                   <MapPin size={18} />
                 </div>
                 <div>
-                  <span className="text-sm font-bold text-white block">
-                    {selectedTrip ? 'ANÁLISIS DE RUTA' : 'UBICACIÓN ACTUAL'}
+                  <span className="text-sm font-bold text-white block uppercase">
+                    {selectedTrip ? 'Análisis de ruta' : 'Ubicación actual'}
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono uppercase">
                     {selectedTrip ? `Trip ID: ${selectedTrip.slice(0,8)}` : 
