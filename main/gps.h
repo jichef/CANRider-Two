@@ -15,5 +15,6 @@ double gps_get_lon();
 float gps_get_speed();
 uint32_t gps_get_satellites();
 bool gps_has_fix();
+String gps_get_time();
 
 #endif

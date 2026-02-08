@@ -33,3 +33,16 @@ uint32_t gps_get_satellites() {
 bool gps_has_fix() {
     return tinyGps.location.isValid() && tinyGps.location.age() < 2000;
 }
+
+String gps_get_time() {
+    if (!tinyGps.date.isValid() || !tinyGps.time.isValid()) {
+        return "";
+    }
+    
+    char sz[32];
+    // Formato ISO 8601 para Supabase: YYYY-MM-DDTHH:MM:SSZ
+    sprintf(sz, "%04d-%02d-%02dT%02d:%02d:%02dZ",
+            tinyGps.date.year(), tinyGps.date.month(), tinyGps.date.day(),
+            tinyGps.time.hour(), tinyGps.time.minute(), tinyGps.time.second());
+    return String(sz);
+}

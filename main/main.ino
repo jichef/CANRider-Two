@@ -1,4 +1,6 @@
 #define LILYGO_T_A7670
+#include <time.h>
+#include <sys/time.h>
 #include "AT/utilities.h"
 #include "config.h"
 #include "gps.h"
@@ -21,7 +23,48 @@ config.h DEBE CONTENER:
 #define VEHICLE_ID    "test01"
 */
 
+void syncNetworkTime() {
+  SerialAT.println("AT+CCLK?");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 1000) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+  }
+  
+  // Formato: +CCLK: "25/02/08,21:16:29+04"
+  int start = res.indexOf("\"");
+  int end = res.lastIndexOf("\"");
+  if (start != -1 && end != -1 && end > start) {
+    String cclk = res.substring(start + 1, end);
+    
+    struct tm tm;
+    tm.tm_year = 100 + cclk.substring(0, 2).toInt(); // 2000 + yy - 1900
+    tm.tm_mon  = cclk.substring(3, 5).toInt() - 1;   // 0-11
+    tm.tm_mday = cclk.substring(6, 8).toInt();
+    tm.tm_hour = cclk.substring(9, 11).toInt();
+    tm.tm_min  = cclk.substring(12, 14).toInt();
+    tm.tm_sec  = cclk.substring(15, 17).toInt();
+    
+    time_t t_now = mktime(&tm);
+    struct timeval tv = { .tv_sec = t_now };
+    settimeofday(&tv, NULL);
+    
+    Serial.println("\n[TIME] Reloj ESP32 sincronizado con red GSM.");
+  }
+}
+
 String getTimestamp() {
+  time_t now;
+  struct tm timeinfo;
+  time(&now);
+  localtime_r(&now, &timeinfo);
+  
+  if (timeinfo.tm_year > 120) { // Si el año es > 2020, asumimos sincronizado
+    char buf[12];
+    strftime(buf, sizeof(buf), "[%H:%M:%S]", &timeinfo);
+    return String(buf);
+  }
+  
   uint32_t seconds = millis() / 1000;
   uint32_t h = seconds / 3600;
   uint32_t m = (seconds % 3600) / 60;
@@ -81,6 +124,23 @@ int getRSSI() {
   return 99; // 99 significa desconocido
 }
 
+String getCurrentISO8601() {
+  String gpsTime = gps_get_time();
+  if (gpsTime != "") return gpsTime;
+
+  time_t now;
+  struct tm ti;
+  time(&now);
+  localtime_r(&now, &ti);
+  
+  if (ti.tm_year > 120) {
+    char buf[25];
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &ti);
+    return String(buf);
+  }
+  return "";
+}
+
 void sendTelemetry() {
   int rssi = getRSSI();
   int bat = getBatteryLevel();
@@ -102,10 +162,16 @@ void sendTelemetry() {
   gps_update(); 
   can_update();
   
+  String timestamp = getCurrentISO8601();
+
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
                 ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(gps_get_lat(), 6) + 
                 ",\"longitude\":" + String(gps_get_lon(), 6) + 
                 ",\"signal_strength\":" + String(rssi);
+  
+  if (timestamp != "") {
+    body += ",\"timestamp\":\"" + timestamp + "\"";
+  }
   
   if (batA.soc != -1) {
     body += ",\"moto_battery\":" + String(batA.soc);
@@ -179,11 +245,13 @@ void setup() {
   sendAT("AT+CPIN?");
 
   // ---------- NETWORK ----------
+  sendAT("AT+CTZU=1"); // Automatic Time Zone Update
   sendAT("AT+CGDCONT=1,\"IP\",\"" APN "\"");
   sendAT("AT+CGACT=1,1");
   sendAT("AT+NETOPEN", 5000);
   delay(2000);
   sendAT("AT+IPADDR");
+  syncNetworkTime();
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
 
   // ---------- SSL ----------
