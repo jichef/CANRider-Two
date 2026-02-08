@@ -45,6 +45,7 @@ export default function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [isConfigured, setIsConfigured] = useState(true);
   const [isStale, setIsStale] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Madrid por defecto si no hay datos
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
@@ -280,145 +281,162 @@ export default function DashboardContent() {
           ))}
         </div>
 
-        {/* Histórico y Gráficas */}
-        <div className="mb-10 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500">
-                <Activity size={18} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-white uppercase tracking-wider">Histórico de Telemetría</h2>
-                <p className="text-[10px] text-zinc-500 font-mono">EVOLUCIÓN TEMPORAL DE LOS DATOS</p>
-              </div>
-            </div>
-
-            <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5">
-              {[
-                { id: '1h', label: '1H' },
-                { id: '6h', label: '6H' },
-                { id: '24h', label: '24H' },
-                { id: '7d', label: '7D' },
-              ].map((range) => (
-                <button
-                  key={range.id}
-                  onClick={() => setTimeRange(range.id)}
-                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-widest transition-all ${
-                    timeRange === range.id 
-                      ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]' 
-                      : 'text-zinc-500 hover:text-white'
-                  }`}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8 h-[300px]">
-            {/* Gráfica de Batería */}
-            <div className="relative">
-              <div className="absolute top-0 left-0 text-[10px] font-bold text-emerald-400/50 tracking-widest uppercase mb-4">
-                Nivel de Batería (%)
-              </div>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={historyData}>
-                  <defs>
-                    <linearGradient id="colorBat" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                  <XAxis 
-                    dataKey="time" 
-                    stroke="#ffffff20" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis 
-                    domain={[0, 100]} 
-                    stroke="#ffffff20" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
-                    itemStyle={{ color: '#10b981' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="battery_level" 
-                    stroke="#10b981" 
-                    fillOpacity={1} 
-                    fill="url(#colorBat)" 
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Gráfica de Señal y Velocidad */}
-            <div className="relative">
-              <div className="absolute top-0 left-0 text-[10px] font-bold text-cyan-400/50 tracking-widest uppercase mb-4">
-                Señal (RSSI) y Velocidad (km/h)
-              </div>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={historyData}>
-                  <defs>
-                    <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                  <XAxis 
-                    dataKey="time" 
-                    stroke="#ffffff20" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis 
-                    stroke="#ffffff20" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="signal_strength" 
-                    name="Señal"
-                    stroke="#22d3ee" 
-                    fillOpacity={1} 
-                    fill="url(#colorSignal)" 
-                    strokeWidth={2}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="speed" 
-                    name="Velocidad"
-                    stroke="#818cf8" 
-                    fillOpacity={1} 
-                    fill="url(#colorSpeed)" 
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+        {/* Botón para mostrar Histórico */}
+        <div className="flex justify-center mb-10">
+          <button 
+            onClick={() => setShowHistory(!showHistory)}
+            className={`flex items-center gap-3 px-8 py-4 rounded-2xl border transition-all duration-500 font-bold tracking-widest text-xs uppercase ${
+              showHistory 
+                ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_30px_rgba(6,182,212,0.4)]' 
+                : 'bg-zinc-900/50 text-cyan-500 border-white/10 hover:border-cyan-500/50 hover:bg-zinc-900'
+            }`}
+          >
+            <Activity size={18} className={showHistory ? 'animate-pulse' : ''} />
+            {showHistory ? 'Ocultar Análisis de Datos' : 'Ver Análisis e Histórico'}
+          </button>
         </div>
+
+        {/* Histórico y Gráficas */}
+        {showHistory && (
+          <div className="mb-10 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500">
+                  <Activity size={18} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white uppercase tracking-wider">Histórico de Telemetría</h2>
+                  <p className="text-[10px] text-zinc-500 font-mono">EVOLUCIÓN TEMPORAL DE LOS DATOS</p>
+                </div>
+              </div>
+
+              <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5">
+                {[
+                  { id: '1h', label: '1H' },
+                  { id: '6h', label: '6H' },
+                  { id: '24h', label: '24H' },
+                  { id: '7d', label: '7D' },
+                ].map((range) => (
+                  <button
+                    key={range.id}
+                    onClick={() => setTimeRange(range.id)}
+                    className={`px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-widest transition-all ${
+                      timeRange === range.id 
+                        ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]' 
+                        : 'text-zinc-500 hover:text-white'
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-8 h-[300px]">
+              {/* Gráfica de Batería */}
+              <div className="relative">
+                <div className="absolute top-0 left-0 text-[10px] font-bold text-emerald-400/50 tracking-widest uppercase mb-4">
+                  Nivel de Batería (%)
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData}>
+                    <defs>
+                      <linearGradient id="colorBat" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                    <XAxis 
+                      dataKey="time" 
+                      stroke="#ffffff20" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis 
+                      domain={[0, 100]} 
+                      stroke="#ffffff20" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
+                      itemStyle={{ color: '#10b981' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="battery_level" 
+                      stroke="#10b981" 
+                      fillOpacity={1} 
+                      fill="url(#colorBat)" 
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Gráfica de Señal y Velocidad */}
+              <div className="relative">
+                <div className="absolute top-0 left-0 text-[10px] font-bold text-cyan-400/50 tracking-widest uppercase mb-4">
+                  Señal (RSSI) y Velocidad (km/h)
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData}>
+                    <defs>
+                      <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                    <XAxis 
+                      dataKey="time" 
+                      stroke="#ffffff20" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis 
+                      stroke="#ffffff20" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="signal_strength" 
+                      name="Señal"
+                      stroke="#22d3ee" 
+                      fillOpacity={1} 
+                      fill="url(#colorSignal)" 
+                      strokeWidth={2}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="speed" 
+                      name="Velocidad"
+                      stroke="#818cf8" 
+                      fillOpacity={1} 
+                      fill="url(#colorSpeed)" 
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Contenedor del Mapa */}
