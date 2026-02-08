@@ -107,8 +107,18 @@ void sendTelemetry() {
                 ",\"longitude\":" + String(gps_get_lon(), 6) + 
                 ",\"signal_strength\":" + String(rssi);
   
-  if (batA.soc != -1) body += ",\"moto_battery\":" + String(batA.soc);
-  if (batB.soc != -1) body += ",\"moto_battery_b\":" + String(batB.soc);
+  if (batA.soc != -1) {
+    body += ",\"moto_battery\":" + String(batA.soc);
+    body += ",\"bat_a_volts\":" + String(batA.voltage);
+    body += ",\"bat_a_amps\":" + String(batA.current);
+    body += ",\"bat_a_temp\":" + String(batA.temp);
+  }
+  if (batB.soc != -1) {
+    body += ",\"moto_battery_b\":" + String(batB.soc);
+    body += ",\"bat_b_volts\":" + String(batB.voltage);
+    body += ",\"bat_b_amps\":" + String(batB.current);
+    body += ",\"bat_b_temp\":" + String(batB.temp);
+  }
   
   body += "}"; 
 

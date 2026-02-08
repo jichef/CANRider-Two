@@ -65,7 +65,7 @@ export default function DashboardContent() {
 
       const { data } = await supabase
         .from('telemetry')
-        .select('timestamp, battery_level, moto_battery, moto_battery_b, signal_strength, speed')
+        .select('timestamp, battery_level, moto_battery, moto_battery_b, signal_strength, speed, bat_a_volts, bat_a_amps, bat_a_temp, bat_b_volts, bat_b_amps, bat_b_temp')
         .gt('timestamp', startTime.toISOString())
         .order('timestamp', { ascending: true });
 
@@ -481,6 +481,58 @@ export default function DashboardContent() {
                       fill="url(#colorSpeed)" 
                       strokeWidth={2}
                     />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-8 h-[300px] mt-12 pt-8 border-t border-white/5">
+              {/* Gráfica de Corriente */}
+              <div className="relative">
+                <div className="absolute top-0 left-0 text-[10px] font-bold text-orange-400/50 tracking-widest uppercase mb-4">
+                  Corriente de Baterías (Amperios)
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData}>
+                    <defs>
+                      <linearGradient id="colorAmpsA" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#facc15" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#facc15" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorAmpsB" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#fb923c" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#fb923c" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                    <XAxis dataKey="time" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                    <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                    <Area type="monotone" dataKey="bat_a_amps" name="Corriente A" stroke="#facc15" fill="url(#colorAmpsA)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="bat_b_amps" name="Corriente B" stroke="#fb923c" fill="url(#colorAmpsB)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Gráfica de Temperatura */}
+              <div className="relative">
+                <div className="absolute top-0 left-0 text-[10px] font-bold text-red-400/50 tracking-widest uppercase mb-4">
+                  Temperatura (°C)
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={historyData}>
+                    <defs>
+                      <linearGradient id="colorTempA" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f87171" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#f87171" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                    <XAxis dataKey="time" stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                    <YAxis stroke="#ffffff20" fontSize={10} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                    <Area type="monotone" dataKey="bat_a_temp" name="Temp A" stroke="#f87171" fill="url(#colorTempA)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="bat_b_temp" name="Temp B" stroke="#ef4444" fillOpacity={0} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
