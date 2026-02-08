@@ -332,15 +332,132 @@ void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
   esp_deep_sleep_start();
 }
 
+// Variables para seguimiento de trayectos
+bool isTripActive = false;
+time_t tripStartTime = 0;
+float tripStartLat = 0, tripStartLon = 0;
+int tripStartBatA = -1, tripStartBatB = -1;
+float tripTotalSpeed = 0;
+uint32_t tripPointsCount = 0;
+float tripDistance = 0;
+float lastTripLat = 0, lastTripLon = 0;
+
+void sendTripSummary() {
+  if (tripPointsCount == 0) return;
+
+  time_t now;
+  time(&now);
+  uint32_t duration = difftime(now, tripStartTime);
+  float avgSpeed = tripTotalSpeed / tripPointsCount;
+  
+  int endBatA = batA.soc;
+  int endBatB = batB.soc;
+  int consumptionA = (tripStartBatA != -1 && endBatA != -1) ? (tripStartBatA - endBatA) : 0;
+  int consumptionB = (tripStartBatB != -1 && endBatB != -1) ? (tripStartBatB - endBatB) : 0;
+
+  // ---------- HTTP CONFIG ----------
+  sendAT("AT+HTTPTERM");
+  sendAT("AT+HTTPINIT");
+  sendAT("AT+HTTPPARA=\"SSLCFG\",0");
+
+  String url = String(SUPABASE_URL);
+  url.replace("telemetry", "trips");
+  url += "?apikey=" + String(SUPABASE_KEY);
+  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
+  sendAT(urlCmd.c_str());
+
+  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
+  String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
+  sendAT(ud.c_str());
+
+  char startTimeStr[25];
+  struct tm ti;
+  localtime_r(&tripStartTime, &ti);
+  strftime(startTimeStr, sizeof(startTimeStr), "%Y-%m-%dT%H:%M:%S", &ti);
+
+  char endTimeStr[25];
+  localtime_r(&now, &ti);
+  strftime(endTimeStr, sizeof(endTimeStr), "%Y-%m-%dT%H:%M:%S", &ti);
+
+  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":\"" + String(startTimeStr) + 
+                "\",\"end_time\":\"" + String(endTimeStr) + "\",\"distance\":" + String(tripDistance, 2) + 
+                ",\"avg_speed\":" + String(avgSpeed, 2) + ",\"duration\":" + String(duration) + 
+                ",\"consumption\":" + String(consumptionA + consumptionB) + 
+                ",\"start_battery_level\":" + String(tripStartBatA) + 
+                ",\"end_battery_level\":" + String(endBatA) + 
+                ",\"path\":[[" + String(tripStartLat, 6) + "," + String(tripStartLon, 6) + "],[" + 
+                String(lastTripLat, 6) + "," + String(lastTripLon, 6) + "]]}";
+
+  Serial.println(getTimestamp() + " [TRIP_END] " + body);
+
+  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
+  sendAT(dcmd.c_str()); 
+  SerialAT.print(body);
+  delay(500);
+
+  sendAT("AT+HTTPACTION=1", 15000);
+  sendAT("AT+HTTPTERM");
+}
+
+float calculateDistance(float lat1, float lon1, float lat2, float lon2) {
+  if (lat1 == 0 || lat2 == 0) return 0;
+  float dLat = (lat2 - lat1) * 0.0174532925f;
+  float dLon = (lon2 - lon1) * 0.0174532925f;
+  float a = sinf(dLat/2) * sinf(dLat/2) + cosf(lat1*0.0174532925f) * cosf(lat2*0.0174532925f) * sinf(dLon/2) * sinf(dLon/2);
+  float c = 2 * atan2f(sqrtf(a), sqrtf(1-a));
+  return 6371.0f * c; 
+}
+
 void loop() {
   gps_update(); 
   can_update();
 
-  if (batA.soc != -1 || batB.soc != -1) {
+  bool hasCanData = (batA.soc != -1 || batB.soc != -1);
+
+  if (hasCanData) {
     lastCanActivity = millis();
+    
+    // INICIO DE TRAYECTO
+    if (!isTripActive) {
+      isTripActive = true;
+      time(&tripStartTime);
+      tripStartLat = gps_get_lat();
+      tripStartLon = gps_get_lon();
+      tripStartBatA = batA.soc;
+      tripStartBatB = batB.soc;
+      tripTotalSpeed = 0;
+      tripPointsCount = 0;
+      tripDistance = 0;
+      lastTripLat = tripStartLat;
+      lastTripLon = tripStartLon;
+      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO.");
+    }
+
+    // ACUMULACIÓN DE DATOS
+    float currentLat = gps_get_lat();
+    float currentLon = gps_get_lon();
+    float currentSpeed = gps_get_speed();
+
+    if (currentLat != 0) {
+      if (lastTripLat != 0) {
+        tripDistance += calculateDistance(lastTripLat, lastTripLon, currentLat, currentLon);
+      }
+      lastTripLat = currentLat;
+      lastTripLon = currentLon;
+    }
+    
+    tripTotalSpeed += currentSpeed;
+    tripPointsCount++;
   }
 
-  // 1. PROTECCIÓN CRÍTICA (Batería muerta, apagado total)
+  // FIN DE TRAYECTO (2 minutos sin CAN)
+  if (isTripActive && (millis() - lastCanActivity > 120000)) {
+    Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto FINALIZADO por inactividad CAN.");
+    sendTripSummary();
+    isTripActive = false;
+  }
+
+  // PROTECCIÓN CRÍTICA (Batería muerta, apagado total)
   if ((batA.soc != -1 && batA.soc <= 10) || (batB.soc != -1 && batB.soc <= 10)) {
     enterDeepSleep("Batería CRÍTICA (<10%) - Apagado total");
   }

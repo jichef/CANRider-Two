@@ -2,8 +2,8 @@
 #include "driver/twai.h"
 
 // Pines CAN (coincidentes con la configuración del receptor)
-#define CAN_RX_PIN 32
-#define CAN_TX_PIN 33
+#define CAN_RX_PIN 21
+#define CAN_TX_PIN 22
 
 // Variables de simulación del vehículo
 float soc = 100.0;        // Empieza al 100% con cada reinicio
