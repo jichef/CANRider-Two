@@ -36,6 +36,22 @@ void sendAT(const char *cmd, uint32_t timeout = 3000) {
   Serial.println();
 }
 
+#define BOARD_BAT_ADC_PIN 35
+
+int getBatteryLevel() {
+  // El divisor de tensión en esta placa es 1:1 (2 x 100k)
+  // ADC mide 0-3.3V (0-4095). Multiplicamos por 2 para el voltaje real.
+  uint32_t raw = 0;
+  for(int i=0; i<10; i++) raw += analogRead(BOARD_BAT_ADC_PIN);
+  float voltage = (raw / 10.0) * (3.3 / 4095.0) * 2.0;
+  
+  // Mapeo simple: 4.2V = 100%, 3.2V = 0%
+  int percentage = (voltage - 3.2) * 100 / (4.2 - 3.2);
+  if (percentage > 100) percentage = 100;
+  if (percentage < 0) percentage = 0;
+  return percentage;
+}
+
 int getRSSI() {
   SerialAT.println("AT+CSQ");
   String res = "";
@@ -53,6 +69,7 @@ int getRSSI() {
 
 void sendTelemetry() {
   int rssi = getRSSI();
+  int bat = getBatteryLevel();
   // ---------- HTTP CONFIG ----------
   sendAT("AT+HTTPTERM");
   sendAT("AT+HTTPINIT");
@@ -71,7 +88,7 @@ void sendTelemetry() {
   gps_update(); 
   
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
-                ",\"battery_level\":100,\"latitude\":" + String(gps_get_lat(), 6) + 
+                ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(gps_get_lat(), 6) + 
                 ",\"longitude\":" + String(gps_get_lon(), 6) + 
                 ",\"signal_strength\":" + String(rssi) + "}"; 
 
