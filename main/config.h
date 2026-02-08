@@ -1,27 +1,15 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "config_user.h"  // Variables personalizables por el usuario
+#define GPRS_USER ""
+#define GPRS_PASS ""
+// config.h
 
-#define INTERVALO_CAN_READ 500
-#define INTERVALO_CAN_CLOCK 200
-#define INTERVALO_TELEMETRY 15000
-#define INTERVALO_SMS 60000
-#define INTERVALO_HORA_REINTENTO 30000
-
-#define CAN_ID_SOC 0x540
-#define CAN_ID_HORA 0x5A1
-
-#define SOC_ALARMA 20
-#define SOC_CRITICO 15
-
-#define PIN_MODO_DIAGNOSTICO 12  // opcional, con pull-up
-
-extern uint8_t soc;
-extern bool hora_valida;
-extern bool alerta_enviada;
-extern bool apagado_ya;
-extern bool red_activa;
-extern bool modo_diagnostico;
+#define APN "internet.digimobil.es"
+#define SUPABASE_URL \
+"https://jmisxaxqwtkudvkytkha.supabase.co/rest/v1/telemetry"
+#define SUPABASE_KEY \
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImptaXN4YXhxd3RrdWR2a3l0a2hhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0MjAxMTAsImV4cCI6MjA4NTk5NjExMH0.uKlohYPeqVm8WRloritzMaDMSq_wT1NxOipfsicx75M"
+#define VEHICLE_ID    "550e8400-e29b-41d4-a716-446655440000"
 
 #endif

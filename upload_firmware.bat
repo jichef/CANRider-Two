@@ -1,6 +1,6 @@
 @echo off
 set ESPTOOL="C:\Users\Administrador\AppData\Local\Arduino15\packages\esp32\tools\esptool_py\4.5.1\esptool.exe"
-set PORT=COM3
+set PORT=COM4
 set BIN_DIR=C:\Users\Administrador\AppData\Local\arduino\sketches\AB91F2139C81EC251C64E3A506C8886C
 set BOOT_APP0="C:\Users\Administrador\AppData\Local\Arduino15\packages\esp32\hardware\esp32\2.0.14\tools\partitions\boot_app0.bin"
 

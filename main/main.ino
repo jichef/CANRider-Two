@@ -1,140 +1,107 @@
-#include <Arduino.h>
+#define LILYGO_T_A7670
+#include "AT/utilities.h"
 #include "config.h"
-#include "config_user.h"
-#include "can_bus.h"
-#include "modem.h"
-#include "gps.h"
-#include "telemetry.h"
-#include "logs.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "esp_task_wdt.h"
 
-// ========= Variables globales =========
-SemaphoreHandle_t modemMutex = nullptr;
-extern uint8_t soc;
-int localHour = 0;
-int minute = 0;
-bool hora_valida = false;
-bool alerta_enviada = false;
-bool red_activa = false;
-bool modo_diagnostico = false;
-extern bool gprsConnected;
+/*
+config.h DEBE CONTENER:
 
-// Datos de telemetría compartidos
-TelemetryData globalData = {0, 0, 0, 0, 0, 0};
-SemaphoreHandle_t dataMutex = nullptr;
+#define APN           "internet.digimobil.es"
+#define SUPABASE_URL  "https://jmisxaxqwtkudvkytkha.supabase.co/rest/v1/telemetry"
+#define SUPABASE_KEY  "TU_API_KEY_AQUI"
+#define VEHICLE_ID    "test01"
+*/
 
-// ========= Prototipos de tareas =========
-void taskTelemetryLoop(void *pvParameters);
-void taskGPSUpdate(void *pvParameters);
+void sendAT(const char *cmd, uint32_t timeout = 3000) {
+  Serial.print(">> ");
+  Serial.println(cmd);
+  SerialAT.println(cmd);
+
+  uint32_t t = millis();
+  while (millis() - t < timeout) {
+    while (SerialAT.available()) {
+      Serial.write(SerialAT.read());
+    }
+  }
+  Serial.println();
+}
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n[BOOT] A7670G + SUPABASE HTTPS");
+
+  // ---------- POWER MODEM ----------
+  pinMode(BOARD_POWERON_PIN, OUTPUT);
+  digitalWrite(BOARD_POWERON_PIN, HIGH);
+
+  pinMode(BOARD_PWRKEY_PIN, OUTPUT);
+  digitalWrite(BOARD_PWRKEY_PIN, LOW);
+  delay(100);
+  digitalWrite(BOARD_PWRKEY_PIN, HIGH);
+  delay(2000);
+  digitalWrite(BOARD_PWRKEY_PIN, LOW);
+
+  SerialAT.begin(MODEM_BAUDRATE, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
+  delay(8000);
+
+  // ---------- AT SYNC ----------
+  for (int i = 0; i < 10; i++) {
+    SerialAT.println("AT");
+    delay(500);
+    if (SerialAT.available()) break;
+  }
+
+  sendAT("ATE0");
+  sendAT("AT+CPIN?");
+
+  // ---------- NETWORK ----------
+  sendAT("AT+CGDCONT=1,\"IP\",\"" APN "\"");
+  sendAT("AT+CGACT=1,1");
+  sendAT("AT+NETOPEN", 5000);
+  delay(2000);
+  sendAT("AT+IPADDR");
+  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
+
+  // ---------- SSL ----------
+  sendAT("AT+CSSLCFG=\"sslversion\",0,4");      // TLS 1.2
+  sendAT("AT+CSSLCFG=\"authmode\",0,0");        // Sin CA
+  sendAT("AT+CSSLCFG=\"enableSNI\",0,1");       // Obligatorio
+  sendAT("AT+CSSLCFG=\"ignorelocaltime\",0,1"); // Sin RTC
+
+  // ---------- HTTP ----------
+  sendAT("AT+HTTPTERM");
+  sendAT("AT+HTTPINIT");
+  sendAT("AT+HTTPPARA=\"SSLCFG\",0");
+
+  // 🔗 SOLUCIÓN: Pasamos apikey por URL y Authorization por cabecera
+  String fullUrl = String(SUPABASE_URL) + "?apikey=" + String(SUPABASE_KEY);
+  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + fullUrl + "\"";
+  sendAT(urlCmd.c_str());
+
+  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
+
+  // 🔑 CABECERA AUTHORIZATION (Necesaria para RLS)
+  String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
+  sendAT(ud.c_str());
+
+  // ---------- BODY ----------
+  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":42.5,\"battery_level\":88}"; 
+
+  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
+  sendAT(dcmd.c_str()); 
+  // Nota: sendAT ya espera y muestra la respuesta. Aquí debería salir "DOWNLOAD"
+  SerialAT.print(body);
   delay(500);
 
-  // --- WATCHDOG TIMER (30s) ---
-  esp_task_wdt_init(30, true);
-  esp_task_wdt_add(NULL);
+  // ---------- POST ----------
+  sendAT("AT+HTTPACTION=1", 15000);
+  // No leemos respuesta (HTTPREAD) porque el código 201 no devuelve cuerpo
+  sendAT("AT+HTTPTERM");
 
-  // --- LOGGER ---
-  initLogger(Serial, LOG_DEBUG);
-  logMsg(LOG_INFO, "SETUP", "Iniciando CanRider ONE (Portal Web Mode)");
-
-  // === CAN Bus ===
-  initCAN();
-  esp_task_wdt_reset();
-  xTaskCreatePinnedToCore(taskCANProcessing, "CANTask", 4096, NULL, 2, NULL, 0);
-
-  // === Módem ===
-  initModem();
-  esp_task_wdt_reset();
-  modemMutex = xSemaphoreCreateMutex();
-  dataMutex = xSemaphoreCreateMutex();
-
-  // Conexión GPRS
-  if (connectGPRS()) {
-    esp_task_wdt_reset();
-    logMsg(LOG_INFO, "GPRS", "Conectado y listo");
-    
-    // Tareas principales
-    xTaskCreatePinnedToCore(taskGPSUpdate, "GPSTask", 6144, NULL, 2, NULL, 1);
-    xTaskCreatePinnedToCore(taskTelemetryLoop, "TelemetryTask", 8192, NULL, 3, NULL, 1);
-  } else {
-    esp_task_wdt_reset();
-    logMsg(LOG_ERROR, "GPRS", "Fallo de red inicial. El sistema intentará operar.");
-    // Podríamos lanzar las tareas igual y que fallen hasta que haya red
-    xTaskCreatePinnedToCore(taskGPSUpdate, "GPSTask", 6144, NULL, 2, NULL, 1);
-    xTaskCreatePinnedToCore(taskTelemetryLoop, "TelemetryTask", 8192, NULL, 3, NULL, 1);
-  }
+  Serial.println("\n[OK] FIN. Datos enviados a Supabase.");
 }
 
 void loop() {
-  esp_task_wdt_reset();
-  
-  // Mostrar estado básico por Serial cada 10s
-  static uint32_t lastReport = 0;
-  if (millis() - lastReport > 10000) {
-    lastReport = millis();
-    logMsg(LOG_INFO, "STATUS", "Batería: " + String(soc) + "% | GPRS: " + (gprsConnected ? "ON" : "OFF"));
-  }
-  
-  delay(1000);
-}
-
-// ========= Tarea GPS =========
-void taskGPSUpdate(void *pvParameters) {
-  // Encender GPS
-  gpsStartFor(3600000); // 1 hora
-  
-  for (;;) {
-    if (gprsConnected && modemMutex) {
-      float lat = 0, lng = 0, speed = 0, course = 0;
-      if (gps_get_position(lat, lng, speed, course)) {
-        if (dataMutex && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-          globalData.lat = lat;
-          globalData.lng = lng;
-          globalData.speed = speed;
-          xSemaphoreGive(dataMutex);
-        }
-        logMsg(LOG_DEBUG, "GPS", "Fix: " + String(lat, 6) + "," + String(lng, 6));
-      } else {
-        logMsg(LOG_DEBUG, "GPS", "Buscando satélites...");
-        if (!gpsActive()) gpsStartFor(3600000);
-      }
-    }
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Cada 5s
-  }
-}
-
-// ========= Tarea Telemetría =========
-void taskTelemetryLoop(void *pvParameters) {
-  for (;;) {
-    if (gprsConnected) {
-      TelemetryData sendData;
-      
-      // Copia segura de datos
-      if (dataMutex && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        sendData = globalData;
-        xSemaphoreGive(dataMutex);
-      }
-      
-      sendData.soc = soc; // Soc se actualiza por CAN en otra tarea
-
-      // Enviar telemetría (aunque no haya GPS, enviamos batería y estado)
-      if (sendTelemetry(sendData)) {
-        if (sendData.lat == 0) {
-          logMsg(LOG_DEBUG, "TELEMETRY", "Enviado (sin GPS todavía)");
-        } else {
-          logMsg(LOG_DEBUG, "TELEMETRY", "Enviado OK");
-        }
-      } else {
-        logMsg(LOG_WARN, "TELEMETRY", "Fallo al enviar");
-      }
-    } else {
-        // Intentar reconectar si se pierde
-        connectGPRS();
-    }
-    vTaskDelay(pdMS_TO_TICKS(15000)); // Cada 15s
-  }
+  while (SerialAT.available()) Serial.write(SerialAT.read());
+  while (Serial.available()) SerialAT.write(Serial.read());
 }

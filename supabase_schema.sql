@@ -48,7 +48,7 @@ create or replace function update_location_point()
 returns trigger as $$
 begin
   if new.latitude is not null and new.longitude is not null then
-    new.location = st_setseid(st_point(new.longitude, new.latitude), 4326)::geography;
+    new.location = st_setsrid(st_point(new.longitude, new.latitude), 4326)::geography;
   end if;
   return new;
 end;
