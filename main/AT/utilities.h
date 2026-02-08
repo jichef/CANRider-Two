@@ -19,7 +19,7 @@
 // 型号名称后面带S3的为ESP32-S3版本，否则是ESP32版本
 
 // Products Link:https://www.lilygo.cc/products/t-sim-a7670e
- #define LILYGO_T_A7670
+// #define LILYGO_T_A7670
 
 // There are two versions of T-Call A7670X. Please be careful to distinguish them. Please check the silkscreen on the front of the board to distinguish them.
 // T-Call A7670X 有两个版本,请注意区分，如何区分请查看板子正面丝印.
@@ -54,7 +54,7 @@
 // #define LILYGO_T_PCIE_SIM7080G
 
 // Products Link: ......
-// #define LILYGO_T_PCIE_SIM7670G
+ #define LILYGO_T_PCIE_SIM7670G
 
 // Products Link: https://lilygo.cc/products/t-eth-elite-1?variant=44498205049013
 // #define LILYGO_T_ETH_ELITE_A7670X

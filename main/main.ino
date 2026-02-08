@@ -1,6 +1,7 @@
 #define LILYGO_T_A7670
 #include "AT/utilities.h"
 #include "config.h"
+#include "gps.h"
 
 /*
 config.h DEBE CONTENER:
@@ -11,8 +12,18 @@ config.h DEBE CONTENER:
 #define VEHICLE_ID    "test01"
 */
 
+String getTimestamp() {
+  uint32_t seconds = millis() / 1000;
+  uint32_t h = seconds / 3600;
+  uint32_t m = (seconds % 3600) / 60;
+  uint32_t s = seconds % 60;
+  char buf[12];
+  snprintf(buf, sizeof(buf), "[%02u:%02u:%02u]", h, m, s);
+  return String(buf);
+}
+
 void sendAT(const char *cmd, uint32_t timeout = 3000) {
-  Serial.print(">> ");
+  Serial.print(getTimestamp() + " >> ");
   Serial.println(cmd);
   SerialAT.println(cmd);
 
@@ -25,10 +36,63 @@ void sendAT(const char *cmd, uint32_t timeout = 3000) {
   Serial.println();
 }
 
+int getRSSI() {
+  SerialAT.println("AT+CSQ");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 500) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+  }
+  int index = res.indexOf("+CSQ: ");
+  if (index != -1) {
+    int rssi = res.substring(index + 6, res.indexOf(",", index)).toInt();
+    return rssi;
+  }
+  return 99; // 99 significa desconocido
+}
+
+void sendTelemetry() {
+  int rssi = getRSSI();
+  // ---------- HTTP CONFIG ----------
+  sendAT("AT+HTTPTERM");
+  sendAT("AT+HTTPINIT");
+  sendAT("AT+HTTPPARA=\"SSLCFG\",0");
+
+  String fullUrl = String(SUPABASE_URL) + "?apikey=" + String(SUPABASE_KEY);
+  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + fullUrl + "\"";
+  sendAT(urlCmd.c_str());
+
+  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
+
+  String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
+  sendAT(ud.c_str());
+
+  // ---------- BODY ----------
+  gps_update(); 
+  
+  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
+                ",\"battery_level\":100,\"latitude\":" + String(gps_get_lat(), 6) + 
+                ",\"longitude\":" + String(gps_get_lon(), 6) + 
+                ",\"signal_strength\":" + String(rssi) + "}"; 
+
+  Serial.println(getTimestamp() + " [SEND] " + body);
+
+  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
+  sendAT(dcmd.c_str()); 
+  SerialAT.print(body);
+  delay(500);
+
+  // ---------- POST ----------
+  sendAT("AT+HTTPACTION=1", 15000);
+  sendAT("AT+HTTPTERM");
+
+  Serial.println(getTimestamp() + " [OK] Telemetría enviada.");
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n[BOOT] A7670G + SUPABASE HTTPS");
+  Serial.println("\n" + getTimestamp() + " [BOOT] A7670G + SUPABASE HTTPS");
 
   // ---------- POWER MODEM ----------
   pinMode(BOARD_POWERON_PIN, OUTPUT);
@@ -42,6 +106,7 @@ void setup() {
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
 
   SerialAT.begin(MODEM_BAUDRATE, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
+  gps_setup();
   delay(8000);
 
   // ---------- AT SYNC ----------
@@ -68,40 +133,21 @@ void setup() {
   sendAT("AT+CSSLCFG=\"enableSNI\",0,1");       // Obligatorio
   sendAT("AT+CSSLCFG=\"ignorelocaltime\",0,1"); // Sin RTC
 
-  // ---------- HTTP ----------
-  sendAT("AT+HTTPTERM");
-  sendAT("AT+HTTPINIT");
-  sendAT("AT+HTTPPARA=\"SSLCFG\",0");
-
-  // 🔗 SOLUCIÓN: Pasamos apikey por URL y Authorization por cabecera
-  String fullUrl = String(SUPABASE_URL) + "?apikey=" + String(SUPABASE_KEY);
-  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + fullUrl + "\"";
-  sendAT(urlCmd.c_str());
-
-  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
-
-  // 🔑 CABECERA AUTHORIZATION (Necesaria para RLS)
-  String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
-  sendAT(ud.c_str());
-
-  // ---------- BODY ----------
-  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":42.5,\"battery_level\":88}"; 
-
-  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
-  sendAT(dcmd.c_str()); 
-  // Nota: sendAT ya espera y muestra la respuesta. Aquí debería salir "DOWNLOAD"
-  SerialAT.print(body);
-  delay(500);
-
-  // ---------- POST ----------
-  sendAT("AT+HTTPACTION=1", 15000);
-  // No leemos respuesta (HTTPREAD) porque el código 201 no devuelve cuerpo
-  sendAT("AT+HTTPTERM");
-
-  Serial.println("\n[OK] FIN. Datos enviados a Supabase.");
+  Serial.println("\n" + getTimestamp() + " [READY] Sistema iniciado.");
 }
 
+uint32_t lastSend = 0;
+const uint32_t sendInterval = 10000; // Enviar cada 10 segundos
+
 void loop() {
+  gps_update(); // Siempre leer GPS para no perder datos
+
+  if (millis() - lastSend > sendInterval) {
+    sendTelemetry();
+    lastSend = millis();
+  }
+
+  // Debug bridge
   while (SerialAT.available()) Serial.write(SerialAT.read());
   while (Serial.available()) SerialAT.write(Serial.read());
 }
