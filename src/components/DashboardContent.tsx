@@ -248,21 +248,35 @@ export default function DashboardContent() {
             )}
           </div>
           
-          <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
-              isConfigured && telemetry && !isStale 
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                : 'bg-red-500/10 text-red-400 border-red-500/20'
-            }`}>
-              <div className={`w-2 h-2 rounded-full ${
-                isConfigured && telemetry && !isStale ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
-              }`} />
-              <span className="text-xs font-bold uppercase tracking-wider">
-                {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
-              </span>
-            </div>
-            <div className="pr-4 text-xs font-mono text-zinc-500">
-              {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
+          <div className="flex flex-wrap items-center gap-4">
+            <button 
+              onClick={() => setShowHistory(!showHistory)}
+              className={`flex items-center gap-2 px-6 py-2 rounded-xl border transition-all duration-500 font-bold tracking-widest text-[10px] uppercase ${
+                showHistory 
+                  ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.3)]' 
+                  : 'bg-zinc-900/50 text-cyan-500 border-white/10 hover:border-cyan-500/50 hover:bg-zinc-900'
+              }`}
+            >
+              <Activity size={14} className={showHistory ? 'animate-pulse' : ''} />
+              {showHistory ? 'Cerrar Análisis' : 'Ver Análisis'}
+            </button>
+
+            <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
+                isConfigured && telemetry && !isStale 
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                  : 'bg-red-500/10 text-red-400 border-red-500/20'
+              }`}>
+                <div className={`w-2 h-2 rounded-full ${
+                  isConfigured && telemetry && !isStale ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
+                }`} />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
+                </span>
+              </div>
+              <div className="pr-4 text-xs font-mono text-zinc-500">
+                {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
+              </div>
             </div>
           </div>
         </header>
@@ -294,21 +308,6 @@ export default function DashboardContent() {
               </div>
             </div>
           ))}
-        </div>
-
-        {/* Botón para mostrar Histórico */}
-        <div className="flex justify-center mb-10">
-          <button 
-            onClick={() => setShowHistory(!showHistory)}
-            className={`flex items-center gap-3 px-8 py-4 rounded-2xl border transition-all duration-500 font-bold tracking-widest text-xs uppercase ${
-              showHistory 
-                ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_30px_rgba(6,182,212,0.4)]' 
-                : 'bg-zinc-900/50 text-cyan-500 border-white/10 hover:border-cyan-500/50 hover:bg-zinc-900'
-            }`}
-          >
-            <Activity size={18} className={showHistory ? 'animate-pulse' : ''} />
-            {showHistory ? 'Ocultar Análisis de Datos' : 'Ver Análisis e Histórico'}
-          </button>
         </div>
 
         {/* Histórico y Gráficas */}
