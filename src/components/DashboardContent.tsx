@@ -65,7 +65,7 @@ export default function DashboardContent() {
 
       const { data } = await supabase
         .from('telemetry')
-        .select('timestamp, battery_level, moto_battery, signal_strength, speed')
+        .select('timestamp, battery_level, moto_battery, moto_battery_b, signal_strength, speed')
         .gt('timestamp', startTime.toISOString())
         .order('timestamp', { ascending: true });
 
@@ -175,13 +175,22 @@ export default function DashboardContent() {
       border: (telemetry?.battery_level ?? 100) < 20 ? 'border-red-500/20' : 'border-emerald-500/20'
     },
     { 
-      label: 'BATERÍA MOTO', 
+      label: 'BATERÍA VEHÍCULO A', 
       value: (telemetry?.moto_battery !== undefined && telemetry?.moto_battery !== null) ? `${telemetry.moto_battery}%` : '--%', 
       percent: telemetry?.moto_battery || 0,
       icon: Zap, 
       color: 'text-yellow-400', 
       glow: 'shadow-[0_0_15px_rgba(250,204,21,0.3)]',
       border: 'border-yellow-500/20'
+    },
+    { 
+      label: 'BATERÍA VEHÍCULO B', 
+      value: (telemetry?.moto_battery_b !== undefined && telemetry?.moto_battery_b !== null) ? `${telemetry.moto_battery_b}%` : '--%', 
+      percent: telemetry?.moto_battery_b || 0,
+      icon: Zap, 
+      color: 'text-orange-400', 
+      glow: 'shadow-[0_0_15px_rgba(251,146,60,0.3)]',
+      border: 'border-orange-500/20'
     },
     { 
       label: 'VELOCIDAD', 
@@ -282,7 +291,7 @@ export default function DashboardContent() {
         </header>
 
         {/* Grid de Estadísticas */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-10">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-10">
           {stats.map((stat) => (
             <div key={stat.label} className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-6 rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
               <div className="flex items-center justify-between mb-6">
@@ -350,7 +359,7 @@ export default function DashboardContent() {
               {/* Gráfica de Batería */}
               <div className="relative">
                 <div className="absolute top-0 left-0 text-[10px] font-bold text-emerald-400/50 tracking-widest uppercase mb-4">
-                  Nivel de baterías CanRider y Vehículo (%)
+                  Nivel de baterías CanRider y Vehículo A/B (%)
                 </div>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={historyData}>
@@ -359,9 +368,13 @@ export default function DashboardContent() {
                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
                         <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                       </linearGradient>
-                      <linearGradient id="colorMoto" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="colorMotoA" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#facc15" stopOpacity={0.3}/>
                         <stop offset="95%" stopColor="#facc15" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorMotoB" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#fb923c" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#fb923c" stopOpacity={0}/>
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
@@ -396,10 +409,19 @@ export default function DashboardContent() {
                     <Area 
                       type="monotone" 
                       dataKey="moto_battery" 
-                      name="Vehículo"
+                      name="Vehículo A"
                       stroke="#facc15" 
                       fillOpacity={1} 
-                      fill="url(#colorMoto)" 
+                      fill="url(#colorMotoA)" 
+                      strokeWidth={2}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="moto_battery_b" 
+                      name="Vehículo B"
+                      stroke="#fb923c" 
+                      fillOpacity={1} 
+                      fill="url(#colorMotoB)" 
                       strokeWidth={2}
                     />
                   </AreaChart>
