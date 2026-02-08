@@ -121,6 +121,7 @@ export default function DashboardContent() {
     { 
       label: 'BATERÍA', 
       value: telemetry?.battery_level !== undefined ? `${telemetry.battery_level}%` : '---', 
+      percent: telemetry?.battery_level || 0,
       icon: Battery, 
       color: 'text-emerald-400', 
       glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
@@ -129,6 +130,7 @@ export default function DashboardContent() {
     { 
       label: 'VELOCIDAD', 
       value: telemetry?.speed !== undefined ? Math.round(telemetry.speed) : '---', 
+      percent: Math.min((telemetry?.speed || 0) * 0.8, 100), // Max 120km/h aprox
       unit: telemetry?.speed !== undefined ? 'km/h' : '',
       icon: Navigation, 
       color: 'text-cyan-400', 
@@ -136,17 +138,19 @@ export default function DashboardContent() {
       border: 'border-cyan-500/20'
     },
     { 
-      label: 'SISTEMA', 
-      value: telemetry ? (telemetry.is_charging ? 'CHARGING' : 'READY') : '---', 
+      label: 'ESTADO', 
+      value: !isStale && telemetry ? 'ONLINE' : 'OFFLINE', 
+      percent: !isStale && telemetry ? 100 : 0,
       icon: ShieldCheck, 
-      color: telemetry?.is_charging ? 'text-amber-400' : (telemetry ? 'text-indigo-400' : 'text-zinc-600'), 
-      glow: telemetry?.is_charging ? 'shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]',
+      color: !isStale && telemetry ? 'text-indigo-400' : 'text-zinc-600', 
+      glow: !isStale && telemetry ? 'shadow-[0_0_15px_rgba(129,140,248,0.3)]' : '',
       border: 'border-indigo-500/20'
     },
     { 
       label: 'SEÑAL', 
       value: telemetry?.signal_strength !== undefined ? telemetry.signal_strength : '---', 
-      unit: telemetry?.signal_strength !== undefined ? 'dBm' : '',
+      percent: Math.min(((telemetry?.signal_strength || 0) / 31) * 100, 100), // CSQ max es 31
+      unit: telemetry?.signal_strength !== undefined ? 'RSSI' : '',
       icon: Signal, 
       color: 'text-fuchsia-400', 
       glow: 'shadow-[0_0_15px_rgba(232,121,249,0.3)]',
@@ -210,7 +214,10 @@ export default function DashboardContent() {
                   <stat.icon size={22} />
                 </div>
                 <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
-                  <div className={`h-full bg-current ${stat.color} w-2/3 opacity-50`} />
+                  <div 
+                    className={`h-full bg-current ${stat.color} transition-all duration-500`} 
+                    style={{ width: `${stat.percent}%`, opacity: 0.5 + (stat.percent / 200) }}
+                  />
                 </div>
               </div>
               <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
@@ -235,7 +242,9 @@ export default function DashboardContent() {
                     {selectedTrip ? 'ROUTE_ANALYSIS' : 'LIVE_LOCATION'}
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono uppercase">
-                    {selectedTrip ? `Trip ID: ${selectedTrip.slice(0,8)}` : 'Madrid, Spain • 40.4168° N, 3.7038° W'}
+                    {selectedTrip ? `Trip ID: ${selectedTrip.slice(0,8)}` : 
+                      telemetry ? `LAT: ${telemetry.latitude?.toFixed(4)}° • LON: ${telemetry.longitude?.toFixed(4)}°` : 
+                      'SEARCHING_SATELLITES...'}
                   </span>
                 </div>
               </div>
