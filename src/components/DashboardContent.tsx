@@ -166,13 +166,22 @@ export default function DashboardContent() {
 
   const stats = [
     { 
-      label: 'BATERÍA', 
+      label: 'BATERÍA CANRIDER', 
       value: telemetry?.battery_level !== undefined ? `${telemetry.battery_level}%` : '---', 
       percent: telemetry?.battery_level || 0,
       icon: Battery, 
       color: (telemetry?.battery_level ?? 100) < 20 ? 'text-red-500' : 'text-emerald-400', 
       glow: (telemetry?.battery_level ?? 100) < 20 ? 'shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
       border: (telemetry?.battery_level ?? 100) < 20 ? 'border-red-500/20' : 'border-emerald-500/20'
+    },
+    { 
+      label: 'BATERÍA MOTO', 
+      value: telemetry?.moto_battery !== undefined ? `${telemetry.moto_battery}%` : '---', 
+      percent: telemetry?.moto_battery || 0,
+      icon: Zap, 
+      color: 'text-yellow-400', 
+      glow: 'shadow-[0_0_15px_rgba(250,204,21,0.3)]',
+      border: 'border-yellow-500/20'
     },
     { 
       label: 'VELOCIDAD', 
@@ -231,6 +240,12 @@ export default function DashboardContent() {
               <Activity size={18} className="animate-pulse" />
               <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
             </div>
+            {telemetry?.timestamp && (
+              <div className="flex items-center gap-2 text-zinc-500 font-mono text-[10px]">
+                <Clock size={12} />
+                <span>ÚLTIMA ACTUALIZACIÓN: {new Date(telemetry.timestamp).toLocaleTimeString('es-ES')}</span>
+              </div>
+            )}
           </div>
           
           <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
@@ -253,7 +268,7 @@ export default function DashboardContent() {
         </header>
 
         {/* Grid de Estadísticas */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-10">
           {stats.map((stat) => (
             <div key={stat.label} className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-6 rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
               <div className="flex items-center justify-between mb-6">
