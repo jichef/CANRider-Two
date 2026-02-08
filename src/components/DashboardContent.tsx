@@ -65,7 +65,7 @@ export default function DashboardContent() {
 
       const { data } = await supabase
         .from('telemetry')
-        .select('timestamp, battery_level, signal_strength, speed')
+        .select('timestamp, battery_level, moto_battery, signal_strength, speed')
         .gt('timestamp', startTime.toISOString())
         .order('timestamp', { ascending: true });
 
