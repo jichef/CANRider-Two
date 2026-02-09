@@ -27,6 +27,9 @@ config.h DEBE CONTENER:
 uint32_t lastTaskCanTimeSend = 0; // Control de envío de hora en Core 0
 uint32_t lastCanActivityTime = 0; // Marca de tiempo de la última trama CAN recibida
 bool isTripActive = false;        // Estado del trayecto actual
+time_t tripStartTime = 0;         // Hora de inicio del trayecto
+time_t tripEndTime = 0;           // Hora de fin del trayecto
+uint32_t tripDuration = 0;        // Duración total en segundos
 
 void syncNetworkTime() {
   SerialAT.println("AT+CCLK?");
@@ -457,9 +460,6 @@ void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
 }
 
 // Variables para seguimiento de trayectos
-time_t tripStartTime = 0;
-time_t tripEndTime = 0;
-uint32_t tripDuration = 0;
 float tripStartLat = 0, tripStartLon = 0;
 int tripStartBatA = -1, tripStartBatB = -1;
 float tripTotalSpeed = 0;
