@@ -21,11 +21,11 @@ bool alert_mode = false; // Nuevo modo para permitir descarga total
 uint32_t last_update = 0;
 float target_speed = 0.0;
 
-// Lógica de trayectos (Activo/Pausa)
-bool is_paused = false;
+// Lógica de trayectos (Auto-Simulador)
+bool auto_mode = false;
 uint32_t last_state_change = 0;
-const uint32_t ACTIVE_DURATION = 30000; // 30 segundos activo
-const uint32_t PAUSE_DURATION = 60000;  // 60 segundos pausa
+const uint32_t ACTIVE_DURATION = 180000; // 3 minutos activo
+const uint32_t PAUSE_DURATION = 120000;  // 2 minutos pausa
 
 void setup() {
   Serial.begin(115200);
@@ -198,20 +198,44 @@ void loop() {
     
     if (cmd == "pausa" || cmd == "pause") {
       is_paused = true;
+      auto_mode = false;
       speed = 0;
       target_speed = 0;
-      Serial.println("\n🛑 [SIM] PAUSA MANUAL ACTIVADA");
+      Serial.println("\n🛑 [SIM] PAUSA MANUAL ACTIVADA (Modo Auto Desactivado)");
     } else if (cmd == "play" || cmd == "run") {
       is_paused = false;
-      alert_mode = false; // Desactiva alerta al reiniciar
-      batA.soc = 100.0;   // Reinicia ciclo
+      auto_mode = false;
+      alert_mode = false;
+      batA.soc = 100.0;
       batB.soc = 100.0;
       target_speed = 45.0;
       last_update = millis();
-      Serial.println("\n🚀 [SIM] CICLO REINICIADO (100%) Y MARCHA REANUDADA");
+      Serial.println("\n🚀 [SIM] CICLO REINICIADO Y MARCHA REANUDADA (Modo Auto Desactivado)");
     } else if (cmd == "alerta" || cmd == "alert") {
       alert_mode = true;
-      Serial.println("\n⚠️ [SIM] MODO ALERTA ACTIVADO: Descarga permitida por debajo del 11%");
+      Serial.println("\n⚠️ [SIM] MODO ALERTA ACTIVADO");
+    } else if (cmd == "simulador") {
+      auto_mode = true;
+      is_paused = false;
+      last_state_change = millis();
+      Serial.println("\n🤖 [SIM] MODO AUTO-SIMULADOR ACTIVADO");
+      Serial.printf("Trayectos de %d min con pausas de %d min\n", ACTIVE_DURATION/60000, PAUSE_DURATION/60000);
+    }
+  }
+
+  // Lógica Auto-Simulador
+  if (auto_mode) {
+    if (!is_paused && (now - last_state_change > ACTIVE_DURATION)) {
+      is_paused = true;
+      speed = 0;
+      target_speed = 0;
+      last_state_change = now;
+      Serial.println("\n⏳ [SIM] AUTO: Iniciando PAUSA (Inactividad)");
+    } else if (is_paused && (now - last_state_change > PAUSE_DURATION)) {
+      is_paused = false;
+      target_speed = random(30, 70);
+      last_state_change = now;
+      Serial.println("\n🚗 [SIM] AUTO: Iniciando TRAYECTO (Actividad)");
     }
   }
 
