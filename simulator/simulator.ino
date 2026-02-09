@@ -6,11 +6,16 @@
 #define RX_GPIO GPIO_NUM_32
 
 // Variables de simulación del vehículo
-float soc = 100.0;        
-float voltage = 84.0;    
-float current = 0.0;     
+struct SimBattery {
+  float soc = 100.0;
+  float voltage = 84.0;
+  float current = 0.0;
+  float temp = 25.0;
+};
+
+SimBattery batA, batB;
+
 float speed = 0.0;       
-float temp = 25.0;       
 bool is_charging = false;
 uint32_t last_update = 0;
 float target_speed = 0.0;
@@ -77,17 +82,26 @@ void updateSimulation() {
   if (speed < 0) speed = 0;
 
   if (speed > 2) {
-    current = 2.0 + (speed * 0.8) + (random(0, 20) / 10.0);
+    batA.current = 2.0 + (speed * 0.4) + (random(0, 10) / 10.0);
+    batB.current = 2.0 + (speed * 0.4) + (random(0, 10) / 10.0);
     is_charging = false;
   } else {
-    current = 0.2;
+    batA.current = 0.1;
+    batB.current = 0.1;
     is_charging = false;
   }
 
-  if (current > 0) soc -= (current * dt) / 300.0; 
-  if (soc < 0) soc = 0;
-  voltage = 66.0 + (soc / 100.0) * 18.0;
-  temp = 25.0 + (current * 0.05) + (random(0, 10) / 10.0);
+  // Descarga Batería A
+  if (batA.current > 0) batA.soc -= (batA.current * dt) / 300.0; 
+  if (batA.soc < 0) batA.soc = 0;
+  batA.voltage = 66.0 + (batA.soc / 100.0) * 18.0;
+  batA.temp = 25.0 + (batA.current * 0.05) + (random(0, 10) / 10.0);
+
+  // Descarga Batería B (Simétrica)
+  if (batB.current > 0) batB.soc -= (batB.current * dt) / 300.0; 
+  if (batB.soc < 0) batB.soc = 0;
+  batB.voltage = 66.0 + (batB.soc / 100.0) * 18.0;
+  batB.temp = 25.0 + (batB.current * 0.05) + (random(0, 10) / 10.0);
 }
 
 void sendCAN() {
@@ -96,25 +110,40 @@ void sendCAN() {
   msg.rtr = 0;
   msg.data_length_code = 8;
   
+  // --- BATERÍA A ---
   // 0x504: Voltaje y Corriente
   msg.identifier = 0x504;
-  uint16_t v_send = (uint16_t)(voltage * 100);
-  int16_t i_send = (int16_t)(current * 10);
-  msg.data[0] = 0x00; msg.data[1] = 0x00;
-  msg.data[2] = (v_send >> 8); msg.data[3] = (v_send & 0xFF);
-  msg.data[4] = (i_send >> 8); msg.data[5] = (i_send & 0xFF);
-  msg.data[6] = 0x00; msg.data[7] = 0x00;
+  uint16_t v_send_a = (uint16_t)(batA.voltage * 100);
+  int16_t i_send_a = (int16_t)(batA.current * 10);
+  msg.data[2] = (v_send_a >> 8); msg.data[3] = (v_send_a & 0xFF);
+  msg.data[4] = (i_send_a >> 8); msg.data[5] = (i_send_a & 0xFF);
   twai_transmit(&msg, 0);
 
   // 0x540: SoC y Temp
   msg.identifier = 0x540;
-  msg.data[0] = (uint8_t)soc;
-  msg.data[1] = 0x00; msg.data[2] = 0x00;
-  msg.data[3] = (uint8_t)temp;
-  msg.data[4] = (uint8_t)temp;
-  msg.data[5] = (uint8_t)temp;
-  msg.data[6] = (uint8_t)temp;
-  msg.data[7] = 0x00;
+  msg.data[0] = (uint8_t)batA.soc;
+  msg.data[3] = (uint8_t)batA.temp;
+  msg.data[4] = (uint8_t)batA.temp;
+  msg.data[5] = (uint8_t)batA.temp;
+  msg.data[6] = (uint8_t)batA.temp;
+  twai_transmit(&msg, 0);
+
+  // --- BATERÍA B ---
+  // 0x505: Voltaje y Corriente (B = A+1)
+  msg.identifier = 0x505;
+  uint16_t v_send_b = (uint16_t)(batB.voltage * 100);
+  int16_t i_send_b = (int16_t)(batB.current * 10);
+  msg.data[2] = (v_send_b >> 8); msg.data[3] = (v_send_b & 0xFF);
+  msg.data[4] = (i_send_b >> 8); msg.data[5] = (i_send_b & 0xFF);
+  twai_transmit(&msg, 0);
+
+  // 0x541: SoC y Temp (B = A+1)
+  msg.identifier = 0x541;
+  msg.data[0] = (uint8_t)batB.soc;
+  msg.data[3] = (uint8_t)batB.temp;
+  msg.data[4] = (uint8_t)batB.temp;
+  msg.data[5] = (uint8_t)batB.temp;
+  msg.data[6] = (uint8_t)batB.temp;
   
   esp_err_t err = twai_transmit(&msg, pdMS_TO_TICKS(50));
   if (err != ESP_OK) {
@@ -180,7 +209,7 @@ void loop() {
     if (is_paused) {
       Serial.println("[SIM] PAUSADO (Escribe 'play' para continuar)");
     } else {
-      Serial.printf("SPD: %.1f km/h | SoC: %.1f%% | V: %.1fV | A: %.1fA\n", speed, soc, voltage, current);
+      Serial.printf("SPD: %.1f km/h | BatA: %.1f%% (%.1fV) | BatB: %.1f%% (%.1fV)\n", speed, batA.soc, batA.voltage, batB.soc, batB.voltage);
     }
     last_print = now;
   }
