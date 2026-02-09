@@ -50,8 +50,8 @@ void syncNetworkTime() {
     
     time_t t_now = mktime(&tm);
     
-    // Restauramos el ajuste de -8h solicitado para cuadrar con el panel
-    t_now -= (8 * 3600); 
+    // Sincronizamos el reloj interno. mktime ya usa la TZ configurada
+    // para convertir la hora local de la red a UTC internamente.
     struct timeval tv = { .tv_sec = t_now };
     settimeofday(&tv, NULL);
 
@@ -141,11 +141,12 @@ String getCurrentISO8601() {
   time_t now;
   struct tm ti;
   time(&now);
-  localtime_r(&now, &ti);
+  gmtime_r(&now, &ti);
   
   if (ti.tm_year > 120) {
     char buf[25];
-    // Añadimos 'Z' para asegurar compatibilidad ISO8601 con Supabase/Vercel
+    // Usamos gmtime_r y 'Z' para enviar UTC real. 
+    // El navegador lo convertirá a la hora local del usuario automáticamente.
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &ti);
     return String(buf);
   }
