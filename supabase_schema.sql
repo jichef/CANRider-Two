@@ -22,7 +22,19 @@ create table telemetry (
   battery_voltage double precision,
   is_charging boolean default false,
   signal_strength integer, -- RSSI de la SIM
-  location geography(point) -- Para búsquedas espaciales
+  location geography(point), -- Para búsquedas espaciales
+  
+  -- Nuevos campos para Baterías Duales
+  moto_battery integer,
+  moto_battery_b integer,
+  bat_a_volts double precision,
+  bat_a_amps double precision,
+  bat_a_temp double precision,
+  bat_b_volts double precision,
+  bat_b_amps double precision,
+  bat_b_temp double precision,
+  is_charging_b boolean default false,
+  location_type text
 );
 
 -- Tabla de Recorridos (Procesados o guardados)
