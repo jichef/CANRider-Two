@@ -25,6 +25,8 @@ config.h DEBE CONTENER:
 
 // Variables globales de control
 uint32_t lastTaskCanTimeSend = 0; // Control de envío de hora en Core 0
+uint32_t lastCanActivityTime = 0; // Marca de tiempo de la última trama CAN recibida
+bool isTripActive = false;        // Estado del trayecto actual
 
 void syncNetworkTime() {
   SerialAT.println("AT+CCLK?");
@@ -50,9 +52,7 @@ void syncNetworkTime() {
     
     time_t t_now = mktime(&tm);
     
-    // Aplicamos el ajuste de -8h detectado para sincronizar con la red local
-    t_now -= (8 * 3600); 
-    
+    // Eliminamos el ajuste manual de -8h, el servidor NTP y la TZ ya se encargan
     struct timeval tv = { .tv_sec = t_now };
     settimeofday(&tv, NULL);
 
@@ -245,11 +245,28 @@ void sendTelemetry() {
   
   String timestamp = getCurrentISO8601();
 
+  // ---------- TRAYECTO LOGIC ----------
+  uint32_t now_ms = millis();
+  
+  // Si hay actividad CAN reciente (< 60s), el trayecto está activo
+  if (lastCanActivityTime > 0 && (now_ms - lastCanActivityTime < 60000)) {
+    if (!isTripActive) {
+      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO por actividad CAN.");
+      isTripActive = true;
+    }
+  } else {
+    if (isTripActive) {
+      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto FINALIZADO por inactividad CAN (>60s).");
+      isTripActive = false;
+    }
+  }
+
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
                 ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(finalLat, 6) + 
                 ",\"longitude\":" + String(finalLon, 6) + 
                 ",\"signal_strength\":" + String(rssi) +
-                ",\"location_type\":\"" + locType + "\"";
+                ",\"location_type\":\"" + locType + "\"" +
+                ",\"is_trip_active\":" + (isTripActive ? "true" : "false");
   
   if (timestamp != "") {
     body += ",\"timestamp\":\"" + timestamp + "\"";
@@ -432,7 +449,6 @@ void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
 }
 
 // Variables para seguimiento de trayectos
-bool isTripActive = false;
 time_t tripStartTime = 0;
 float tripStartLat = 0, tripStartLon = 0;
 int tripStartBatA = -1, tripStartBatB = -1;

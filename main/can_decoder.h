@@ -18,9 +18,17 @@ struct BatteryData {
 BatteryData batA;
 BatteryData batB;
 
+// Declaración externa para rastrear actividad CAN
+extern uint32_t lastCanActivityTime;
+
 void decodeCANFrame(const twai_message_t &msg) {
   uint32_t id = msg.identifier;
   const uint8_t *data = msg.data;
+
+  // Si recibimos una trama válida de las que nos interesan, actualizamos actividad
+  if (id >= 0x500 && id <= 0x5FF) {
+    lastCanActivityTime = millis();
+  }
 
   // Determinar si es Batería A o B (B-mode es ID + 1)
   bool isBatB = (id % 2 != 0 && id >= 0x505 && id <= 0x54F);

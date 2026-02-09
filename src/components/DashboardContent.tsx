@@ -232,23 +232,23 @@ export default function DashboardContent() {
     { 
       label: 'ESTADO', 
       value: !isStale && telemetry 
-        ? 'ONLINE' 
+        ? (telemetry.is_trip_active ? 'EN TRAYECTO' : 'ONLINE') 
         : ((telemetry?.moto_battery !== null && telemetry?.moto_battery <= 10) || (telemetry?.moto_battery_b !== null && telemetry?.moto_battery_b <= 10))
           ? 'REPOSO' 
           : 'OFFLINE', 
       percent: !isStale && telemetry ? 100 : 0,
       icon: ShieldCheck, 
       color: !isStale && telemetry 
-        ? 'text-indigo-400' 
+        ? (telemetry.is_trip_active ? 'text-cyan-400' : 'text-indigo-400') 
         : ((telemetry?.moto_battery !== null && telemetry?.moto_battery <= 10) || (telemetry?.moto_battery_b !== null && telemetry?.moto_battery_b <= 10))
           ? 'text-amber-500' 
           : 'text-zinc-600', 
       glow: !isStale && telemetry 
-        ? 'shadow-[0_0_15px_rgba(129,140,248,0.3)]' 
+        ? (telemetry.is_trip_active ? 'shadow-[0_0_15px_rgba(34,211,238,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]') 
         : ((telemetry?.moto_battery !== null && telemetry?.moto_battery <= 10) || (telemetry?.moto_battery_b !== null && telemetry?.moto_battery_b <= 10))
           ? 'shadow-[0_0_15px_rgba(245,158,11,0.3)]'
           : '',
-      border: 'border-indigo-500/20'
+      border: telemetry?.is_trip_active ? 'border-cyan-500/50' : 'border-indigo-500/20'
     },
     { 
       label: 'SEÑAL', 
@@ -657,7 +657,18 @@ export default function DashboardContent() {
                 trips.map((trip) => {
                   const date = new Date(trip.start_time).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
                   const isSelected = selectedTrip === trip.id;
-                  const batteryUsed = trip.consumption || (trip.start_battery_level && trip.end_battery_level ? trip.start_battery_level - trip.end_battery_level : null);
+                  
+                  // Calcular duración amigable
+                  let durationStr = 'N/A';
+                  if (trip.start_time && trip.end_time) {
+                    const diffMs = new Date(trip.end_time).getTime() - new Date(trip.start_time).getTime();
+                    const mins = Math.floor(diffMs / 60000);
+                    durationStr = mins > 0 ? `${mins} MIN` : '< 1 MIN';
+                  } else if (trip.start_time && !trip.end_time) {
+                    durationStr = 'EN CURSO';
+                  }
+
+                  const batteryUsed = trip.consumption || 0;
                   
                   return (
                     <button 
@@ -678,13 +689,13 @@ export default function DashboardContent() {
                         <div className="flex items-center gap-4">
                           <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                             <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />
-                            {trip.distance} KM
+                            {trip.distance || 0} KM
                           </div>
                           <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
                             <Clock size={12} />
-                            {trip.duration || trip.time || 'N/A'}
+                            {durationStr}
                           </div>
-                          {batteryUsed && (
+                          {batteryUsed > 0 && (
                             <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500/80">
                               <Battery size={12} />
                               -{batteryUsed}%
@@ -696,6 +707,10 @@ export default function DashboardContent() {
                         isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
                       }`}>
                         <Zap size={14} fill={isSelected ? "currentColor" : "none"} />
+                      </div>
+                    </button>
+                  );
+
                       </div>
                     </button>
                   );

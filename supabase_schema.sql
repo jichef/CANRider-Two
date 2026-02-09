@@ -35,7 +35,8 @@ create table telemetry (
   bat_b_temp double precision,
   is_charging_b boolean default false,
   location_type text,
-  date text
+  date text,
+  is_trip_active boolean default false
 );
 
 -- Tabla de Recorridos (Procesados o guardados)
@@ -70,3 +71,53 @@ $$ language plpgsql;
 create trigger tr_update_telemetry_location
 before insert on telemetry
 for each row execute function update_location_point();
+
+-- Función para gestionar trayectos automáticamente
+create or replace function process_telemetry_trip()
+returns trigger as $$
+declare
+  active_trip_id uuid;
+begin
+  -- Solo procesar si el trayecto está activo
+  if new.is_trip_active then
+    -- Buscar si ya existe un trayecto abierto (sin end_time) para esta moto
+    select id into active_trip_id 
+    from trips 
+    where motorcycle_id = new.motorcycle_id 
+    and end_time is null
+    limit 1;
+
+    if active_trip_id is null then
+      -- Crear nuevo trayecto
+      insert into trips (motorcycle_id, start_time, path, max_speed)
+      values (
+        new.motorcycle_id, 
+        new.timestamp, 
+        jsonb_build_array(jsonb_build_array(new.longitude, new.latitude)),
+        new.speed
+      );
+    else
+      -- Actualizar trayecto existente
+      update trips 
+      set 
+        path = path || jsonb_build_array(jsonb_build_array(new.longitude, new.latitude)),
+        max_speed = greatest(max_speed, new.speed),
+        avg_speed = (avg_speed + new.speed) / 2
+      where id = active_trip_id;
+    end if;
+  else
+    -- Si el trayecto NO está activo, cerrar cualquier trayecto abierto
+    update trips 
+    set end_time = new.timestamp 
+    where motorcycle_id = new.motorcycle_id 
+    and end_time is null;
+  end if;
+  
+  return new;
+end;
+$$ language plpgsql;
+
+-- Trigger para procesar trayectos
+create trigger tr_process_telemetry_trip
+after insert on telemetry
+for each row execute function process_telemetry_trip();
