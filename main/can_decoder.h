@@ -56,8 +56,9 @@ void decodeCANFrame(const twai_message_t &msg) {
 // Por defecto pines 21 (TX) y 22 (RX) son comunes, pero en T-A7670G 
 // debemos verificar los pines disponibles. 
 bool can_setup(int rx_pin, int tx_pin) {
-  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)tx_pin, (gpio_num_t)rx_pin, TWAI_MODE_NORMAL);
-  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS(); // Velocidad ajustada a 250k
+  // Modo LISTEN_ONLY: Pasivo total. No envía ACKs ni tramas.
+  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)tx_pin, (gpio_num_t)rx_pin, TWAI_MODE_LISTEN_ONLY);
+  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS(); 
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
   if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK) {
@@ -69,9 +70,35 @@ bool can_setup(int rx_pin, int tx_pin) {
 }
 
 void can_update() {
+  twai_status_info_t status;
+  if (twai_get_status_info(&status) == ESP_OK) {
+    if (status.state == TWAI_STATE_BUS_OFF) {
+      Serial.printf("⚠️ CAN Bus-Off! Errores: TX:%u, RX:%u. Recuperando...\n", status.tx_error_counter, status.rx_error_counter);
+      twai_initiate_recovery();
+      return;
+    } else if (status.state == TWAI_STATE_STOPPED) {
+      twai_start();
+      return;
+    }
+  }
+
   twai_message_t message;
+  // Volvemos a timeout 0 para que la tarea sea lo más rápida posible
   while (twai_receive(&message, 0) == ESP_OK) {
-    Serial.printf("[CAN] Recibido ID: 0x%03X | DLC: %d\n", message.identifier, message.data_length_code);
+    Serial.print("📥 CAN RX ID=0x");
+    Serial.print(message.identifier, HEX);
+    Serial.print(message.extd ? " EXT " : " STD ");
+    Serial.print("DLC=");
+    Serial.print(message.data_length_code);
+    Serial.print(" DATA=");
+
+    for (int i = 0; i < message.data_length_code; i++) {
+      if (message.data[i] < 16) Serial.print("0");
+      Serial.print(message.data[i], HEX);
+      Serial.print(" ");
+    }
+    Serial.println();
+
     decodeCANFrame(message);
   }
 }
@@ -91,7 +118,14 @@ bool can_send_time(uint8_t hour, uint8_t minute) {
   message.data[6] = minute;
   message.data[7] = 0x00;
   
-  return twai_transmit(&message, pdMS_TO_TICKS(10)) == ESP_OK;
+  esp_err_t err = twai_transmit(&message, pdMS_TO_TICKS(10));
+  if (err != ESP_OK) {
+    // Si ves este error, revisa el cable del pin TX (33)
+    Serial.printf("❌ Error enviando hora: %s\n", esp_err_to_name(err));
+  } else {
+    Serial.printf("📤 CAN TX Time: %02d:%02d\n", hour, minute);
+  }
+  return err == ESP_OK;
 }
 
 #endif

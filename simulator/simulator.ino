@@ -15,6 +15,12 @@ bool is_charging = false;
 uint32_t last_update = 0;
 float target_speed = 0.0;
 
+// Lógica de trayectos (Activo/Pausa)
+bool is_paused = false;
+uint32_t last_state_change = 0;
+const uint32_t ACTIVE_DURATION = 30000; // 30 segundos activo
+const uint32_t PAUSE_DURATION = 60000;  // 60 segundos pausa
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -30,7 +36,8 @@ void setup() {
   
   Serial.println("Iniciando bus CAN a 250kbps...");
 
-  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)TX_GPIO, (gpio_num_t)RX_GPIO, TWAI_MODE_NORMAL);
+  // Volvemos a NO_ACK: Envía tramas sin esperar confirmación
+  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)TX_GPIO, (gpio_num_t)RX_GPIO, TWAI_MODE_NO_ACK);
   g_config.alerts_enabled = TWAI_ALERT_ALL;
 
   twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS(); 
@@ -139,15 +146,43 @@ void checkIncomingCAN() {
 }
 
 void loop() {
+  uint32_t now = millis();
+
+  // Control manual por Serial
+  if (Serial.available()) {
+    String cmd = Serial.readString();
+    cmd.trim();
+    cmd.toLowerCase();
+    
+    if (cmd == "pausa" || cmd == "pause") {
+      is_paused = true;
+      speed = 0;
+      target_speed = 0;
+      Serial.println("\n🛑 [SIM] PAUSA MANUAL ACTIVADA");
+    } else if (cmd == "play" || cmd == "run") {
+      is_paused = false;
+      target_speed = 45.0;
+      last_update = millis();
+      Serial.println("\n🚀 [SIM] MARCHA REANUDADA");
+    }
+  }
+
   checkCanStatus();
   checkIncomingCAN();
-  updateSimulation();
-  sendCAN();
+
+  if (!is_paused) {
+    updateSimulation();
+    sendCAN();
+  }
   
   static uint32_t last_print = 0;
-  if (millis() - last_print > 1000) {
-    Serial.printf("SPD: %.1f km/h | SoC: %.1f%% | V: %.1fV | A: %.1fA\n", speed, soc, voltage, current);
-    last_print = millis();
+  if (now - last_print > 1000) {
+    if (is_paused) {
+      Serial.println("[SIM] PAUSADO (Escribe 'play' para continuar)");
+    } else {
+      Serial.printf("SPD: %.1f km/h | SoC: %.1f%% | V: %.1fV | A: %.1fA\n", speed, soc, voltage, current);
+    }
+    last_print = now;
   }
   delay(250); 
 }

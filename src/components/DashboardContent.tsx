@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Activity,
   Smartphone,
+  Trash2,
   Calendar
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -43,6 +44,7 @@ export default function DashboardContent() {
   const [timeRange, setTimeRange] = useState('24h');
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
   const [isStale, setIsStale] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -164,6 +166,29 @@ export default function DashboardContent() {
     };
   }, [supabase]);
 
+  const handleClearData = async () => {
+    if (!confirm('¿Estás seguro de que quieres borrar todo el historial de telemetría y viajes? Los dispositivos registrados se mantendrán.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const response = await fetch('/api/admin/clear-data', {
+        method: 'POST',
+      });
+
+      if (!response.ok) throw new Error('Error al borrar datos');
+
+      alert('Datos borrados correctamente. La página se recargará.');
+      window.location.reload();
+    } catch (error) {
+      console.error(error);
+      alert('Error al intentar borrar los datos.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const stats = [
     { 
       label: 'BATERÍA CANRIDER', 
@@ -284,6 +309,19 @@ export default function DashboardContent() {
             >
               <Activity size={14} className={showHistory ? 'animate-pulse' : ''} />
               {showHistory ? 'Cerrar Análisis' : 'Ver Análisis'}
+            </button>
+
+            <button 
+              onClick={handleClearData}
+              disabled={isDeleting}
+              className={`flex items-center gap-2 px-6 py-2 rounded-xl border transition-all duration-500 font-bold tracking-widest text-[10px] uppercase ${
+                isDeleting 
+                  ? 'bg-red-500/20 text-red-500/50 border-red-500/20 cursor-not-allowed' 
+                  : 'bg-zinc-900/50 text-red-500/70 border-white/10 hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-500'
+              }`}
+            >
+              <Trash2 size={14} className={isDeleting ? 'animate-spin' : ''} />
+              {isDeleting ? 'Borrando...' : 'Vaciar Datos'}
             </button>
 
             <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">

@@ -23,6 +23,9 @@ config.h DEBE CONTENER:
 #define VEHICLE_ID    "test01"
 */
 
+// Variables globales de control
+uint32_t lastTaskCanTimeSend = 0; // Control de envío de hora en Core 0
+
 void syncNetworkTime() {
   SerialAT.println("AT+CCLK?");
   String res = "";
@@ -46,10 +49,17 @@ void syncNetworkTime() {
     tm.tm_sec  = cclk.substring(15, 17).toInt();
     
     time_t t_now = mktime(&tm);
+    
+    // Restauramos el ajuste de -8h solicitado para cuadrar con el panel
+    t_now -= (8 * 3600); 
     struct timeval tv = { .tv_sec = t_now };
     settimeofday(&tv, NULL);
+
+    // Configurar Zona Horaria de España (CET/CEST)
+    setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+    tzset();
     
-    Serial.println("\n[TIME] Reloj ESP32 sincronizado con red GSM.");
+    Serial.println("\n[TIME] Reloj ESP32 sincronizado (Horario España).");
   }
 }
 
@@ -60,8 +70,8 @@ String getTimestamp() {
   localtime_r(&now, &timeinfo);
   
   if (timeinfo.tm_year > 120) { // Si el año es > 2020, asumimos sincronizado
-    char buf[12];
-    strftime(buf, sizeof(buf), "[%H:%M:%S]", &timeinfo);
+    char buf[22];
+    strftime(buf, sizeof(buf), "[%Y-%m-%d %H:%M:%S]", &timeinfo);
     return String(buf);
   }
   
@@ -135,7 +145,8 @@ String getCurrentISO8601() {
   
   if (ti.tm_year > 120) {
     char buf[25];
-    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &ti);
+    // Añadimos 'Z' para asegurar compatibilidad ISO8601 con Supabase/Vercel
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &ti);
     return String(buf);
   }
   return "";
@@ -166,7 +177,37 @@ void updateLBS() {
   }
 }
 
+bool checkNetwork() {
+  SerialAT.println("AT+NETOPEN?");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 500) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+  }
+  
+  if (res.indexOf("+NETOPEN: 1") != -1) return true;
+  
+  Serial.println("\n" + getTimestamp() + " [NET] Red caída o cerrada. Intentando abrir...");
+  sendAT("AT+NETOPEN", 5000);
+  delay(2000);
+  
+  // Verificar si se abrió tras el intento
+  SerialAT.println("AT+NETOPEN?");
+  res = "";
+  t = millis();
+  while (millis() - t < 500) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+  }
+  return (res.indexOf("+NETOPEN: 1") != -1);
+}
+
 void sendTelemetry() {
+  // Verificar red antes de intentar enviar
+  if (!checkNetwork()) {
+    Serial.println(getTimestamp() + " [NET] No se pudo restablecer la red.");
+    return;
+  }
+
   int rssi = getRSSI();
   int bat = getBatteryLevel();
   
@@ -186,7 +227,7 @@ void sendTelemetry() {
 
   // ---------- BODY ----------
   gps_update(); 
-  can_update();
+  // can_update() ahora se gestiona exclusivamente en la tarea canBusTask (Core 0)
   
   float finalLat = gps_get_lat();
   float finalLon = gps_get_lon();
@@ -210,6 +251,7 @@ void sendTelemetry() {
   
   if (timestamp != "") {
     body += ",\"timestamp\":\"" + timestamp + "\"";
+    body += ",\"date\":\"" + timestamp.substring(0, 10) + "\"";
   }
   
   if (batA.soc != -1) {
@@ -243,6 +285,34 @@ void sendTelemetry() {
   Serial.println(getTimestamp() + " [OK] Telemetría enviada.");
 }
 
+void canBusTask(void *pvParameters) {
+  uint32_t lastHeartbeat = 0;
+  for(;;) {
+    can_update(); // Recibe y decodifica continuamente
+    
+    if (millis() - lastHeartbeat > 5000) {
+      Serial.println("[TASK] CAN Core 0 OK - Escuchando bus...");
+      lastHeartbeat = millis();
+    }
+    
+    // Envío de hora desactivado por petición del usuario
+    /*
+    if (millis() - lastTaskCanTimeSend > 1000) {
+      time_t now;
+      struct tm ti;
+      time(&now);
+      localtime_r(&now, &ti);
+      
+      if (ti.tm_year > 120) {
+        can_send_time((uint8_t)ti.tm_hour, (uint8_t)ti.tm_min);
+      }
+      lastTaskCanTimeSend = millis();
+    }
+    */
+    vTaskDelay(pdMS_TO_TICKS(10)); // Pequeña pausa para no saturar el core
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -268,7 +338,8 @@ void setup() {
   gps_setup();
   
   if (can_setup(CAN_RX_PIN, CAN_TX_PIN)) {
-    Serial.printf("%s [CAN] OK (RX:%d, TX:%d)\n", getTimestamp().c_str(), CAN_RX_PIN, CAN_TX_PIN);
+    Serial.println(getTimestamp() + " [CAN] OK. Iniciando Tarea Independiente...");
+    xTaskCreatePinnedToCore(canBusTask, "CAN_Task", 4096, NULL, 5, NULL, 0); // Core 0
   } else {
     Serial.println(getTimestamp() + " [ERROR] Falló inicialización CAN");
   }
@@ -308,7 +379,7 @@ void setup() {
 
 uint32_t lastSend = 0;
 const uint32_t sendInterval = 10000; // Enviar telemetría cada 10 segundos
-uint32_t lastCanTimeSend = 0;
+uint32_t lastCanTimeSend = 0; // Para el loop principal (si se usa)
 const uint32_t canTimeInterval = 200; // Enviar trama CAN cada 200ms
 uint32_t lastTimeSync = 0;
 const uint32_t syncInterval = 3600000; // Re-sincronizar hora cada 1 hora
@@ -344,6 +415,7 @@ float lastTripLat = 0, lastTripLon = 0;
 
 void sendTripSummary() {
   if (tripPointsCount == 0) return;
+  if (!checkNetwork()) return;
 
   time_t now;
   time(&now);
@@ -411,7 +483,7 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2) {
 
 void loop() {
   gps_update(); 
-  can_update();
+  // can_update() ahora corre en su propia tarea (Core 0)
 
   bool hasCanData = (batA.soc != -1 || batB.soc != -1);
 
@@ -420,17 +492,27 @@ void loop() {
     
     // INICIO DE TRAYECTO
     if (!isTripActive) {
+      float startLat = gps_get_lat();
+      float startLon = gps_get_lon();
+      
+      // Si no hay GPS, intentamos LBS para no perder el inicio
+      if (startLat == 0) {
+        updateLBS();
+        startLat = lbsLat;
+        startLon = lbsLon;
+      }
+
       isTripActive = true;
       time(&tripStartTime);
-      tripStartLat = gps_get_lat();
-      tripStartLon = gps_get_lon();
+      tripStartLat = startLat;
+      tripStartLon = startLon;
       tripStartBatA = batA.soc;
       tripStartBatB = batB.soc;
       tripTotalSpeed = 0;
       tripPointsCount = 0;
       tripDistance = 0;
-      lastTripLat = tripStartLat;
-      lastTripLon = tripStartLon;
+      lastTripLat = startLat;
+      lastTripLon = startLon;
       Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO.");
     }
 
@@ -451,8 +533,8 @@ void loop() {
     tripPointsCount++;
   }
 
-  // FIN DE TRAYECTO (2 minutos sin CAN)
-  if (isTripActive && (millis() - lastCanActivity > 120000)) {
+  // FIN DE TRAYECTO (1 minuto sin CAN)
+  if (isTripActive && (millis() - lastCanActivity > 60000)) {
     Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto FINALIZADO por inactividad CAN.");
     sendTripSummary();
     isTripActive = false;
@@ -483,19 +565,7 @@ void loop() {
     lastTimeSync = millis();
   }
 
-  // Enviar trama CAN horaria cada 200ms
-  if (millis() - lastCanTimeSend > canTimeInterval) {
-    time_t now;
-    struct tm ti;
-    time(&now);
-    localtime_r(&now, &ti);
-    
-    // Solo enviamos si el reloj está sincronizado (año > 2020)
-    if (ti.tm_year > 120) {
-      can_send_time((uint8_t)ti.tm_hour, (uint8_t)ti.tm_min);
-    }
-    lastCanTimeSend = millis();
-  }
+  // can_send_time() ahora corre en su propia tarea (Core 0)
 
   if (millis() - lastSend > sendInterval) {
     sendTelemetry();
