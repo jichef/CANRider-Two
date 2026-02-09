@@ -189,6 +189,26 @@ export default function DashboardContent() {
     }
   };
 
+  const handleDeleteTrip = async (e: React.MouseEvent, tripId: string) => {
+    e.stopPropagation(); // Evitar seleccionar el viaje al borrarlo
+    if (!confirm('¿Estás seguro de que quieres eliminar este trayecto?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('trips')
+        .delete()
+        .eq('id', tripId);
+
+      if (error) throw error;
+
+      setTrips(trips.filter(t => t.id !== tripId));
+      if (selectedTrip === tripId) setSelectedTrip(null);
+    } catch (error) {
+      console.error('Error deleting trip:', error);
+      alert('Error al eliminar el trayecto');
+    }
+  };
+
   const stats = [
     { 
       label: 'BATERÍA CANRIDER', 
@@ -711,10 +731,19 @@ export default function DashboardContent() {
                           )}
                         </div>
                       </div>
-                      <div className={`p-2 rounded-xl transition-all ${
-                        isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
-                      }`}>
-                        <Zap size={14} fill={isSelected ? "currentColor" : "none"} />
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={(e) => handleDeleteTrip(e, trip.id)}
+                          className="p-2 rounded-xl bg-red-500/10 text-red-500/50 hover:text-red-500 hover:bg-red-500/20 transition-all opacity-0 group-hover:opacity-100"
+                          title="Eliminar trayecto"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                        <div className={`p-2 rounded-xl transition-all ${
+                          isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
+                        }`}>
+                          <Zap size={14} fill={isSelected ? "currentColor" : "none"} />
+                        </div>
                       </div>
                     </button>
                   );

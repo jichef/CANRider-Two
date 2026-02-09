@@ -49,6 +49,8 @@ create table trips (
   avg_speed double precision,
   max_speed double precision,
   consumption integer, -- porcentaje consumido
+  start_battery_level integer,
+  end_battery_level integer,
   path jsonb -- Array de coordenadas [[lat, lng], ...]
 );
 
@@ -89,26 +91,31 @@ begin
 
     if active_trip_id is null then
       -- Crear nuevo trayecto
-      insert into trips (motorcycle_id, start_time, path, max_speed)
+      insert into trips (motorcycle_id, start_time, path, max_speed, start_battery_level, consumption)
       values (
         new.motorcycle_id, 
         new.timestamp, 
-        jsonb_build_array(jsonb_build_array(new.longitude, new.latitude)),
-        new.speed
+        jsonb_build_array(jsonb_build_array(new.latitude, new.longitude)),
+        new.speed,
+        new.moto_battery,
+        0
       );
     else
       -- Actualizar trayecto existente
       update trips 
       set 
-        path = path || jsonb_build_array(jsonb_build_array(new.longitude, new.latitude)),
+        path = path || jsonb_build_array(jsonb_build_array(new.latitude, new.longitude)),
         max_speed = greatest(max_speed, new.speed),
-        avg_speed = (avg_speed + new.speed) / 2
+        consumption = start_battery_level - new.moto_battery
       where id = active_trip_id;
     end if;
   else
     -- Si el trayecto NO está activo, cerrar cualquier trayecto abierto
     update trips 
-    set end_time = new.timestamp 
+    set 
+      end_time = new.timestamp,
+      end_battery_level = new.moto_battery,
+      consumption = start_battery_level - new.moto_battery
     where motorcycle_id = new.motorcycle_id 
     and end_time is null;
   end if;
