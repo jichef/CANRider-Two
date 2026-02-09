@@ -191,6 +191,10 @@ export default function DashboardContent() {
 
   const handleDeleteTrip = async (e: React.MouseEvent, tripId: string) => {
     e.stopPropagation(); // Evitar seleccionar el viaje al borrarlo
+    if (!supabase) {
+      alert('Error: Base de datos no conectada');
+      return;
+    }
     if (!confirm('¿Estás seguro de que quieres eliminar este trayecto?')) return;
 
     try {
