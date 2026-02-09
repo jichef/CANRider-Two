@@ -710,10 +710,6 @@ export default function DashboardContent() {
                       </div>
                     </button>
                   );
-
-                      </div>
-                    </button>
-                  );
                 })
               ) : (
                 <div className="py-12 flex flex-col items-center justify-center text-zinc-600 border border-dashed border-white/5 rounded-3xl">
