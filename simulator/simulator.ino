@@ -17,6 +17,7 @@ SimBattery batA, batB;
 
 float speed = 0.0;       
 bool is_charging = false;
+bool alert_mode = false; // Nuevo modo para permitir descarga total
 uint32_t last_update = 0;
 float target_speed = 0.0;
 
@@ -93,12 +94,14 @@ void updateSimulation() {
 
   // Descarga Batería A
   if (batA.current > 0) batA.soc -= (batA.current * dt) / 300.0; 
+  if (!alert_mode && batA.soc < 11.0) batA.soc = 11.0; // Límite 11%
   if (batA.soc < 0) batA.soc = 0;
   batA.voltage = 66.0 + (batA.soc / 100.0) * 18.0;
   batA.temp = 25.0 + (batA.current * 0.05) + (random(0, 10) / 10.0);
 
   // Descarga Batería B (Simétrica)
   if (batB.current > 0) batB.soc -= (batB.current * dt) / 300.0; 
+  if (!alert_mode && batB.soc < 11.0) batB.soc = 11.0; // Límite 11%
   if (batB.soc < 0) batB.soc = 0;
   batB.voltage = 66.0 + (batB.soc / 100.0) * 18.0;
   batB.temp = 25.0 + (batB.current * 0.05) + (random(0, 10) / 10.0);
@@ -190,9 +193,15 @@ void loop() {
       Serial.println("\n🛑 [SIM] PAUSA MANUAL ACTIVADA");
     } else if (cmd == "play" || cmd == "run") {
       is_paused = false;
+      alert_mode = false; // Desactiva alerta al reiniciar
+      batA.soc = 100.0;   // Reinicia ciclo
+      batB.soc = 100.0;
       target_speed = 45.0;
       last_update = millis();
-      Serial.println("\n🚀 [SIM] MARCHA REANUDADA");
+      Serial.println("\n🚀 [SIM] CICLO REINICIADO (100%) Y MARCHA REANUDADA");
+    } else if (cmd == "alerta" || cmd == "alert") {
+      alert_mode = true;
+      Serial.println("\n⚠️ [SIM] MODO ALERTA ACTIVADO: Descarga permitida por debajo del 11%");
     }
   }
 
