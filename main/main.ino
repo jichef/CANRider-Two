@@ -298,8 +298,14 @@ void sendTelemetry() {
 
   // Si hubo error 400, leer el cuerpo de la respuesta obligatoriamente
   if (actionRes.indexOf(",400,") != -1) {
-    Serial.println("\n[DEBUG] Error 400 detectado. Leyendo motivo de Supabase...");
-    sendAT("AT+HTTPREAD", 3000);
+    int firstComma = actionRes.indexOf(",400,");
+    int secondComma = actionRes.indexOf(",", firstComma + 5);
+    String lenStr = actionRes.substring(firstComma + 5, secondComma);
+    lenStr.trim();
+    
+    Serial.printf("\n[DEBUG] Error 400 detectado (%s bytes). Motivo: ", lenStr.c_str());
+    String readCmd = "AT+HTTPREAD=0," + lenStr;
+    sendAT(readCmd.c_str(), 3000);
   }
   
   sendAT("AT+HTTPTERM");

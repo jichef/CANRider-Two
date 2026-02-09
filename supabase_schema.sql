@@ -34,7 +34,8 @@ create table telemetry (
   bat_b_amps double precision,
   bat_b_temp double precision,
   is_charging_b boolean default false,
-  location_type text
+  location_type text,
+  date text
 );
 
 -- Tabla de Recorridos (Procesados o guardados)
