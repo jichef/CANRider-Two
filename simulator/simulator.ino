@@ -94,17 +94,26 @@ void updateSimulation() {
 
   // Descarga Batería A
   if (batA.current > 0) batA.soc -= (batA.current * dt) / 300.0; 
-  if (!alert_mode && batA.soc < 11.0) batA.soc = 11.0; // Límite 11%
+  if (!alert_mode && batA.soc < 11.0) batA.soc = 11.0; 
   if (batA.soc < 0) batA.soc = 0;
-  batA.voltage = 66.0 + (batA.soc / 100.0) * 18.0;
-  batA.temp = 25.0 + (batA.current * 0.05) + (random(0, 10) / 10.0);
+  // Añadimos jitter de +-0.2V para que la gráfica se mueva
+  batA.voltage = (66.0 + (batA.soc / 100.0) * 18.0) + (random(-20, 20) / 100.0);
+  batA.temp = 25.0 + (batA.current * 0.05) + (random(-10, 10) / 10.0);
 
-  // Descarga Batería B (Simétrica)
-  if (batB.current > 0) batB.soc -= (batB.current * dt) / 300.0; 
-  if (!alert_mode && batB.soc < 11.0) batB.soc = 11.0; // Límite 11%
+  // Descarga Batería B (Con desfase del 1% respecto a A)
+  batB.soc = batA.soc - 1.2; // Desfase fijo + pequeña variación
   if (batB.soc < 0) batB.soc = 0;
-  batB.voltage = 66.0 + (batB.soc / 100.0) * 18.0;
-  batB.temp = 25.0 + (batB.current * 0.05) + (random(0, 10) / 10.0);
+  if (!alert_mode && batB.soc < 11.0 && batA.soc > 11.0) batB.soc = 11.0;
+  
+  // Jitter en Batería B
+  batB.voltage = (66.0 + (batB.soc / 100.0) * 18.0) + (random(-20, 20) / 100.0);
+  batB.temp = 25.0 + (batB.current * 0.05) + (random(-10, 10) / 10.0);
+  
+  // Variación en las corrientes para que no sean idénticas
+  batA.current += (random(-5, 5) / 10.0);
+  batB.current += (random(-5, 5) / 10.0);
+  if (batA.current < 0) batA.current = 0.1;
+  if (batB.current < 0) batB.current = 0.1;
 }
 
 void sendCAN() {
