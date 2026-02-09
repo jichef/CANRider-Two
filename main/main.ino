@@ -27,6 +27,9 @@ config.h DEBE CONTENER:
 uint32_t lastTaskCanTimeSend = 0; // Control de envío de hora en Core 0
 uint32_t lastCanActivityTime = 0; // Marca de tiempo de la última trama CAN recibida
 bool isTripActive = false;        // Estado del trayecto actual
+time_t tripStartTime = 0;         // Hora de inicio del trayecto
+time_t tripEndTime = 0;           // Hora de fin del trayecto
+uint32_t tripDuration = 0;        // Duración total en segundos
 
 void syncNetworkTime() {
   SerialAT.println("AT+CCLK?");
@@ -135,23 +138,22 @@ int getRSSI() {
   return 99; // 99 significa desconocido
 }
 
+String formatISO8601(time_t t) {
+  if (t <= 0) return "";
+  struct tm ti;
+  gmtime_r(&t, &ti);
+  char buf[25];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &ti);
+  return String(buf);
+}
+
 String getCurrentISO8601() {
   String gpsTime = gps_get_time();
   if (gpsTime != "") return gpsTime;
 
   time_t now;
-  struct tm ti;
   time(&now);
-  gmtime_r(&now, &ti);
-  
-  if (ti.tm_year > 120) {
-    char buf[25];
-    // Usamos gmtime_r y 'Z' para enviar UTC real. 
-    // El navegador lo convertirá a la hora local del usuario automáticamente.
-    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &ti);
-    return String(buf);
-  }
-  return "";
+  return formatISO8601(now);
 }
 
 float lbsLat = 0, lbsLon = 0;
@@ -247,17 +249,25 @@ void sendTelemetry() {
 
   // ---------- TRAYECTO LOGIC ----------
   uint32_t now_ms = millis();
+  time_t now_unix;
+  time(&now_unix);
   
   // Si hay actividad CAN reciente (< 60s), el trayecto está activo
   if (lastCanActivityTime > 0 && (now_ms - lastCanActivityTime < 60000)) {
     if (!isTripActive) {
       Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO por actividad CAN.");
       isTripActive = true;
+      tripStartTime = now_unix;
+      tripEndTime = 0;
+      tripDuration = 0;
     }
+    tripDuration = (uint32_t)(now_unix - tripStartTime);
   } else {
     if (isTripActive) {
       Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto FINALIZADO por inactividad CAN (>60s).");
       isTripActive = false;
+      tripEndTime = now_unix;
+      tripDuration = (uint32_t)(tripEndTime - tripStartTime);
     }
   }
 
@@ -266,7 +276,10 @@ void sendTelemetry() {
                 ",\"longitude\":" + String(finalLon, 6) + 
                 ",\"signal_strength\":" + String(rssi) +
                 ",\"location_type\":\"" + locType + "\"" +
-                ",\"is_trip_active\":" + (isTripActive ? "true" : "false");
+                ",\"is_trip_active\":" + (isTripActive ? "true" : "false") +
+                ",\"trip_duration\":" + String(tripDuration) +
+                ",\"trip_start\":\"" + formatISO8601(tripStartTime) + "\"" +
+                ",\"trip_end\":\"" + formatISO8601(tripEndTime) + "\"";
   
   if (timestamp != "") {
     body += ",\"timestamp\":\"" + timestamp + "\"";
@@ -340,8 +353,7 @@ void canBusTask(void *pvParameters) {
       lastHeartbeat = millis();
     }
     
-    // Envío de hora desactivado por petición del usuario
-    /*
+    // Envío de latido de hora (ID 0x510) cada segundo
     if (millis() - lastTaskCanTimeSend > 1000) {
       time_t now;
       struct tm ti;
@@ -349,11 +361,10 @@ void canBusTask(void *pvParameters) {
       localtime_r(&now, &ti);
       
       if (ti.tm_year > 120) {
-        can_send_time((uint8_t)ti.tm_hour, (uint8_t)ti.tm_min);
+        can_send_time((uint8_t)ti.tm_hour, (uint8_t)ti.tm_min, (uint8_t)ti.tm_sec);
       }
       lastTaskCanTimeSend = millis();
     }
-    */
     vTaskDelay(pdMS_TO_TICKS(10)); // Pequeña pausa para no saturar el core
   }
 }

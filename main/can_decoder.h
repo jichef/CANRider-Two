@@ -113,27 +113,22 @@ void can_update() {
   }
 }
 
-bool can_send_time(uint8_t hour, uint8_t minute) {
+bool can_send_time(uint8_t hour, uint8_t minute, uint8_t second = 0) {
   twai_message_t message;
-  message.identifier = 0x5A1;
+  message.identifier = 0x510;
   message.extd = 0;           // Trama estándar
   message.rtr = 0;            // No es remota
-  message.data_length_code = 8;
-  message.data[0] = 0xA1;
-  message.data[1] = 0x00;
-  message.data[2] = 0x01;
+  message.data_length_code = 4;
+  message.data[0] = second;
+  message.data[1] = hour;
+  message.data[2] = minute;
   message.data[3] = 0x00;
-  message.data[4] = 0x70;
-  message.data[5] = hour;
-  message.data[6] = minute;
-  message.data[7] = 0x00;
   
   esp_err_t err = twai_transmit(&message, pdMS_TO_TICKS(10));
   if (err != ESP_OK) {
-    // Si ves este error, revisa el cable del pin TX (33)
-    Serial.printf("❌ Error enviando hora: %s\n", esp_err_to_name(err));
+    Serial.printf("❌ Error enviando hora (0x510): %s\n", esp_err_to_name(err));
   } else {
-    Serial.printf("📤 CAN TX Time: %02d:%02d\n", hour, minute);
+    Serial.printf("📤 CAN TX Time (0x510): %02d:%02d:%02d\n", hour, minute, second);
   }
   return err == ESP_OK;
 }

@@ -21,7 +21,7 @@ bool alert_mode = false; // Nuevo modo para permitir descarga total
 uint32_t last_update = 0;
 float target_speed = 0.0;
 
-// Lógica de trayectos (Auto-Simulador)
+bool is_paused = false;
 bool auto_mode = false;
 uint32_t last_state_change = 0;
 const uint32_t ACTIVE_DURATION = 180000; // 3 minutos activo
@@ -179,8 +179,8 @@ void checkCanStatus() {
 void checkIncomingCAN() {
   twai_message_t msg;
   while (twai_receive(&msg, 0) == ESP_OK) {
-    if (msg.identifier == 0x5A1) {
-      Serial.printf("[TIME] Sincronización recibida -> %02d:%02d\n", msg.data[5], msg.data[6]);
+    if (msg.identifier == 0x510) {
+      Serial.printf("[TIME] Latido recibido -> %02d:%02d:%02d\n", msg.data[1], msg.data[2], msg.data[0]);
     } else {
       Serial.printf("[CAN] Recibido ID: 0x%03X\n", msg.identifier);
     }
