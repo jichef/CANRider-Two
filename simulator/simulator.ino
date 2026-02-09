@@ -206,11 +206,14 @@ void loop() {
       is_paused = false;
       auto_mode = false;
       alert_mode = false;
-      batA.soc = 100.0;
-      batB.soc = 100.0;
       target_speed = 45.0;
       last_update = millis();
-      Serial.println("\n🚀 [SIM] CICLO REINICIADO Y MARCHA REANUDADA (Modo Auto Desactivado)");
+      Serial.println("\n🚀 [SIM] MARCHA REANUDADA (Nivel de batería mantenido)");
+    } else if (cmd == "reset") {
+      batA.soc = 100.0;
+      batB.soc = 100.0;
+      alert_mode = false;
+      Serial.println("\n🔋 [SIM] BATERÍAS REINICIADAS AL 100%");
     } else if (cmd == "alerta" || cmd == "alert") {
       alert_mode = true;
       Serial.println("\n⚠️ [SIM] MODO ALERTA ACTIVADO");
