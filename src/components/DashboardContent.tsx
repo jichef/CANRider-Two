@@ -668,7 +668,15 @@ export default function DashboardContent() {
                     durationStr = 'EN CURSO';
                   }
 
-                  const batteryUsed = trip.consumption || 0;
+                  // Calcular consumo de batería
+                  let batteryUsed = 0;
+                  if (trip.end_time) {
+                    // Trayecto finalizado: usamos el valor calculado por el trigger
+                    batteryUsed = trip.consumption || 0;
+                  } else if (telemetry?.moto_battery !== undefined && trip.consumption !== undefined) {
+                    // Trayecto en curso: consumo = inicial (guardado en consumption) - actual
+                    batteryUsed = Math.max(0, trip.consumption - telemetry.moto_battery);
+                  }
                   
                   return (
                     <button 
