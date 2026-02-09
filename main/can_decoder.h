@@ -85,6 +85,7 @@ void can_update() {
   twai_message_t message;
   // Volvemos a timeout 0 para que la tarea sea lo más rápida posible
   while (twai_receive(&message, 0) == ESP_OK) {
+    /* Silenciado temporalmente por ruido
     Serial.print("📥 CAN RX ID=0x");
     Serial.print(message.identifier, HEX);
     Serial.print(message.extd ? " EXT " : " STD ");
@@ -98,6 +99,7 @@ void can_update() {
       Serial.print(" ");
     }
     Serial.println();
+    */
 
     decodeCANFrame(message);
   }
