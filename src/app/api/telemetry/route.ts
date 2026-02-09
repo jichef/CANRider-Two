@@ -34,10 +34,24 @@ export async function POST(req: NextRequest) {
         battery_voltage: data.battery_voltage,
         is_charging: data.is_charging,
         signal_strength: data.signal_strength,
-        timestamp: data.timestamp || new Date().toISOString()
+        timestamp: data.timestamp || new Date().toISOString(),
+        // Nuevos campos de Batería A y B
+        moto_battery: data.moto_battery,
+        moto_battery_b: data.moto_battery_b,
+        bat_a_volts: data.bat_a_volts,
+        bat_a_amps: data.bat_a_amps,
+        bat_a_temp: data.bat_a_temp,
+        bat_b_volts: data.bat_b_volts,
+        bat_b_amps: data.bat_b_amps,
+        bat_b_temp: data.bat_b_temp,
+        is_charging_b: data.is_charging_b,
+        location_type: data.location_type
       }]);
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error de Supabase:', error);
+      return NextResponse.json({ error: error.message, details: error.details }, { status: 400 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
