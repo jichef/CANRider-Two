@@ -228,6 +228,13 @@ void loop() {
 
   // Lógica Auto-Simulador
   if (auto_mode) {
+    // Autorrecarga si llega al 10% para permitir ciclos continuos
+    if (!alert_mode && batA.soc <= 11.0) {
+      batA.soc = 100.0;
+      batB.soc = 100.0;
+      Serial.println("\n🔋 [SIM] AUTO: Batería crítica (10%) -> Recarga automática al 100%");
+    }
+
     if (!is_paused && (now - last_state_change > ACTIVE_DURATION)) {
       is_paused = true;
       speed = 0;
