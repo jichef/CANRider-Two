@@ -50,8 +50,9 @@ void syncNetworkTime() {
     
     time_t t_now = mktime(&tm);
     
-    // Sincronizamos el reloj interno. mktime ya usa la TZ configurada
-    // para convertir la hora local de la red a UTC internamente.
+    // Aplicamos el ajuste de -8h detectado para sincronizar con la red local
+    t_now -= (8 * 3600); 
+    
     struct timeval tv = { .tv_sec = t_now };
     settimeofday(&tv, NULL);
 
@@ -281,6 +282,14 @@ void sendTelemetry() {
 
   // ---------- POST ----------
   sendAT("AT+HTTPACTION=1", 15000);
+  
+  // Leer respuesta en caso de error para diagnóstico
+  SerialAT.println("AT+HTTPREAD");
+  uint32_t t = millis();
+  while (millis() - t < 2000) {
+    while (SerialAT.available()) Serial.write(SerialAT.read());
+  }
+  
   sendAT("AT+HTTPTERM");
 
   Serial.println(getTimestamp() + " [OK] Telemetría enviada.");
