@@ -281,13 +281,25 @@ void sendTelemetry() {
   delay(500);
 
   // ---------- POST ----------
-  sendAT("AT+HTTPACTION=1", 15000);
+  Serial.println(getTimestamp() + " [HTTP] Iniciando POST...");
+  SerialAT.println("AT+HTTPACTION=1");
   
-  // Leer respuesta en caso de error para diagnóstico
-  SerialAT.println("AT+HTTPREAD");
-  uint32_t t = millis();
-  while (millis() - t < 2000) {
-    while (SerialAT.available()) Serial.write(SerialAT.read());
+  // Esperar activamente al código de respuesta (+HTTPACTION: 1,XXX,LEN)
+  String actionRes = "";
+  uint32_t tAction = millis();
+  while (millis() - tAction < 15000) {
+    while (SerialAT.available()) {
+      char c = SerialAT.read();
+      actionRes += c;
+      Serial.write(c);
+    }
+    if (actionRes.indexOf("+HTTPACTION:") != -1 && actionRes.indexOf("\n", actionRes.indexOf("+HTTPACTION:")) != -1) break;
+  }
+
+  // Si hubo error 400, leer el cuerpo de la respuesta obligatoriamente
+  if (actionRes.indexOf(",400,") != -1) {
+    Serial.println("\n[DEBUG] Error 400 detectado. Leyendo motivo de Supabase...");
+    sendAT("AT+HTTPREAD", 3000);
   }
   
   sendAT("AT+HTTPTERM");
