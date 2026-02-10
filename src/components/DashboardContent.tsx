@@ -48,6 +48,7 @@ export default function DashboardContent() {
   const [isConfigured, setIsConfigured] = useState(true);
   const [isStale, setIsStale] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [tripsLimit, setTripsLimit] = useState(5);
 
   // Madrid por defecto si no hay datos
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
@@ -132,7 +133,7 @@ export default function DashboardContent() {
         .from('trips')
         .select('*')
         .order('start_time', { ascending: false })
-        .limit(5);
+        .limit(tripsLimit);
 
       if (tripData) {
         setTrips(tripData);
@@ -164,7 +165,7 @@ export default function DashboardContent() {
         supabase.removeChannel(channel);
       }
     };
-  }, [supabase]);
+  }, [supabase, tripsLimit]);
 
   const handleClearData = async () => {
     if (!confirm('¿Estás seguro de que quieres borrar todo el historial de telemetría y viajes? Los dispositivos registrados se mantendrán.')) {
@@ -671,25 +672,45 @@ export default function DashboardContent() {
                 </div>
                 <h2 className="text-lg font-bold text-white">HISTORIAL</h2>
               </div>
-              <button className="text-[10px] font-bold text-zinc-500 hover:text-white transition-colors tracking-widest uppercase">
-                View All
+              <button 
+                onClick={() => setTripsLimit(tripsLimit === 5 ? 100 : 5)}
+                className="text-[10px] font-bold text-zinc-500 hover:text-white transition-colors tracking-widest uppercase"
+              >
+                {tripsLimit === 5 ? 'View All' : 'Show Less'}
               </button>
             </div>
             
             <div className="space-y-4">
               {trips.length > 0 ? (
                 trips.map((trip) => {
-                  const date = new Date(trip.start_time).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
+                  const startTime = trip.start_time || trip.trip_start;
+                  const endTime = trip.end_time || trip.trip_end;
+                  
+                  const date = startTime ? new Date(startTime).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase() : 'N/A';
                   const isSelected = selectedTrip === trip.id;
                   
-                  // Calcular duración amigable
+                  // Calcular duración amigable y horas
                   let durationStr = 'N/A';
-                  if (trip.start_time && trip.end_time) {
-                    const diffMs = new Date(trip.end_time).getTime() - new Date(trip.start_time).getTime();
-                    const mins = Math.floor(diffMs / 60000);
-                    durationStr = mins > 0 ? `${mins} MIN` : '< 1 MIN';
-                  } else if (trip.start_time && !trip.end_time) {
-                    durationStr = 'EN CURSO';
+                  let timeRangeStr = '';
+                  
+                  if (startTime) {
+                    const start = new Date(startTime);
+                    const startH = start.getHours().toString().padStart(2, '0');
+                    const startM = start.getMinutes().toString().padStart(2, '0');
+                    
+                    if (endTime) {
+                      const end = new Date(endTime);
+                      const endH = end.getHours().toString().padStart(2, '0');
+                      const endM = end.getMinutes().toString().padStart(2, '0');
+                      timeRangeStr = `${startH}:${startM} - ${endH}:${endM}`;
+                      
+                      const diffMs = end.getTime() - start.getTime();
+                      const mins = Math.floor(diffMs / 60000);
+                      durationStr = mins > 0 ? `${mins} MIN` : '< 1 MIN';
+                    } else {
+                      timeRangeStr = `${startH}:${startM} - IN CURSO`;
+                      durationStr = 'EN CURSO';
+                    }
                   }
 
                   // Calcular consumo de batería
@@ -713,11 +734,18 @@ export default function DashboardContent() {
                       }`}
                     >
                       <div className="space-y-1 text-left">
-                        <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
-                          isSelected ? 'text-cyan-400' : 'text-zinc-500'
-                        }`}>
-                          {date}
-                        </span>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
+                            isSelected ? 'text-cyan-400' : 'text-zinc-500'
+                          }`}>
+                            {date}
+                          </span>
+                          <span className={`text-[9px] font-mono tracking-tighter ${
+                            isSelected ? 'text-cyan-300' : 'text-zinc-400'
+                          }`}>
+                            {timeRangeStr}
+                          </span>
+                        </div>
                         <div className="flex items-center gap-4">
                           <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                             <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />
