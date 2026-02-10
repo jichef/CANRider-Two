@@ -444,7 +444,10 @@ void sendTelemetry() {
                 ",\"location_type\":\"" + locType + "\"" +
                 ",\"is_trip_active\":" + (isTripActive ? "true" : "false") +
                 ",\"trip_duration\":" + String(tripDuration) +
+                ",\"duration\":" + String(tripDuration) +
+                ",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") +
                 ",\"trip_start\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") +
+                ",\"end_time\":" + (tripEndTime > 0 ? "\"" + formatISO8601(tripEndTime) + "\"" : "null") +
                 ",\"trip_end\":" + (tripEndTime > 0 ? "\"" + formatISO8601(tripEndTime) + "\"" : "null");
   
   if (timestamp != "") {
@@ -669,8 +672,13 @@ void sendTripSummary() {
   sendAT(ud.c_str());
 
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") + 
-                ",\"end_time\":" + (now > 0 ? "\"" + formatISO8601(now) + "\"" : "null") + ",\"distance\":" + String(tripDistance, 2) + 
-                ",\"avg_speed\":" + String(avgSpeed, 2) + ",\"duration\":" + String(duration) + 
+                ",\"trip_start\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") + 
+                ",\"end_time\":" + (now > 0 ? "\"" + formatISO8601(now) + "\"" : "null") + 
+                ",\"trip_end\":" + (now > 0 ? "\"" + formatISO8601(now) + "\"" : "null") + 
+                ",\"distance\":" + String(tripDistance, 2) + 
+                ",\"avg_speed\":" + String(avgSpeed, 2) + 
+                ",\"duration\":" + String(duration) + 
+                ",\"trip_duration\":" + String(duration) + 
                 ",\"consumption\":" + String(consumptionA + consumptionB) + 
                 ",\"start_battery_level\":" + String(tripStartBatA) + 
                 ",\"end_battery_level\":" + String(endBatA) + 
