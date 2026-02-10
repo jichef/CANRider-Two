@@ -784,7 +784,6 @@ void loop() {
     lastTimeSync = millis();
   }
 
-  /* 
   // Enviar trama de hora cada 200ms
   if (millis() - lastCanTimeSend > canTimeInterval) {
     time_t now;
@@ -797,7 +796,6 @@ void loop() {
     }
     lastCanTimeSend = millis();
   }
-  */
 
   if (millis() - lastSend > sendInterval) {
     sendTelemetry();

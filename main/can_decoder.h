@@ -64,7 +64,8 @@ void decodeCANFrame(const twai_message_t &msg) {
 // Por defecto pines 21 (TX) y 22 (RX) son comunes, pero en T-A7670G 
 // debemos verificar los pines disponibles. 
 bool can_setup(int rx_pin, int tx_pin) {
-  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)tx_pin, (gpio_num_t)rx_pin, TWAI_MODE_LISTEN_ONLY);
+  twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)tx_pin, (gpio_num_t)rx_pin, TWAI_MODE_NORMAL);
+  g_config.tx_queue_len = 10; // Permitir cola de transmisión
   twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS(); 
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 

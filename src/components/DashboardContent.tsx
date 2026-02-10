@@ -680,7 +680,7 @@ export default function DashboardContent() {
               </button>
             </div>
             
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
               {trips.length > 0 ? (
                 trips.map((trip) => {
                   const startTime = trip.start_time || trip.trip_start;
