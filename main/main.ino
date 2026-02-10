@@ -235,21 +235,14 @@ void syncTimeHTTP() {
         tm_info.tm_year -= 1900;
         tm_info.tm_mon -= 1;
 
-        // Configurar zona horaria de España (Península)
-        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0", 1);
+        // Forzar siempre a UTC internamente para evitar desfases con Supabase/Vercel
+        setenv("TZ", "UTC0", 1);
         tzset();
         time_t t_now = mktime(&tm_info);
         struct timeval tv = { .tv_sec = t_now };
         settimeofday(&tv, NULL);
         
-        // Actualizar el reloj interno del módem para que el backup sea válido
-        char cclk_cmd[64];
-        snprintf(cclk_cmd, sizeof(cclk_cmd), "AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+00\"",
-                 tm_info.tm_year - 100, tm_info.tm_mon + 1, tm_info.tm_mday,
-                 tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
-        sendAT(cclk_cmd);
-
-        Serial.printf("[TIME] Sincronización HTTP Exitosa (UTC): %s\n", iso.c_str());
+        Serial.printf("[TIME] Sincronización HTTP Exitosa (UTC): %ld\n", t_now);
       }
     }
   } else {
