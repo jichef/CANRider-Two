@@ -12,7 +12,10 @@ import {
   Activity,
   Smartphone,
   Trash2,
-  Calendar
+  Calendar,
+  Play,
+  Flag,
+  ArrowRight
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useMemo } from 'react';
@@ -691,24 +694,22 @@ export default function DashboardContent() {
                   
                   // Calcular duración amigable y horas
                   let durationStr = 'N/A';
-                  let timeRangeStr = '';
+                  let startStr = '--:--';
+                  let endStr = '--:--';
                   
                   if (startTime) {
                     const start = new Date(startTime);
-                    const startH = start.getHours().toString().padStart(2, '0');
-                    const startM = start.getMinutes().toString().padStart(2, '0');
+                    startStr = `${start.getHours().toString().padStart(2, '0')}:${start.getMinutes().toString().padStart(2, '0')}`;
                     
                     if (endTime) {
                       const end = new Date(endTime);
-                      const endH = end.getHours().toString().padStart(2, '0');
-                      const endM = end.getMinutes().toString().padStart(2, '0');
-                      timeRangeStr = `${startH}:${startM} - ${endH}:${endM}`;
+                      endStr = `${end.getHours().toString().padStart(2, '0')}:${end.getMinutes().toString().padStart(2, '0')}`;
                       
                       const diffMs = end.getTime() - start.getTime();
                       const mins = Math.floor(diffMs / 60000);
                       durationStr = mins > 0 ? `${mins} MIN` : '< 1 MIN';
                     } else {
-                      timeRangeStr = `${startH}:${startM} - IN CURSO`;
+                      endStr = 'ACT';
                       durationStr = 'EN CURSO';
                     }
                   }
@@ -740,11 +741,21 @@ export default function DashboardContent() {
                           }`}>
                             {date}
                           </span>
-                          <span className={`text-[9px] font-mono tracking-tighter ${
-                            isSelected ? 'text-cyan-300' : 'text-zinc-400'
-                          }`}>
-                            {timeRangeStr}
-                          </span>
+                          <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                            <div className="flex items-center gap-1">
+                              <Play size={8} className="text-emerald-500 fill-emerald-500/20" />
+                              <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-cyan-300' : 'text-zinc-400'}`}>
+                                {startStr}
+                              </span>
+                            </div>
+                            <ArrowRight size={8} className="text-zinc-600" />
+                            <div className="flex items-center gap-1">
+                              <Flag size={8} className={endTime ? "text-red-500 fill-red-500/20" : "text-amber-500 animate-pulse"} />
+                              <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-cyan-300' : 'text-zinc-400'}`}>
+                                {endStr}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="flex items-center gap-1.5 text-xs font-bold text-white">
