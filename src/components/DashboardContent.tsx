@@ -51,7 +51,8 @@ export default function DashboardContent() {
   const [isConfigured, setIsConfigured] = useState(true);
   const [isStale, setIsStale] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [tripsLimit, setTripsLimit] = useState(5);
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 5;
 
   // Madrid por defecto si no hay datos
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
@@ -131,12 +132,12 @@ export default function DashboardContent() {
         }
       }
 
-      // Cargar viajes
+      // Cargar viajes con paginación
       const { data: tripData } = await supabase
         .from('trips')
         .select('*')
         .order('start_time', { ascending: false })
-        .limit(tripsLimit);
+        .range((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE - 1);
 
       if (tripData) {
         setTrips(tripData);
@@ -168,7 +169,7 @@ export default function DashboardContent() {
         supabase.removeChannel(channel);
       }
     };
-  }, [supabase, tripsLimit]);
+  }, [supabase, page]);
 
   const handleClearData = async () => {
     if (!confirm('¿Estás seguro de que quieres borrar todo el historial de telemetría y viajes? Los dispositivos registrados se mantendrán.')) {
@@ -667,7 +668,7 @@ export default function DashboardContent() {
           </div>
 
           {/* Historial de Viajes */}
-          <div className="bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl">
+          <div className="bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl flex flex-col">
             <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
@@ -675,12 +676,27 @@ export default function DashboardContent() {
                 </div>
                 <h2 className="text-lg font-bold text-white">HISTORIAL</h2>
               </div>
-              <button 
-                onClick={() => setTripsLimit(tripsLimit === 5 ? 100 : 5)}
-                className="text-[10px] font-bold text-zinc-500 hover:text-white transition-colors tracking-widest uppercase"
-              >
-                {tripsLimit === 5 ? 'View All' : 'Show Less'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setPage(Math.max(1, page - 1))}
+                  disabled={page === 1}
+                  className={`p-1.5 rounded-lg border border-white/5 transition-all ${
+                    page === 1 ? 'opacity-20 cursor-not-allowed' : 'hover:bg-zinc-800 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <ArrowRight size={14} className="rotate-180" />
+                </button>
+                <span className="text-[10px] font-mono font-black text-zinc-500 w-8 text-center">{page}</span>
+                <button 
+                  onClick={() => setPage(page + 1)}
+                  disabled={trips.length < ITEMS_PER_PAGE}
+                  className={`p-1.5 rounded-lg border border-white/5 transition-all ${
+                    trips.length < ITEMS_PER_PAGE ? 'opacity-20 cursor-not-allowed' : 'hover:bg-zinc-800 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <ArrowRight size={14} />
+                </button>
+              </div>
             </div>
             
             <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
