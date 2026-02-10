@@ -8,10 +8,10 @@
 
 // Definir pines CAN si no están definidos
 #ifndef CAN_RX_PIN
-#define CAN_RX_PIN 32
+#define CAN_RX_PIN 15
 #endif
 #ifndef CAN_TX_PIN
-#define CAN_TX_PIN 33
+#define CAN_TX_PIN 14
 #endif
 
 /*
@@ -27,46 +27,13 @@ config.h DEBE CONTENER:
 uint32_t lastTaskCanTimeSend = 0; // Control de envío de hora en Core 0
 uint32_t lastCanActivityTime = 0; // Marca de tiempo de la última trama CAN recibida
 bool isTripActive = false;        // Estado del trayecto actual
+int networkFailures = 0;          // Contador de fallos de red consecutivos
+const int MAX_NETWORK_FAILURES = 10; // Reiniciar tras 10 fallos
 time_t tripStartTime = 0;         // Hora de inicio del trayecto
 time_t tripEndTime = 0;           // Hora de fin del trayecto
 uint32_t tripDuration = 0;        // Duración total en segundos
 
-void syncNetworkTime() {
-  SerialAT.println("AT+CCLK?");
-  String res = "";
-  uint32_t t = millis();
-  while (millis() - t < 1000) {
-    while (SerialAT.available()) res += (char)SerialAT.read();
-  }
-  
-  // Formato: +CCLK: "25/02/08,21:16:29+04"
-  int start = res.indexOf("\"");
-  int end = res.lastIndexOf("\"");
-  if (start != -1 && end != -1 && end > start) {
-    String cclk = res.substring(start + 1, end);
-    
-    struct tm tm;
-    tm.tm_year = 100 + cclk.substring(0, 2).toInt(); // 2000 + yy - 1900
-    tm.tm_mon  = cclk.substring(3, 5).toInt() - 1;   // 0-11
-    tm.tm_mday = cclk.substring(6, 8).toInt();
-    tm.tm_hour = cclk.substring(9, 11).toInt();
-    tm.tm_min  = cclk.substring(12, 14).toInt();
-    tm.tm_sec  = cclk.substring(15, 17).toInt();
-    
-    time_t t_now = mktime(&tm);
-    
-    // Eliminamos el ajuste manual de -8h, el servidor NTP y la TZ ya se encargan
-    struct timeval tv = { .tv_sec = t_now };
-    settimeofday(&tv, NULL);
-
-    // Configurar Zona Horaria de España (CET/CEST)
-    setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
-    tzset();
-    
-    Serial.println("\n[TIME] Reloj ESP32 sincronizado (Horario España).");
-  }
-}
-
+// --- FUNCIONES BÁSICAS (Declarar antes de usar) ---
 String getTimestamp() {
   time_t now;
   struct tm timeinfo;
@@ -101,6 +68,7 @@ void sendAT(const char *cmd, uint32_t timeout = 3000) {
   }
   Serial.println();
 }
+// --------------------------------------------------
 
 int getBatteryLevel() {
   uint32_t mv = 0;
@@ -189,7 +157,10 @@ bool checkNetwork() {
     while (SerialAT.available()) res += (char)SerialAT.read();
   }
   
-  if (res.indexOf("+NETOPEN: 1") != -1) return true;
+  if (res.indexOf("+NETOPEN: 1") != -1) {
+    networkFailures = 0; // Resetear contador si la red está abierta
+    return true;
+  }
   
   Serial.println("\n" + getTimestamp() + " [NET] Red caída o cerrada. Intentando abrir...");
   sendAT("AT+NETOPEN", 5000);
@@ -202,7 +173,222 @@ bool checkNetwork() {
   while (millis() - t < 500) {
     while (SerialAT.available()) res += (char)SerialAT.read();
   }
-  return (res.indexOf("+NETOPEN: 1") != -1);
+  
+  if (res.indexOf("+NETOPEN: 1") != -1) {
+    networkFailures = 0;
+    return true;
+  }
+
+  networkFailures++;
+  Serial.printf("[NET] Fallo de red #%d de %d\n", networkFailures, MAX_NETWORK_FAILURES);
+  
+  if (networkFailures >= MAX_NETWORK_FAILURES) {
+    Serial.println("🚨 Demasiados fallos de red. Reiniciando ESP32...");
+    delay(1000);
+    esp_restart();
+  }
+
+  return false;
+}
+
+void syncTimeHTTP() {
+  if (!checkNetwork()) return;
+
+  Serial.println("[TIME] Obteniendo hora real vía HTTP API...");
+  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\""); // Asegurar DNS
+  sendAT("AT+HTTPTERM");
+  sendAT("AT+HTTPINIT");
+  sendAT("AT+HTTPPARA=\"URL\",\"http://worldtimeapi.org/api/timezone/Etc/UTC\"");
+  sendAT("AT+HTTPACTION=0"); // GET
+
+  // Esperar respuesta (máximo 10s para red lenta)
+  uint32_t t = millis();
+  String res = "";
+  while (millis() - t < 10000) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+    if (res.indexOf("+HTTPACTION:") != -1) break;
+  }
+
+  if (res.indexOf(",200,") != -1) {
+    int lastComma = res.lastIndexOf(",");
+    int len = res.substring(lastComma + 1).toInt();
+    if (len > 0) {
+      String readCmd = "AT+HTTPREAD=0," + String(len);
+      SerialAT.println(readCmd);
+      
+      String body = "";
+      t = millis();
+      while (millis() - t < 5000) {
+        while (SerialAT.available()) body += (char)SerialAT.read();
+        if (body.indexOf("datetime") != -1 && body.indexOf("}") != -1) break;
+      }
+
+      int dateIdx = body.indexOf("\"datetime\":\"");
+      if (dateIdx != -1) {
+        String iso = body.substring(dateIdx + 12, dateIdx + 31); // "2026-02-10T20:30:00"
+        struct tm tm_info;
+        memset(&tm_info, 0, sizeof(struct tm));
+        sscanf(iso.c_str(), "%d-%d-%dT%d:%d:%d", 
+               &tm_info.tm_year, &tm_info.tm_mon, &tm_info.tm_mday,
+               &tm_info.tm_hour, &tm_info.tm_min, &tm_info.tm_sec);
+        
+        tm_info.tm_year -= 1900;
+        tm_info.tm_mon -= 1;
+
+        // Configurar zona horaria de España (Península)
+        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0", 1);
+        tzset();
+        time_t t_now = mktime(&tm_info);
+        struct timeval tv = { .tv_sec = t_now };
+        settimeofday(&tv, NULL);
+        
+        // Actualizar el reloj interno del módem para que el backup sea válido
+        char cclk_cmd[64];
+        snprintf(cclk_cmd, sizeof(cclk_cmd), "AT+CCLK=\"%02d/%02d/%02d,%02d:%02d:%02d+00\"",
+                 tm_info.tm_year - 100, tm_info.tm_mon + 1, tm_info.tm_mday,
+                 tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
+        sendAT(cclk_cmd);
+
+        Serial.printf("[TIME] Sincronización HTTP Exitosa (UTC): %s\n", iso.c_str());
+      }
+    }
+  } else {
+    Serial.printf("[TIME] Error HTTP: %s\n", res.c_str());
+  }
+  sendAT("AT+HTTPTERM");
+}
+
+void syncTimeNTP() {
+  if (!checkNetwork()) return;
+  Serial.println("[TIME] Sincronizando vía NTP...");
+  sendAT("AT+CNTP=\"pool.ntp.org\",0");
+  sendAT("AT+CNTP");
+  delay(2000);
+}
+
+void syncTimeCell() {
+  if (!checkNetwork()) return;
+  Serial.println("[TIME] Obteniendo hora de la red celular...");
+  // AT+CLBS=1,1 devuelve lat,lon,precision,date,time
+  SerialAT.println("AT+CLBS=1,1");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 5000) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+    if (res.indexOf("+CLBS:") != -1) break;
+  }
+
+  int lastComma = res.lastIndexOf(",");
+  if (lastComma != -1) {
+    // Formato: ...precision,YYYY/MM/DD,HH:MM:SS
+    int dateComma = res.lastIndexOf(",", lastComma - 1);
+    if (dateComma != -1) {
+      String datePart = res.substring(dateComma + 1, lastComma);
+      String timePart = res.substring(lastComma + 1);
+      timePart.trim();
+      
+      struct tm tm_info;
+      memset(&tm_info, 0, sizeof(struct tm));
+      int yy, mm, dd, hh, min, ss;
+      if (sscanf(datePart.c_str(), "%d/%d/%d", &yy, &mm, &dd) == 3 &&
+          sscanf(timePart.c_str(), "%d:%d:%d", &hh, &min, &ss) == 3) {
+        tm_info.tm_year = yy - 1900;
+        tm_info.tm_mon = mm - 1;
+        tm_info.tm_mday = dd;
+        tm_info.tm_hour = hh;
+        tm_info.tm_min = min;
+        tm_info.tm_sec = ss;
+
+        setenv("TZ", "UTC0", 1);
+        tzset();
+        time_t t_now = mktime(&tm_info);
+        struct timeval tv = { .tv_sec = t_now };
+        settimeofday(&tv, NULL);
+        Serial.printf("[TIME] Sincronización Celular Exitosa: %02d:%02d:%02d\n", hh, min, ss);
+      }
+    }
+  }
+}
+
+void syncNetworkTime() {
+  // 1. Intentar GPS
+  if (gps_get_lat() != 0) {
+    String gpsTime = gps_get_time();
+    if (gpsTime.length() > 18) {
+      struct tm tm_info;
+      memset(&tm_info, 0, sizeof(struct tm));
+      int yy, mm, dd, hh, min, ss;
+      if (sscanf(gpsTime.c_str(), "%d-%d-%dT%d:%d:%d", &yy, &mm, &dd, &hh, &min, &ss) == 6) {
+        tm_info.tm_year = yy - 1900;
+        tm_info.tm_mon = mm - 1;
+        tm_info.tm_mday = dd;
+        tm_info.tm_hour = hh;
+        tm_info.tm_min = min;
+        tm_info.tm_sec = ss;
+        
+        setenv("TZ", "UTC0", 1);
+        tzset();
+        time_t t_now = mktime(&tm_info);
+        struct timeval tv = { .tv_sec = t_now };
+        settimeofday(&tv, NULL);
+        Serial.println("[TIME] Sincronizado mediante GPS.");
+        return;
+      }
+    }
+  }
+
+  // 2. Intentar Cell Network (Más rápido que HTTP)
+  syncTimeCell();
+
+  // 3. Intentar HTTP API
+  if (time(NULL) < 1700000000) syncTimeHTTP();
+
+  // 4. NTP Backup
+  if (time(NULL) < 1700000000) syncTimeNTP();
+
+  // 5. Final Backup: Módem (AT+CCLK)
+  if (time(NULL) < 1700000000) {
+    // Limpiar buffer antes de pedir la hora (como en OLD)
+    while (SerialAT.available()) SerialAT.read();
+    
+    SerialAT.println("AT+CCLK?");
+    String res = "";
+    uint32_t t = millis();
+    while (millis() - t < 1500) {
+      while (SerialAT.available()) res += (char)SerialAT.read();
+      if (res.indexOf("OK") != -1) break;
+    }
+    
+    int start = res.indexOf("\"");
+    int end = res.lastIndexOf("\"");
+    if (start != -1 && end != -1 && end > start) {
+      String cclk = res.substring(start + 1, end); 
+      struct tm tm_info;
+      memset(&tm_info, 0, sizeof(struct tm));
+      int yy, mm, dd, hh, min, ss;
+      if (sscanf(cclk.c_str(), "%d/%d/%d,%d:%d:%d", &yy, &mm, &dd, &hh, &min, &ss) == 6) {
+        // Validar que no sea 00:00:00 (error transitorio de OLD)
+        if (hh == 0 && min == 0 && ss == 0 && yy == 0) {
+           Serial.println("[TIME] CCLK devolvió 00:00:00, descartando.");
+           return;
+        }
+        
+        tm_info.tm_year = yy + 100; 
+        tm_info.tm_mon = mm - 1;
+        tm_info.tm_mday = dd;
+        tm_info.tm_hour = hh;
+        tm_info.tm_min = min;
+        tm_info.tm_sec = ss;
+        
+        setenv("TZ", "UTC0", 1);
+        tzset();
+        time_t t_now = mktime(&tm_info);
+        struct timeval tv = { .tv_sec = t_now };
+        settimeofday(&tv, NULL);
+        Serial.println("[TIME] Sincronización por Módem completa.");
+      }
+    }
+  }
 }
 
 void sendTelemetry() {
@@ -230,9 +416,6 @@ void sendTelemetry() {
   sendAT(ud.c_str());
 
   // ---------- BODY ----------
-  gps_update(); 
-  // can_update() ahora se gestiona exclusivamente en la tarea canBusTask (Core 0)
-  
   float finalLat = gps_get_lat();
   float finalLon = gps_get_lon();
   
@@ -246,29 +429,12 @@ void sendTelemetry() {
   }
   
   String timestamp = getCurrentISO8601();
-
-  // ---------- TRAYECTO LOGIC ----------
-  uint32_t now_ms = millis();
-  time_t now_unix;
-  time(&now_unix);
   
-  // Si hay actividad CAN reciente (< 60s), el trayecto está activo
-  if (lastCanActivityTime > 0 && (now_ms - lastCanActivityTime < 60000)) {
-    if (!isTripActive) {
-      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO por actividad CAN.");
-      isTripActive = true;
-      tripStartTime = now_unix;
-      tripEndTime = 0;
-      tripDuration = 0;
-    }
+  // Calcular duración si el trayecto está activo
+  if (isTripActive) {
+    time_t now_unix;
+    time(&now_unix);
     tripDuration = (uint32_t)(now_unix - tripStartTime);
-  } else {
-    if (isTripActive) {
-      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto FINALIZADO por inactividad CAN (>60s).");
-      isTripActive = false;
-      tripEndTime = now_unix;
-      tripDuration = (uint32_t)(tripEndTime - tripStartTime);
-    }
   }
 
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
@@ -278,8 +444,8 @@ void sendTelemetry() {
                 ",\"location_type\":\"" + locType + "\"" +
                 ",\"is_trip_active\":" + (isTripActive ? "true" : "false") +
                 ",\"trip_duration\":" + String(tripDuration) +
-                ",\"trip_start\":\"" + formatISO8601(tripStartTime) + "\"" +
-                ",\"trip_end\":\"" + formatISO8601(tripEndTime) + "\"";
+                ",\"trip_start\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") +
+                ",\"trip_end\":" + (tripEndTime > 0 ? "\"" + formatISO8601(tripEndTime) + "\"" : "null");
   
   if (timestamp != "") {
     body += ",\"timestamp\":\"" + timestamp + "\"";
@@ -353,8 +519,9 @@ void canBusTask(void *pvParameters) {
       lastHeartbeat = millis();
     }
     
-    // Envío de latido de hora (ID 0x510) cada segundo
-    if (millis() - lastTaskCanTimeSend > 1000) {
+    /* 
+    // Envío de latido de hora (ID 0x510) cada 200ms (como en OLD)
+    if (millis() - lastTaskCanTimeSend > 200) {
       time_t now;
       struct tm ti;
       time(&now);
@@ -365,6 +532,7 @@ void canBusTask(void *pvParameters) {
       }
       lastTaskCanTimeSend = millis();
     }
+    */
     vTaskDelay(pdMS_TO_TICKS(10)); // Pequeña pausa para no saturar el core
   }
 }
@@ -383,6 +551,9 @@ void setup() {
   pinMode(BOARD_POWERON_PIN, OUTPUT);
   digitalWrite(BOARD_POWERON_PIN, HIGH);
 
+  // Asegurar que el pin 32 (CS de SD en Lilygo) no esté bloqueando el CAN
+  pinMode(32, INPUT_PULLUP); 
+
   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
   delay(100);
@@ -394,8 +565,8 @@ void setup() {
   gps_setup();
   
   if (can_setup(CAN_RX_PIN, CAN_TX_PIN)) {
-    Serial.println(getTimestamp() + " [CAN] OK. Iniciando Tarea Independiente...");
-    xTaskCreatePinnedToCore(canBusTask, "CAN_Task", 4096, NULL, 5, NULL, 0); // Core 0
+    Serial.println(getTimestamp() + " [CAN] OK. Ejecutando en Loop principal...");
+    // xTaskCreatePinnedToCore(canBusTask, "CAN_Task", 4096, NULL, 5, NULL, 0); // Core 0 desactivado para test
   } else {
     Serial.println(getTimestamp() + " [ERROR] Falló inicialización CAN");
   }
@@ -419,10 +590,10 @@ void setup() {
   sendAT("AT+NETOPEN", 5000);
   delay(2000);
   sendAT("AT+IPADDR");
-  sendAT("AT+CNTP=\"pool.ntp.org\",0"); // Opcional: Sincronizar NTP también
-  sendAT("AT+CLBSCFG=1,3");             // Configurar LBS para máxima precisión
+  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\""); // DNS de Google/Cloudflare (como en OLD)
+  sendAT("AT+CLBSCFG=1,3");             
+  
   syncNetworkTime();
-  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
 
   // ---------- SSL ----------
   sendAT("AT+CSSLCFG=\"sslversion\",0,4");      // TLS 1.2
@@ -439,7 +610,7 @@ uint32_t lastCanTimeSend = 0; // Para el loop principal (si se usa)
 const uint32_t canTimeInterval = 200; // Enviar trama CAN cada 200ms
 uint32_t lastTimeSync = 0;
 const uint32_t syncInterval = 3600000; // Re-sincronizar hora cada 1 hora
-uint32_t lastCanActivity = 0;
+uint32_t lastGeneralActivity = 0; // Para control de reposo (CAN + Movimiento)
 
 void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
   Serial.println("\n" + getTimestamp() + " [SLEEP] " + reason);
@@ -497,17 +668,8 @@ void sendTripSummary() {
   String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
   sendAT(ud.c_str());
 
-  char startTimeStr[25];
-  struct tm ti;
-  localtime_r(&tripStartTime, &ti);
-  strftime(startTimeStr, sizeof(startTimeStr), "%Y-%m-%dT%H:%M:%S", &ti);
-
-  char endTimeStr[25];
-  localtime_r(&now, &ti);
-  strftime(endTimeStr, sizeof(endTimeStr), "%Y-%m-%dT%H:%M:%S", &ti);
-
-  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":\"" + String(startTimeStr) + 
-                "\",\"end_time\":\"" + String(endTimeStr) + "\",\"distance\":" + String(tripDistance, 2) + 
+  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") + 
+                ",\"end_time\":" + (now > 0 ? "\"" + formatISO8601(now) + "\"" : "null") + ",\"distance\":" + String(tripDistance, 2) + 
                 ",\"avg_speed\":" + String(avgSpeed, 2) + ",\"duration\":" + String(duration) + 
                 ",\"consumption\":" + String(consumptionA + consumptionB) + 
                 ",\"start_battery_level\":" + String(tripStartBatA) + 
@@ -536,20 +698,18 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2) {
 }
 
 void loop() {
+  can_update(); 
   gps_update(); 
-  // can_update() ahora corre en su propia tarea (Core 0)
 
-  bool hasCanData = (batA.soc != -1 || batB.soc != -1);
+  // Verificar actividad CAN (lastCanActivityTime se actualiza en can_decoder.h)
+  bool hasCanData = (lastCanActivityTime > 0 && (millis() - lastCanActivityTime < 5000));
 
   if (hasCanData) {
-    lastCanActivity = millis();
-    
     // INICIO DE TRAYECTO
     if (!isTripActive) {
       float startLat = gps_get_lat();
       float startLon = gps_get_lon();
       
-      // Si no hay GPS, intentamos LBS para no perder el inicio
       if (startLat == 0) {
         updateLBS();
         startLat = lbsLat;
@@ -558,10 +718,11 @@ void loop() {
 
       isTripActive = true;
       time(&tripStartTime);
+      tripEndTime = 0; // Resetear fin
       tripStartLat = startLat;
       tripStartLon = startLon;
-      tripStartBatA = batA.soc;
-      tripStartBatB = batB.soc;
+      tripStartBatA = (batA.soc != -1) ? batA.soc : -1;
+      tripStartBatB = (batB.soc != -1) ? batB.soc : -1;
       tripTotalSpeed = 0;
       tripPointsCount = 0;
       tripDistance = 0;
@@ -585,11 +746,14 @@ void loop() {
     
     tripTotalSpeed += currentSpeed;
     tripPointsCount++;
+    lastGeneralActivity = millis(); // Hay actividad CAN
   }
 
   // FIN DE TRAYECTO (1 minuto sin CAN)
-  if (isTripActive && (millis() - lastCanActivity > 60000)) {
+  if (isTripActive && (millis() - lastCanActivityTime > 60000)) {
     Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto FINALIZADO por inactividad CAN.");
+    time(&tripEndTime);
+    tripDuration = (uint32_t)(tripEndTime - tripStartTime);
     sendTripSummary();
     isTripActive = false;
   }
@@ -603,11 +767,11 @@ void loop() {
   // Si la moto está apagada (no hay CAN) pero se está moviendo (GPS > 2km/h)
   bool isMoving = gps_get_speed() > 2.0;
   if (isMoving) {
-    lastCanActivity = millis(); // Resetear inactividad si hay movimiento
+    lastGeneralActivity = millis(); // Resetear inactividad si hay movimiento
   }
 
   // 3. REPOSO INTELIGENTE (Inactividad de 5 minutos)
-  if (millis() > 300000 && (millis() - lastCanActivity > 300000)) {
+  if (millis() > 300000 && (millis() - lastGeneralActivity > 300000)) {
     // Si la batería está sana (>15%), despertamos cada 30 min para seguridad
     uint32_t sleepTime = 1800; // 30 minutos
     enterDeepSleep("Inactividad detectada - Modo Vigilancia", sleepTime);
@@ -619,7 +783,20 @@ void loop() {
     lastTimeSync = millis();
   }
 
-  // can_send_time() ahora corre en su propia tarea (Core 0)
+  /* 
+  // Enviar trama de hora cada 200ms
+  if (millis() - lastCanTimeSend > canTimeInterval) {
+    time_t now;
+    struct tm ti;
+    time(&now);
+    localtime_r(&now, &ti);
+    
+    if (ti.tm_year > 120) { // Solo si la hora está sincronizada
+      can_send_time((uint8_t)ti.tm_hour, (uint8_t)ti.tm_min, (uint8_t)ti.tm_sec);
+    }
+    lastCanTimeSend = millis();
+  }
+  */
 
   if (millis() - lastSend > sendInterval) {
     sendTelemetry();

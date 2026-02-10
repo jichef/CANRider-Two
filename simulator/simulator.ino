@@ -45,6 +45,10 @@ void setup() {
   // Volvemos a NO_ACK: Envía tramas sin esperar confirmación
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)TX_GPIO, (gpio_num_t)RX_GPIO, TWAI_MODE_NO_ACK);
   g_config.alerts_enabled = TWAI_ALERT_ALL;
+  
+  // Aumentar colas (coincidiendo con el receptor)
+  g_config.tx_queue_len = 20;
+  g_config.rx_queue_len = 20;
 
   twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS(); 
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
@@ -180,7 +184,13 @@ void checkIncomingCAN() {
   twai_message_t msg;
   while (twai_receive(&msg, 0) == ESP_OK) {
     if (msg.identifier == 0x510) {
-      Serial.printf("[TIME] Latido recibido -> %02d:%02d:%02d\n", msg.data[1], msg.data[2], msg.data[0]);
+      if (msg.data[0] == 0xA1) {
+        // Nuevo formato: Firma A1, Seq, 01, 00, 70, HH, MM, 00
+        Serial.printf("[TIME] Latido recibido -> %02d:%02d (Firma: 0x%02X, Seq: %d)\n", 
+                      msg.data[5], msg.data[6], msg.data[0], msg.data[1]);
+      } else {
+        Serial.println("[TIME] Recibida trama 0x510 con formato DESCONOCIDO");
+      }
     } else {
       Serial.printf("[CAN] Recibido ID: 0x%03X\n", msg.identifier);
     }
