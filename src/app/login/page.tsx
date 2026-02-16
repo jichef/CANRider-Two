@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import { ShieldCheck, Zap, Lock, Mail } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('jichef@gmail.com');
-  const [password, setPassword] = useState('abreteyaYA11');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
