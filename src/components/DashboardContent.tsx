@@ -39,6 +39,8 @@ const Map = dynamic(() => import('@/components/Map'), {
   )
 });
 
+import CanConfigPanel from './CanConfigPanel';
+
 export default function DashboardContent() {
   const supabase = createClient();
   const [telemetry, setTelemetry] = useState<any>(null);
@@ -51,6 +53,7 @@ export default function DashboardContent() {
   const [isConfigured, setIsConfigured] = useState(true);
   const [isStale, setIsStale] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showCanConfig, setShowCanConfig] = useState(false);
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 5;
 
@@ -329,6 +332,18 @@ export default function DashboardContent() {
           
           <div className="flex flex-wrap items-center gap-4">
             <button 
+              onClick={() => setShowCanConfig(!showCanConfig)}
+              className={`flex items-center gap-2 px-6 py-2 rounded-xl border transition-all duration-500 font-bold tracking-widest text-[10px] uppercase ${
+                showCanConfig 
+                  ? 'bg-blue-500 text-black border-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' 
+                  : 'bg-zinc-900/50 text-blue-500 border-white/10 hover:border-blue-500/50 hover:bg-zinc-900'
+              }`}
+            >
+              <Zap size={14} className={showCanConfig ? 'animate-pulse' : ''} />
+              Configurar CAN
+            </button>
+
+            <button 
               onClick={() => setShowHistory(!showHistory)}
               className={`flex items-center gap-2 px-6 py-2 rounded-xl border transition-all duration-500 font-bold tracking-widest text-[10px] uppercase ${
                 showHistory 
@@ -407,6 +422,21 @@ export default function DashboardContent() {
             </div>
           ))}
         </div>
+
+        {/* Panel de Configuración CAN (Overlay) */}
+        {showCanConfig && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+              <button 
+                onClick={() => setShowCanConfig(false)}
+                className="absolute top-4 right-4 z-[110] p-2 bg-zinc-900 rounded-full text-white hover:bg-zinc-800 transition-all border border-white/10"
+              >
+                <XAxis size={20} /> {/* Usando un componente ya importado o similar para cerrar */}
+              </button>
+              <CanConfigPanel motorcycleId={telemetry?.motorcycle_id || '550e8400-e29b-41d4-a716-446655440000'} />
+            </div>
+          </div>
+        )}
 
         {/* Histórico y Gráficas */}
         {showHistory && (
