@@ -15,7 +15,8 @@ import {
   Calendar,
   Play,
   Flag,
-  ArrowRight
+  ArrowRight,
+  X
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useMemo } from 'react';
@@ -431,7 +432,7 @@ export default function DashboardContent() {
                 onClick={() => setShowCanConfig(false)}
                 className="absolute top-4 right-4 z-[110] p-2 bg-zinc-900 rounded-full text-white hover:bg-zinc-800 transition-all border border-white/10"
               >
-                <XAxis size={20} /> {/* Usando un componente ya importado o similar para cerrar */}
+                <X size={20} />
               </button>
               <CanConfigPanel motorcycleId={telemetry?.motorcycle_id || '550e8400-e29b-41d4-a716-446655440000'} />
             </div>
