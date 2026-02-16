@@ -52,29 +52,28 @@ void decodeCANFrame(const twai_message_t &msg) {
 
   lastCanActivityTime = millis();
 
-  // Determinar si es Batería A o B
-  // Si el ID coincide directamente con la regla, es Bat A. 
-  // Si coincide con ID + offset, es Bat B.
-  
-  auto processRule = [&](const CANRule &rule, float &targetA, float &targetB) {
+  // Función lambda interna para procesar una regla contra un valor específico
+  auto checkAndProcess = [&](const CANRule &rule, float &target) {
       if (id == rule.id) {
-          targetA = extractValueFromFrame(data, rule);
-      } else if (id == rule.id + manualConfig.bat_b_offset) {
-          targetB = extractValueFromFrame(data, rule);
+          target = extractValueFromFrame(data, rule);
+          return true;
       }
+      return false;
   };
 
-  processRule(manualConfig.voltage, batA.voltage, batB.voltage);
-  processRule(manualConfig.current, batA.current, batB.current);
-  processRule(manualConfig.soc, batA.soc, batB.soc); // Nota: soc es float aquí internamente por extractValue
-  
-  // Caso especial SOC: convertir a int si es necesario
-  if (id == manualConfig.soc.id) batA.soc = (int)extractValueFromFrame(data, manualConfig.soc);
-  if (id == manualConfig.soc.id + manualConfig.bat_b_offset) batB.soc = (int)extractValueFromFrame(data, manualConfig.soc);
+  // Procesar Batería A
+  checkAndProcess(manualConfig.batA.voltage, batA.voltage);
+  checkAndProcess(manualConfig.batA.current, batA.current);
+  if (id == manualConfig.batA.soc.id) batA.soc = (int)extractValueFromFrame(data, manualConfig.batA.soc);
+  checkAndProcess(manualConfig.batA.temp, batA.temp);
 
-  processRule(manualConfig.temp, batA.temp, batB.temp);
+  // Procesar Batería B (Independiente)
+  checkAndProcess(manualConfig.batB.voltage, batB.voltage);
+  checkAndProcess(manualConfig.batB.current, batB.current);
+  if (id == manualConfig.batB.soc.id) batB.soc = (int)extractValueFromFrame(data, manualConfig.batB.soc);
+  checkAndProcess(manualConfig.batB.temp, batB.temp);
 
-  // Lógica fija mínima para carga (esto también podría ser una regla en el futuro)
+  // Lógica fija mínima para carga
   if (id == 0x506 || id == 0x507) {
       BatteryData &bat = (id == 0x507) ? batB : batA;
       bat.is_charging = (data[0] & 0x01) || (data[1] & 0x10);
@@ -107,19 +106,24 @@ void can_update() {
 uint8_t can_tx_seq = 0; 
 bool can_send_time(uint8_t hour, uint8_t minute, uint8_t second = 0) {
   twai_message_t message;
-  message.identifier = 0x510;
+  message.identifier = manualConfig.time_tx_id;
   message.extd = 0;
   message.rtr = 0;
   message.data_length_code = 8;
   
+  // Trama base (se puede hacer más configurable aún en el futuro)
   message.data[0] = 0xA1;
   message.data[1] = can_tx_seq++;
   message.data[2] = 0x01;
   message.data[3] = 0x00;
   message.data[4] = 0x70;
-  message.data[5] = hour;
-  message.data[6] = minute;
+  message.data[5] = 0x00;
+  message.data[6] = 0x00;
   message.data[7] = 0x00;
+
+  // Inyectar hora y minuto en los bytes configurados
+  if (manualConfig.time_hour_byte < 8) message.data[manualConfig.time_hour_byte] = hour;
+  if (manualConfig.time_min_byte < 8)  message.data[manualConfig.time_min_byte] = minute;
   
   esp_err_t err = twai_transmit(&message, pdMS_TO_TICKS(10));
   return err == ESP_OK;

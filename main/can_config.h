@@ -13,23 +13,40 @@ struct CANRule {
     bool big_endian;     // Orden de los bytes
 };
 
-// Configuración manual para los parámetros principales
-struct CANConfig {
+// Configuración manual para una batería completa
+struct BatteryConfig {
     CANRule voltage;
     CANRule current;
     CANRule soc;
     CANRule temp;
-    
-    // Reglas para determinar si es Batería A o B
-    uint32_t bat_b_offset = 1; // Por defecto ID_B = ID_A + 1
 };
 
-// Valores por defecto (se pueden cargar desde memoria en el futuro)
+// Configuración global del sistema
+struct CANConfig {
+    BatteryConfig batA;
+    BatteryConfig batB;
+    uint32_t time_tx_id = 0x510;  // ID configurable para inyección de hora
+    uint8_t time_hour_byte = 5;    // Byte donde va la hora (0-7)
+    uint8_t time_min_byte = 6;     // Byte donde van los minutos (0-7)
+};
+
+// Valores por defecto
 CANConfig manualConfig = {
-    .voltage = { .id = 0x504, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true },
-    .current = { .id = 0x504, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true },
-    .soc     = { .id = 0x540, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true },
-    .temp    = { .id = 0x540, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true }
+    .batA = {
+        .voltage = { .id = 0x504, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true },
+        .current = { .id = 0x504, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true },
+        .soc     = { .id = 0x540, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true },
+        .temp    = { .id = 0x540, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true }
+    },
+    .batB = {
+        .voltage = { .id = 0x505, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true },
+        .current = { .id = 0x505, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true },
+        .soc     = { .id = 0x541, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true },
+        .temp    = { .id = 0x541, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true }
+    },
+    .time_tx_id = 0x510,
+    .time_hour_byte = 5,
+    .time_min_byte = 6
 };
 
 #endif

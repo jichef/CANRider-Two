@@ -16,10 +16,12 @@ import {
   Play,
   Flag,
   ArrowRight,
-  X
+  X,
+  LogOut
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { 
   AreaChart, 
@@ -44,6 +46,7 @@ import CanConfigPanel from './CanConfigPanel';
 
 export default function DashboardContent() {
   const supabase = createClient();
+  const router = useRouter();
   const [telemetry, setTelemetry] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
   const [historyData, setHistoryData] = useState<any[]>([]);
@@ -56,6 +59,13 @@ export default function DashboardContent() {
   const [showHistory, setShowHistory] = useState(false);
   const [showCanConfig, setShowCanConfig] = useState(false);
   const [page, setPage] = useState(1);
+
+  const handleLogout = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    router.refresh();
+    router.push('/login');
+  };
   const ITEMS_PER_PAGE = 5;
 
   // Madrid por defecto si no hay datos
@@ -385,6 +395,13 @@ export default function DashboardContent() {
               <div className="pr-4 text-xs font-mono text-zinc-500">
                 {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
               </div>
+              <button 
+                onClick={handleLogout}
+                className="p-2 rounded-xl bg-red-500/10 text-red-500/70 border border-red-500/20 hover:bg-red-500/20 hover:text-red-500 transition-all ml-2"
+                title="Cerrar sesión"
+              >
+                <LogOut size={14} />
+              </button>
             </div>
           </div>
         </header>
