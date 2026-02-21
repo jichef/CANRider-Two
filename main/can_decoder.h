@@ -22,6 +22,10 @@ BatteryData batB;
 // Declaración externa para rastrear actividad CAN
 extern uint32_t lastCanActivityTime;
 
+#ifndef CAN_ACTIVITY_LED_PIN
+#define CAN_ACTIVITY_LED_PIN 13
+#endif
+
 // Función auxiliar para extraer valores basados en reglas
 float extractValueFromFrame(const uint8_t *data, const CANRule &rule) {
     uint32_t rawValue = 0;
@@ -51,6 +55,11 @@ void decodeCANFrame(const twai_message_t &msg) {
   const uint8_t *data = msg.data;
 
   lastCanActivityTime = millis();
+  
+  // Parpadeo rápido del LED al recibir datos
+  static bool ledState = false;
+  ledState = !ledState;
+  digitalWrite(CAN_ACTIVITY_LED_PIN, ledState);
 
   // Función lambda interna para procesar una regla contra un valor específico
   auto checkAndProcess = [&](const CANRule &rule, float &target) {

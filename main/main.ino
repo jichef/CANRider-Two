@@ -1,4 +1,5 @@
-#define LILYGO_T_A7670
+// #define LILYGO_T_A7670
+#define LILYGO_SIM7000G
 #include <time.h>
 #include <sys/time.h>
 #include "AT/utilities.h"
@@ -12,6 +13,10 @@
 #endif
 #ifndef CAN_TX_PIN
 #define CAN_TX_PIN 14
+#endif
+
+#ifndef CAN_ACTIVITY_LED_PIN
+#define CAN_ACTIVITY_LED_PIN 13
 #endif
 
 /*
@@ -150,6 +155,22 @@ void updateLBS() {
 }
 
 bool checkNetwork() {
+#ifdef LILYGO_SIM7000G
+  SerialAT.println("AT+CNACT?");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 500) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+  }
+  
+  if (res.indexOf("+CNACT: 1") != -1) {
+    networkFailures = 0;
+    return true;
+  }
+  
+  Serial.println("\n" + getTimestamp() + " [NET] SIM7000 Red caída. Intentando abrir...");
+  sendAT("AT+CNACT=1,\"" APN "\"", 5000);
+#else
   SerialAT.println("AT+NETOPEN?");
   String res = "";
   uint32_t t = millis();
@@ -164,17 +185,26 @@ bool checkNetwork() {
   
   Serial.println("\n" + getTimestamp() + " [NET] Red caída o cerrada. Intentando abrir...");
   sendAT("AT+NETOPEN", 5000);
+#endif
   delay(2000);
   
   // Verificar si se abrió tras el intento
+#ifdef LILYGO_SIM7000G
+  SerialAT.println("AT+CNACT?");
+#else
   SerialAT.println("AT+NETOPEN?");
+#endif
   res = "";
   t = millis();
   while (millis() - t < 500) {
     while (SerialAT.available()) res += (char)SerialAT.read();
   }
   
+#ifdef LILYGO_SIM7000G
+  if (res.indexOf("+CNACT: 1") != -1) {
+#else
   if (res.indexOf("+NETOPEN: 1") != -1) {
+#endif
     networkFailures = 0;
     return true;
   }
@@ -397,16 +427,23 @@ void sendTelemetry() {
   // ---------- HTTP CONFIG ----------
   sendAT("AT+HTTPTERM");
   sendAT("AT+HTTPINIT");
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+HTTPPARA=\"CID\",1");
+  sendAT("AT+HTTPSSL=1");
+  // Intentamos añadir cabeceras individuales si el firmware lo permite
+  String h1 = "AT+HTTPPARA=\"HEADER\",\"apikey: " + String(SUPABASE_KEY) + "\"";
+  sendAT(h1.c_str());
+  String h2 = "AT+HTTPPARA=\"HEADER\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
+  sendAT(h2.c_str());
+#else
   sendAT("AT+HTTPPARA=\"SSLCFG\",0");
+#endif
 
   String fullUrl = String(SUPABASE_URL) + "?apikey=" + String(SUPABASE_KEY);
   String urlCmd = "AT+HTTPPARA=\"URL\",\"" + fullUrl + "\"";
   sendAT(urlCmd.c_str());
 
   sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
-
-  String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
-  sendAT(ud.c_str());
 
   // ---------- BODY ----------
   float finalLat = gps_get_lat();
@@ -544,8 +581,13 @@ void setup() {
   Serial.println("\n" + getTimestamp() + " [BOOT] CanRiderONE");
 
   // ---------- POWER MODEM ----------
+#ifdef BOARD_POWERON_PIN
   pinMode(BOARD_POWERON_PIN, OUTPUT);
   digitalWrite(BOARD_POWERON_PIN, HIGH);
+#endif
+  
+  pinMode(CAN_ACTIVITY_LED_PIN, OUTPUT);
+  digitalWrite(CAN_ACTIVITY_LED_PIN, LOW); // LED apagado inicialmente
 
   // Asegurar que el pin 32 (CS de SD en Lilygo) no esté bloqueando el CAN
   pinMode(32, INPUT_PULLUP); 
@@ -557,6 +599,9 @@ void setup() {
   delay(2000);
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
 
+#ifndef MODEM_BAUDRATE
+#define MODEM_BAUDRATE 115200
+#endif
   SerialAT.begin(MODEM_BAUDRATE, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
   gps_setup();
   
@@ -578,24 +623,43 @@ void setup() {
 
   sendAT("ATE0");
   sendAT("AT+CPIN?");
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+CGNSPWR=1"); // Encender GPS interno
+#endif
 
   // ---------- NETWORK ----------
   sendAT("AT+CTZU=1"); // Automatic Time Zone Update
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+CNACT=1,\"" APN "\"", 5000);
+#else
   sendAT("AT+CGDCONT=1,\"IP\",\"" APN "\"");
   sendAT("AT+CGACT=1,1");
   sendAT("AT+NETOPEN", 5000);
+#endif
   delay(2000);
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+CNACT?");
+#else
   sendAT("AT+IPADDR");
+#endif
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\""); // DNS de Google/Cloudflare (como en OLD)
   sendAT("AT+CLBSCFG=1,3");             
   
   syncNetworkTime();
 
   // ---------- SSL ----------
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+CSSLCFG=\"sslversion\",1,3");      // TLS 1.2, Perfil 1
+  sendAT("AT+CSSLCFG=\"authmode\",1,0");        // Sin CA
+  sendAT("AT+CSSLCFG=\"ignorertctime\",1,1");   // Sin RTC
+  sendAT("AT+CSSLCFG=\"sni\",1,\"jmisxaxqwtkudvkytkha.supabase.co\"");
+#else
   sendAT("AT+CSSLCFG=\"sslversion\",0,4");      // TLS 1.2
   sendAT("AT+CSSLCFG=\"authmode\",0,0");        // Sin CA
   sendAT("AT+CSSLCFG=\"enableSNI\",0,1");       // Obligatorio
   sendAT("AT+CSSLCFG=\"ignorelocaltime\",0,1"); // Sin RTC
+  sendAT("AT+CSSLCFG=\"sni\",1,\"jmisxaxqwtkudvkytkha.supabase.co\"");
+#endif
 
   Serial.println("\n" + getTimestamp() + " [READY] Sistema iniciado.");
 }
@@ -614,7 +678,9 @@ void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
   // Apagar módem de forma controlada
   sendAT("AT+CPOWD=1"); 
   delay(2000);
+#ifdef BOARD_POWERON_PIN
   digitalWrite(BOARD_POWERON_PIN, LOW);
+#endif
 
   if (seconds > 0) {
     Serial.printf("Despertando en %u segundos para reporte de seguridad...\n", seconds);
@@ -650,8 +716,16 @@ void sendTripSummary() {
 
   // ---------- HTTP CONFIG ----------
   sendAT("AT+HTTPTERM");
+  sendAT("AT+HTTPSSL=1");
+sendAT("AT+HTTPPARA=\"CID\",1");
+sendAT("AT+HTTPPARA=\"SSLCFG\",1");
   sendAT("AT+HTTPINIT");
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+HTTPPARA=\"CID\",1");
+  sendAT("AT+HTTPSSL=1");
+#else
   sendAT("AT+HTTPPARA=\"SSLCFG\",0");
+#endif
 
   String url = String(SUPABASE_URL);
   url.replace("telemetry", "trips");
@@ -661,7 +735,12 @@ void sendTripSummary() {
   sendAT(urlCmd.c_str());
 
   sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
+#ifdef LILYGO_SIM7000G
+  String authHeader = "Authorization: Bearer " + String(SUPABASE_KEY);
+  String ud = "AT+HTTPPARA=\"HEADER\",\"" + authHeader + "\"";
+#else
   String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
+#endif
   sendAT(ud.c_str());
 
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") + 
@@ -701,6 +780,11 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2) {
 void loop() {
   can_update(); 
   gps_update(); 
+
+  // Asegurar que el LED se apague si no hay actividad CAN reciente
+  if (millis() - lastCanActivityTime > 100) {
+    digitalWrite(CAN_ACTIVITY_LED_PIN, LOW);
+  }
 
   // Verificar actividad CAN (lastCanActivityTime se actualiza en can_decoder.h)
   bool hasCanData = (lastCanActivityTime > 0 && (millis() - lastCanActivityTime < 5000));
