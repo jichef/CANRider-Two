@@ -148,13 +148,18 @@ export default function DashboardContent() {
       }
 
       // Cargar viajes con paginación
-      const { data: tripData } = await supabase
+      const { data: tripData, error: tripError } = await supabase
         .from('trips')
         .select('*')
+        .eq('motorcycle_id', telemetry?.motorcycle_id || '550e8400-e29b-41d4-a716-446655440000')
         .order('start_time', { ascending: false })
         .range((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE - 1);
 
+      if (tripError) {
+        console.error('[Dashboard] Error loading trips:', tripError);
+      }
       if (tripData) {
+        console.log('[Dashboard] Loaded trips:', tripData.length, 'with theft_detected:', tripData.filter((t: any) => t.is_theft_detected).length);
         setTrips(tripData);
       }
 
