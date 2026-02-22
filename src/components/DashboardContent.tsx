@@ -43,6 +43,7 @@ const Map = dynamic(() => import('@/components/Map'), {
 });
 
 import CanConfigPanel from './CanConfigPanel';
+import TheftEventsPanel from './TheftEventsPanel';
 
 export default function DashboardContent() {
   const supabase = createClient();
@@ -455,6 +456,11 @@ export default function DashboardContent() {
             </div>
           </div>
         )}
+
+        {/* Panel de Eventos de Robo */}
+        <div className="mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <TheftEventsPanel motorcycleId={telemetry?.motorcycle_id || '550e8400-e29b-41d4-a716-446655440000'} />
+        </div>
 
         {/* Histórico y Gráficas */}
         {showHistory && (

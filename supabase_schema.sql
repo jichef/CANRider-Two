@@ -44,36 +44,69 @@ create table if not exists can_configurations (
   id uuid default gen_random_uuid() primary key,
   motorcycle_id text not null unique,
   
-  -- Regla Voltaje
-  v_id integer default 1284, -- 0x504
+  -- Batería A: Voltaje
+  v_id integer default 1284,
   v_start integer default 2,
   v_len integer default 2,
   v_factor float default 0.01,
   v_be boolean default true,
   
-  -- Regla Corriente
-  c_id integer default 1284, -- 0x504
+  -- Batería A: Corriente
+  c_id integer default 1284,
   c_start integer default 4,
   c_len integer default 2,
   c_factor float default 0.1,
   c_signed boolean default true,
   c_be boolean default true,
   
-  -- Regla SOC
-  s_id integer default 1344, -- 0x540
+  -- Batería A: SOC
+  s_id integer default 1344,
   s_start integer default 0,
   s_len integer default 1,
   s_factor float default 1.0,
   s_be boolean default true,
   
-  -- Regla Temperatura
-  t_id integer default 1344, -- 0x540
+  -- Batería A: Temperatura
+  t_id integer default 1344,
   t_start integer default 3,
   t_len integer default 1,
   t_factor float default 1.0,
   t_be boolean default true,
   
-  bat_b_offset integer default 1,
+  -- Batería B: Voltaje
+  vb_id integer default 1285,
+  vb_start integer default 2,
+  vb_len integer default 2,
+  vb_factor float default 0.01,
+  vb_be boolean default true,
+  
+  -- Batería B: Corriente
+  cb_id integer default 1285,
+  cb_start integer default 4,
+  cb_len integer default 2,
+  cb_factor float default 0.1,
+  cb_signed boolean default true,
+  cb_be boolean default true,
+  
+  -- Batería B: SOC
+  sb_id integer default 1345,
+  sb_start integer default 0,
+  sb_len integer default 1,
+  sb_factor float default 1.0,
+  sb_be boolean default true,
+  
+  -- Batería B: Temperatura
+  tb_id integer default 1345,
+  tb_start integer default 3,
+  tb_len integer default 1,
+  tb_factor float default 1.0,
+  tb_be boolean default true,
+  
+  -- Sistema: Inyección de hora en CAN
+  time_tx_id integer default 1296,
+  time_hour_byte integer default 5,
+  time_min_byte integer default 6,
+  
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 

@@ -30,23 +30,22 @@ struct CANConfig {
     uint8_t time_min_byte = 6;     // Byte donde van los minutos (0-7)
 };
 
-// Valores por defecto
-CANConfig manualConfig = {
-    .batA = {
-        .voltage = { .id = 0x504, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true },
-        .current = { .id = 0x504, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true },
-        .soc     = { .id = 0x540, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true },
-        .temp    = { .id = 0x540, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true }
-    },
-    .batB = {
-        .voltage = { .id = 0x505, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true },
-        .current = { .id = 0x505, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true },
-        .soc     = { .id = 0x541, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true },
-        .temp    = { .id = 0x541, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true }
-    },
-    .time_tx_id = 0x510,
-    .time_hour_byte = 5,
-    .time_min_byte = 6
-};
+CANConfig manualConfig;
+
+void initDefaultCanConfig() {
+  manualConfig.batA.voltage = { .id = 0x504, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true };
+  manualConfig.batA.current = { .id = 0x504, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true };
+  manualConfig.batA.soc     = { .id = 0x540, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true };
+  manualConfig.batA.temp    = { .id = 0x540, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true };
+  
+  manualConfig.batB.voltage = { .id = 0x505, .start_byte = 2, .length = 2, .factor = 0.01f, .is_signed = false, .big_endian = true };
+  manualConfig.batB.current = { .id = 0x505, .start_byte = 4, .length = 2, .factor = 0.1f,  .is_signed = true,  .big_endian = true };
+  manualConfig.batB.soc     = { .id = 0x541, .start_byte = 0, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true };
+  manualConfig.batB.temp    = { .id = 0x541, .start_byte = 3, .length = 1, .factor = 1.0f,  .is_signed = false, .big_endian = true };
+  
+  manualConfig.time_tx_id = 0x510;
+  manualConfig.time_hour_byte = 5;
+  manualConfig.time_min_byte = 6;
+}
 
 #endif

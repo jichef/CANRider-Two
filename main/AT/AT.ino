@@ -1,57 +1,37 @@
-#include <Arduino.h>
-#include <TinyGPS++.h>
+/*
+  Blink
 
-#define SerialAT   Serial1
-#define SerialGPS  Serial2
+  Turns an LED on for one second, then off for one second, repeatedly.
 
-#define BOARD_MODEM_RX_PIN 27
-#define BOARD_MODEM_TX_PIN 26
-#define BOARD_GPS_RX_PIN   22
-#define BOARD_GPS_TX_PIN   21
-#define BOARD_POWER_ON_PIN 12
-#define BOARD_MODEM_PWR_PIN 4
+  Most Arduinos have an on-board LED you can control. On the UNO, MEGA and ZERO
+  it is attached to digital pin 13, on MKR1000 on pin 6. LED_BUILTIN is set to
+  the correct LED pin independent of which board is used.
+  If you want to know what pin the on-board LED is connected to on your Arduino
+  model, check the Technical Specs of your board at:
+  https://docs.arduino.cc/hardware/
 
-TinyGPSPlus gps;
+  modified 8 May 2014
+  by Scott Fitzgerald
+  modified 2 Sep 2016
+  by Arturo Guadalupi
+  modified 8 Sep 2016
+  by Colby Newman
 
-void displayInfo();  // 👈 PROTOTIPO
+  This example code is in the public domain.
 
+  https://docs.arduino.cc/built-in-examples/basics/Blink/
+*/
+
+// the setup function runs once when you press reset or power the board
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
-
-  pinMode(BOARD_POWER_ON_PIN, OUTPUT);
-  digitalWrite(BOARD_POWER_ON_PIN, HIGH);
-
-  pinMode(BOARD_MODEM_PWR_PIN, OUTPUT);
-  digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
-  delay(100);
-  digitalWrite(BOARD_MODEM_PWR_PIN, HIGH);
-  delay(100);
-  digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
-
-  SerialAT.begin(115200, SERIAL_8N1, BOARD_MODEM_RX_PIN, BOARD_MODEM_TX_PIN);
-  SerialGPS.begin(9600, SERIAL_8N1, BOARD_GPS_RX_PIN, BOARD_GPS_TX_PIN);
-
-  Serial.println("A7670G + GPS externo (debug NMEA)");
+  // initialize digital pin LED_BUILTIN as an output.
+  pinMode(LED_BUILTIN, OUTPUT);
 }
 
+// the loop function runs over and over again forever
 void loop() {
-  while (SerialGPS.available()) {
-    char c = SerialGPS.read();
-    Serial.write(c);            // 👈 VER NMEA
-    gps.encode(c);
-  }
-
-  if (gps.location.isUpdated()) {
-    displayInfo();
-  }
-}
-
-void displayInfo() {
-  Serial.print("\nLAT: ");
-  Serial.print(gps.location.lat(), 6);
-  Serial.print(" LON: ");
-  Serial.print(gps.location.lng(), 6);
-  Serial.print(" SATS: ");
-  Serial.println(gps.satellites.value());
+  digitalWrite(LED_BUILTIN, HIGH);  // turn the LED on (HIGH is the voltage level)
+  delay(1000);                      // wait for a second
+  digitalWrite(LED_BUILTIN, LOW);   // turn the LED off by making the voltage LOW
+  delay(1000);                      // wait for a second
 }

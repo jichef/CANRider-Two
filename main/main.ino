@@ -1,11 +1,12 @@
-// #define LILYGO_T_A7670
-#define LILYGO_SIM7000G
+#define LILYGO_T_A7670
+// #define LILYGO_SIM7000G
 #include <time.h>
 #include <sys/time.h>
 #include "AT/utilities.h"
 #include "config.h"
 #include "gps.h"
 #include "can_decoder.h"
+#include "can_config_loader.h"
 
 // Definir pines CAN si no están definidos
 #ifndef CAN_RX_PIN
@@ -570,13 +571,17 @@ void canBusTask(void *pvParameters) {
   }
 }
 
+uint32_t lastCanConfigLoad = 0;
+const uint32_t canConfigLoadInterval = 21600000;
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // Configuración ADC para batería
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
+
+  initDefaultCanConfig();
 
   Serial.println("\n" + getTimestamp() + " [BOOT] CanRiderONE");
 
@@ -642,12 +647,15 @@ void setup() {
 #else
   sendAT("AT+IPADDR");
 #endif
-  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\""); // DNS de Google/Cloudflare (como en OLD)
+  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\"");
   sendAT("AT+CLBSCFG=1,3");             
   
   syncNetworkTime();
+  delay(2000);
 
-  // ---------- SSL ----------
+#ifndef LILYGO_SIM7000G
+  sendAT("AT+HTTPTERM", 3000);
+#endif
 #ifdef LILYGO_SIM7000G
   sendAT("AT+CSSLCFG=\"sslversion\",1,3");      // TLS 1.2, Perfil 1
   sendAT("AT+CSSLCFG=\"authmode\",1,0");        // Sin CA
@@ -661,16 +669,19 @@ void setup() {
   sendAT("AT+CSSLCFG=\"sni\",1,\"jmisxaxqwtkudvkytkha.supabase.co\"");
 #endif
 
+  loadCanConfigFromSupabase(VEHICLE_ID);
+  lastCanConfigLoad = millis();
+
   Serial.println("\n" + getTimestamp() + " [READY] Sistema iniciado.");
 }
 
 uint32_t lastSend = 0;
-const uint32_t sendInterval = 10000; // Enviar telemetría cada 10 segundos
-uint32_t lastCanTimeSend = 0; // Para el loop principal (si se usa)
-const uint32_t canTimeInterval = 200; // Enviar trama CAN cada 200ms
+const uint32_t sendInterval = 10000;
+uint32_t lastCanTimeSend = 0;
+const uint32_t canTimeInterval = 200;
 uint32_t lastTimeSync = 0;
-const uint32_t syncInterval = 3600000; // Re-sincronizar hora cada 1 hora
-uint32_t lastGeneralActivity = 0; // Para control de reposo (CAN + Movimiento)
+const uint32_t syncInterval = 3600000;
+uint32_t lastGeneralActivity = 0;
 
 void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
   Serial.println("\n" + getTimestamp() + " [SLEEP] " + reason);
@@ -699,6 +710,88 @@ float tripTotalSpeed = 0;
 uint32_t tripPointsCount = 0;
 float tripDistance = 0;
 float lastTripLat = 0, lastTripLon = 0;
+
+// Variables para detección de robo
+bool isTheftEventActive = false;
+time_t theftStartTime = 0;
+float theftStartLat = 0, theftStartLon = 0;
+int theftStartBat = -1;
+float theftMaxSpeed = 0;
+float theftDistance = 0;
+float lastTheftLat = 0, lastTheftLon = 0;
+uint32_t lastMovementTime = 0;
+const uint32_t movementTimeoutTheft = 120000; // 2 minutos sin movimiento = fin evento
+
+void sendTheftEvent() {
+  Serial.printf("\n[THEFT_SEND] Enviando evento... Distancia: %.2f km\n", theftDistance);
+  
+  if (theftDistance < 0.1) {
+    Serial.println("[THEFT_SEND] Distancia muy corta, descartando");
+    return;
+  }
+  
+  if (!checkNetwork()) {
+    Serial.println("[THEFT_SEND] Sin red, no se puede enviar");
+    return;
+  }
+
+  time_t now;
+  time(&now);
+
+  int endBat = (batA.soc != -1) ? batA.soc : ((batB.soc != -1) ? batB.soc : -1);
+  Serial.printf("[THEFT_SEND] Vehículo: %s | Bat: %d→%d%% | Distancia: %.2fkm | Vel: %.2f\n", 
+    VEHICLE_ID, theftStartBat, endBat, theftDistance, theftMaxSpeed);
+  
+  sendAT("AT+HTTPTERM", 3000);
+  sendAT("AT+HTTPINIT", 3000);
+#ifdef LILYGO_SIM7000G
+  sendAT("AT+HTTPPARA=\"CID\",1", 3000);
+  sendAT("AT+HTTPSSL=1", 3000);
+#else
+  sendAT("AT+HTTPPARA=\"SSLCFG\",0", 3000);
+#endif
+
+  String url = String(SUPABASE_URL);
+  url.replace("telemetry", "theft_events");
+  url += "?apikey=" + String(SUPABASE_KEY);
+  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
+  sendAT(urlCmd.c_str(), 3000);
+  
+  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
+
+  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":\"" + formatISO8601(theftStartTime) + 
+                "\",\"end_time\":\"" + formatISO8601(now) + 
+                "\",\"status\":\"completed\"" +
+                ",\"start_latitude\":" + String(theftStartLat, 6) +
+                ",\"start_longitude\":" + String(theftStartLon, 6) +
+                ",\"end_latitude\":" + String(lastTheftLat, 6) +
+                ",\"end_longitude\":" + String(lastTheftLon, 6) +
+                ",\"distance_km\":" + String(theftDistance, 2) +
+                ",\"max_speed\":" + String(theftMaxSpeed, 2) +
+                ",\"battery_level_start\":" + String(theftStartBat) +
+                ",\"battery_level_end\":" + String(endBat) +
+                ",\"signal_strength\":" + String(getRSSI()) + "}";
+
+  Serial.println(getTimestamp() + " [THEFT_EVENT] " + body);
+
+  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
+  sendAT(dcmd.c_str(), 3000);
+  SerialAT.print(body);
+  delay(500);
+
+  SerialAT.println("AT+HTTPACTION=1");
+  uint32_t t = millis();
+  String actionRes = "";
+  while (millis() - t < 15000) {
+    while (SerialAT.available()) {
+      actionRes += (char)SerialAT.read();
+    }
+    if (actionRes.indexOf("+HTTPACTION:") != -1) break;
+  }
+  
+  sendAT("AT+HTTPTERM", 3000);
+  Serial.println(getTimestamp() + " [THEFT_EVENT] Reported to Supabase");
+}
 
 void sendTripSummary() {
   if (tripPointsCount == 0) return;
@@ -849,10 +942,53 @@ void loop() {
   }
   
   // 2. DETECCIÓN DE MOVIMIENTO / ROBO
-  // Si la moto está apagada (no hay CAN) pero se está moviendo (GPS > 2km/h)
   bool isMoving = gps_get_speed() > 2.0;
+  bool isCanActive = (lastCanActivityTime > 0 && (millis() - lastCanActivityTime < 5000));
+  
   if (isMoving) {
-    lastGeneralActivity = millis(); // Resetear inactividad si hay movimiento
+    lastGeneralActivity = millis();
+  }
+  
+  // ANTI-ROBO: Movimiento sin CAN activo
+  if (isMoving && !isCanActive) {
+    if (!isTheftEventActive) {
+      isTheftEventActive = true;
+      time(&theftStartTime);
+      theftStartLat = gps_get_lat();
+      theftStartLon = gps_get_lon();
+      theftStartBat = (batA.soc != -1) ? batA.soc : ((batB.soc != -1) ? batB.soc : -1);
+      theftMaxSpeed = 0;
+      theftDistance = 0;
+      lastTheftLat = theftStartLat;
+      lastTheftLon = theftStartLon;
+      lastMovementTime = millis();
+      Serial.printf("\n[THEFT_DETECTED] ROBO!!! GPS: %.6f, %.6f | Speed: %.2f km/h | Bat: %d%%\n", 
+        theftStartLat, theftStartLon, gps_get_speed(), theftStartBat);
+    } else {
+      // Actualizar datos del evento
+      float currentLat = gps_get_lat();
+      float currentLon = gps_get_lon();
+      float currentSpeed = gps_get_speed();
+      
+      if (currentLat != 0 && lastTheftLat != 0) {
+        theftDistance += calculateDistance(lastTheftLat, lastTheftLon, currentLat, currentLon);
+      }
+      
+      if (currentSpeed > theftMaxSpeed) {
+        theftMaxSpeed = currentSpeed;
+      }
+      
+      lastTheftLat = currentLat;
+      lastTheftLon = currentLon;
+      lastMovementTime = millis();
+    }
+  }
+  
+  // FIN DE EVENTO DE ROBO (2 min sin movimiento)
+  if (isTheftEventActive && (millis() - lastMovementTime > movementTimeoutTheft)) {
+    Serial.println("\n" + getTimestamp() + " [THEFT_END] Evento de robo finalizado");
+    sendTheftEvent();
+    isTheftEventActive = false;
   }
 
   // 3. REPOSO INTELIGENTE (Inactividad de 5 minutos)
@@ -866,6 +1002,12 @@ void loop() {
   if (millis() - lastTimeSync > syncInterval) {
     syncNetworkTime();
     lastTimeSync = millis();
+  }
+
+  // Recargar configuración CAN cada 6 horas
+  if (millis() - lastCanConfigLoad > canConfigLoadInterval) {
+    loadCanConfigFromSupabase(VEHICLE_ID);
+    lastCanConfigLoad = millis();
   }
 
   // Enviar trama de hora cada 200ms
