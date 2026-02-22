@@ -197,12 +197,47 @@ void loadCanConfigFromSupabase(const char* motorcycle_id) {
           manualConfig.time_hour_byte = getJsonIntValue(jsonStr, "time_hour_byte", 5);
           manualConfig.time_min_byte = getJsonIntValue(jsonStr, "time_min_byte", 6);
           
-          Serial.println(getTimestamp() + " [CAN_CONFIG] Configuration loaded successfully!");
-          Serial.printf("[CAN_CONFIG] BatA: V:0x%X[%d] C:0x%X[%d] SOC:0x%X[%d] T:0x%X[%d]\n",
-            manualConfig.batA.voltage.id, manualConfig.batA.voltage.start_byte,
+          Serial.println(getTimestamp() + " [CAN_CONFIG] ========== CONFIGURACIÓN CARGADA ==========");
+          Serial.printf("[CAN_CONFIG] BATERÍA A:\n");
+          Serial.printf("[CAN_CONFIG]   Voltaje:   ID=0x%03X start=%d len=%d factor=%.4f BE=%d\n",
+            manualConfig.batA.voltage.id, manualConfig.batA.voltage.start_byte, 
+            manualConfig.batA.voltage.length, manualConfig.batA.voltage.factor,
+            manualConfig.batA.voltage.big_endian);
+          Serial.printf("[CAN_CONFIG]   Corriente: ID=0x%03X start=%d len=%d factor=%.4f BE=%d SIGN=%d\n",
             manualConfig.batA.current.id, manualConfig.batA.current.start_byte,
+            manualConfig.batA.current.length, manualConfig.batA.current.factor,
+            manualConfig.batA.current.big_endian, manualConfig.batA.current.is_signed);
+          Serial.printf("[CAN_CONFIG]   SOC:       ID=0x%03X start=%d len=%d factor=%.4f BE=%d\n",
             manualConfig.batA.soc.id, manualConfig.batA.soc.start_byte,
-            manualConfig.batA.temp.id, manualConfig.batA.temp.start_byte);
+            manualConfig.batA.soc.length, manualConfig.batA.soc.factor,
+            manualConfig.batA.soc.big_endian);
+          Serial.printf("[CAN_CONFIG]   Temp:      ID=0x%03X start=%d len=%d factor=%.4f BE=%d\n",
+            manualConfig.batA.temp.id, manualConfig.batA.temp.start_byte,
+            manualConfig.batA.temp.length, manualConfig.batA.temp.factor,
+            manualConfig.batA.temp.big_endian);
+          
+          Serial.printf("[CAN_CONFIG] BATERÍA B:\n");
+          Serial.printf("[CAN_CONFIG]   Voltaje:   ID=0x%03X start=%d len=%d factor=%.4f BE=%d\n",
+            manualConfig.batB.voltage.id, manualConfig.batB.voltage.start_byte,
+            manualConfig.batB.voltage.length, manualConfig.batB.voltage.factor,
+            manualConfig.batB.voltage.big_endian);
+          Serial.printf("[CAN_CONFIG]   Corriente: ID=0x%03X start=%d len=%d factor=%.4f BE=%d SIGN=%d\n",
+            manualConfig.batB.current.id, manualConfig.batB.current.start_byte,
+            manualConfig.batB.current.length, manualConfig.batB.current.factor,
+            manualConfig.batB.current.big_endian, manualConfig.batB.current.is_signed);
+          Serial.printf("[CAN_CONFIG]   SOC:       ID=0x%03X start=%d len=%d factor=%.4f BE=%d\n",
+            manualConfig.batB.soc.id, manualConfig.batB.soc.start_byte,
+            manualConfig.batB.soc.length, manualConfig.batB.soc.factor,
+            manualConfig.batB.soc.big_endian);
+          Serial.printf("[CAN_CONFIG]   Temp:      ID=0x%03X start=%d len=%d factor=%.4f BE=%d\n",
+            manualConfig.batB.temp.id, manualConfig.batB.temp.start_byte,
+            manualConfig.batB.temp.length, manualConfig.batB.temp.factor,
+            manualConfig.batB.temp.big_endian);
+          
+          Serial.printf("[CAN_CONFIG] SISTEMA:\n");
+          Serial.printf("[CAN_CONFIG]   Time TX ID: 0x%03X byte_hora=%d byte_min=%d\n",
+            manualConfig.time_tx_id, manualConfig.time_hour_byte, manualConfig.time_min_byte);
+          Serial.println("[CAN_CONFIG] =========================================");
         }
       }
     }
