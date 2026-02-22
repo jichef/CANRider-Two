@@ -842,6 +842,11 @@ export default function DashboardContent() {
                               -{batteryUsed}%
                             </div>
                           )}
+                          {trip.is_theft_detected && (
+                            <div className="ml-auto px-2 py-0.5 rounded-full text-[8px] font-black bg-red-500/20 border border-red-500/40 text-red-400 tracking-widest uppercase">
+                              Sin motor
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex flex-col gap-2">

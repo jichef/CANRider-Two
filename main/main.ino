@@ -751,32 +751,32 @@ void sendTheftEvent() {
   sendAT("AT+HTTPPARA=\"SSLCFG\",0", 3000);
 #endif
 
+  // Enviar a trips como recorrido normal marcado como robo
   String url = String(SUPABASE_URL);
-  url.replace("telemetry", "theft_events");
+  url.replace("telemetry", "trips");
   url += "?apikey=" + String(SUPABASE_KEY);
   String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
   sendAT(urlCmd.c_str(), 3000);
   
   sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
 
-  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":\"" + formatISO8601(theftStartTime) + 
-                "\",\"end_time\":\"" + formatISO8601(now) + 
-                "\",\"status\":\"completed\"" +
-                ",\"start_latitude\":" + String(theftStartLat, 6) +
-                ",\"start_longitude\":" + String(theftStartLon, 6) +
-                ",\"end_latitude\":" + String(lastTheftLat, 6) +
-                ",\"end_longitude\":" + String(lastTheftLon, 6) +
-                ",\"distance_km\":" + String(theftDistance, 2) +
-                ",\"max_speed\":" + String(theftMaxSpeed, 2) +
-                ",\"battery_level_start\":" + String(theftStartBat) +
-                ",\"battery_level_end\":" + String(endBat) +
-                ",\"signal_strength\":" + String(getRSSI()) + "}";
+  String tripBody = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":\"" + formatISO8601(theftStartTime) + 
+                    "\",\"end_time\":\"" + formatISO8601(now) + 
+                    "\",\"distance\":" + String(theftDistance, 2) +
+                    ",\"avg_speed\":" + String(theftMaxSpeed / 2, 2) +
+                    ",\"max_speed\":" + String(theftMaxSpeed, 2) +
+                    ",\"consumption\":" + String(max(0, theftStartBat - endBat)) +
+                    ",\"start_battery_level\":" + String(theftStartBat) +
+                    ",\"end_battery_level\":" + String(endBat) +
+                    ",\"path\":[[" + String(theftStartLat, 6) + "," + String(theftStartLon, 6) + "],[" + 
+                    String(lastTheftLat, 6) + "," + String(lastTheftLon, 6) + "]]" +
+                    ",\"is_theft_detected\":true}";
 
-  Serial.println(getTimestamp() + " [THEFT_EVENT] " + body);
+  Serial.println(getTimestamp() + " [TRIP_INSERT] " + tripBody.substring(0, 150));
 
-  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
+  String dcmd = "AT+HTTPDATA=" + String(tripBody.length()) + ",5000";
   sendAT(dcmd.c_str(), 3000);
-  SerialAT.print(body);
+  SerialAT.print(tripBody);
   delay(500);
 
   SerialAT.println("AT+HTTPACTION=1");
@@ -790,7 +790,7 @@ void sendTheftEvent() {
   }
   
   sendAT("AT+HTTPTERM", 3000);
-  Serial.println(getTimestamp() + " [THEFT_EVENT] Reported to Supabase");
+  Serial.println(getTimestamp() + " [TRIP_INSERT] Trip guardado en Supabase");
 }
 
 void sendTripSummary() {

@@ -51,3 +51,6 @@ CREATE TABLE IF NOT EXISTS theft_events (
 
 CREATE INDEX IF NOT EXISTS theft_events_motorcycle_id_idx ON theft_events(motorcycle_id);
 CREATE INDEX IF NOT EXISTS theft_events_start_time_idx ON theft_events(start_time desc);
+
+-- Agregar columna is_theft_detected a tabla trips (si no existe)
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS is_theft_detected boolean default false;
