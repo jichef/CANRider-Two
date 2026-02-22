@@ -457,10 +457,12 @@ export default function DashboardContent() {
           </div>
         )}
 
-        {/* Panel de Eventos de Robo */}
+        {/* Panel de Eventos de Robo - OCULTO: ahora se muestra en lista de viajes */}
+        {/* 
         <div className="mb-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <TheftEventsPanel motorcycleId={telemetry?.motorcycle_id || '550e8400-e29b-41d4-a716-446655440000'} />
         </div>
+        */}
 
         {/* Histórico y Gráficas */}
         {showHistory && (
