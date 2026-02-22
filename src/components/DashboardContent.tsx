@@ -808,7 +808,9 @@ export default function DashboardContent() {
                       className={`w-full group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
                         isSelected 
                           ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]' 
-                          : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
+                          : trip.is_theft_detected
+                            ? 'bg-red-950/20 border-red-500/60 hover:border-red-500 hover:bg-red-950/30 shadow-[0_0_15px_rgba(239,68,68,0.15)]'
+                            : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
                       }`}
                     >
                       <div className="space-y-1 text-left">
@@ -850,7 +852,8 @@ export default function DashboardContent() {
                             </div>
                           )}
                           {trip.is_theft_detected && (
-                            <div className="ml-auto px-2 py-0.5 rounded-full text-[8px] font-black bg-red-500/20 border border-red-500/40 text-red-400 tracking-widest uppercase">
+                            <div className="ml-auto px-3 py-1.5 rounded-xl text-[9px] font-black bg-gradient-to-r from-red-500/30 to-red-600/20 border border-red-500/50 text-red-300 tracking-widest uppercase flex items-center gap-1.5 shadow-[0_0_12px_rgba(239,68,68,0.2)]">
+                              <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></div>
                               Sin motor
                             </div>
                           )}
