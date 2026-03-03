@@ -2,22 +2,24 @@
 // #define LILYGO_SIM7000G
 #include <time.h>
 #include <sys/time.h>
+#include <SPI.h>
+#include <SD.h>
 #include "AT/utilities.h"
 #include "config.h"
 #include "gps.h"
 #include "can_decoder.h"
 #include "can_config_loader.h"
 
-// Definir pines CAN si no están definidos
+// Definir pines CAN reconfigurados para no entrar en conflicto con la SD
 #ifndef CAN_RX_PIN
-#define CAN_RX_PIN 15
+#define CAN_RX_PIN 21
 #endif
 #ifndef CAN_TX_PIN
-#define CAN_TX_PIN 14
+#define CAN_TX_PIN 22
 #endif
 
 #ifndef CAN_ACTIVITY_LED_PIN
-#define CAN_ACTIVITY_LED_PIN 13
+#define CAN_ACTIVITY_LED_PIN 23
 #endif
 
 /*
@@ -38,6 +40,41 @@ const int MAX_NETWORK_FAILURES = 10; // Reiniciar tras 10 fallos
 time_t tripStartTime = 0;         // Hora de inicio del trayecto
 time_t tripEndTime = 0;           // Hora de fin del trayecto
 uint32_t tripDuration = 0;        // Duración total en segundos
+
+// Variables para seguimiento de trayectos (Movidas aquí para evitar errores de compilación)
+float tripStartLat = 0, tripStartLon = 0;
+int tripStartBatA = -1, tripStartBatB = -1;
+float tripTotalSpeed = 0;
+uint32_t tripPointsCount = 0;
+float tripDistance = 0;
+float lastTripLat = 0, lastTripLon = 0;
+String tripPathJson = "";
+uint32_t tripPointsStored = 0;
+const uint32_t MAX_TRIP_POINTS = 200; // Límite en RAM para el resumen rápido
+uint32_t lastTripPathPointTime = 0;
+const uint32_t tripPathPointInterval = 30000; // Punto cada 30s en RAM
+String currentTripFile = ""; // Archivo en SD para el recorrido completo
+
+// Variables para detección de robo (Movidas aquí para evitar errores de compilación)
+bool isTheftEventActive = false;
+time_t theftStartTime = 0;
+float theftStartLat = 0, theftStartLon = 0;
+int theftStartBat = -1;
+float theftMaxSpeed = 0;
+float theftDistance = 0;
+float lastTheftLat = 0, lastTheftLon = 0;
+uint32_t lastMovementTime = 0;
+const uint32_t movementTimeoutTheft = 120000; // 2 minutos sin movimiento = fin evento
+
+// Filtros y recorrido modo robo
+String theftPathJson = "";
+uint32_t theftPointsCount = 0;
+const uint32_t MAX_THEFT_POINTS = 100;
+const float THEFT_SPEED_THRESHOLD = 5.0; // km/h
+const float THEFT_MIN_DISTANCE_SEND = 0.05; // 50 metros para confirmar robo
+uint32_t lastPathPointTime = 0;
+const uint32_t pathPointInterval = 10000; // Guardar punto cada 10s
+String currentTheftFile = ""; // Archivo SD para robo
 
 // --- FUNCIONES BÁSICAS (Declarar antes de usar) ---
 String getTimestamp() {
@@ -474,6 +511,7 @@ void sendTelemetry() {
                 ",\"signal_strength\":" + String(rssi) +
                 ",\"location_type\":\"" + locType + "\"" +
                 ",\"is_trip_active\":" + (isTripActive ? "true" : "false") +
+                ",\"is_theft_active\":" + (isTheftEventActive ? "true" : "false") +
                 ",\"trip_duration\":" + String(tripDuration) +
                 ",\"duration\":" + String(tripDuration) +
                 ",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") +
@@ -574,6 +612,84 @@ void canBusTask(void *pvParameters) {
 uint32_t lastCanConfigLoad = 0;
 const uint32_t canConfigLoadInterval = 21600000;
 
+void logPointToSD(String filename, float lat, float lon, float speed, int bat) {
+  if (!SD.exists("/trips")) SD.mkdir("/trips");
+  
+  File file = SD.open(filename, FILE_APPEND);
+  if (file) {
+    file.printf("%.6f,%.6f,%.1f,%d\n", lat, lon, speed, bat);
+    file.close();
+  }
+}
+
+String readPathFromSD(String filename) {
+  File file = SD.open(filename, FILE_READ);
+  if (!file) return "";
+
+  String path = "";
+  int count = 0;
+  // Para evitar saturar RAM, si el archivo es muy grande, saltamos puntos
+  long fileSize = file.size();
+  int skip = 1;
+  if (fileSize > 5000) skip = 2; // Más de ~150 puntos, leemos la mitad
+  if (fileSize > 10000) skip = 4; // Más de ~300 puntos, leemos 1/4
+
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    if (count % skip == 0) {
+      int firstComma = line.indexOf(',');
+      int secondComma = line.indexOf(',', firstComma + 1);
+      if (firstComma != -1 && secondComma != -1) {
+        String lat = line.substring(0, firstComma);
+        String lon = line.substring(firstComma + 1, secondComma);
+        if (path != "") path += ",";
+        path += "[" + lat + "," + lon + "]";
+      }
+    }
+    count++;
+  }
+  file.close();
+  return path;
+}
+
+void checkPendingTrips() {
+  if (!checkNetwork()) return;
+  
+  File root = SD.open("/trips");
+  if (!root) return;
+  
+  File file = root.openNextFile();
+  while (file) {
+    String name = file.name();
+    // Si es un archivo CSV y no es el que estamos usando ahora
+    if (name.endsWith(".csv") && 
+        "/trips/" + name != currentTripFile && 
+        "/trips/" + name != currentTheftFile) {
+      
+      Serial.println("[SD] Detectado viaje pendiente: " + name);
+      // Aquí se podría implementar una versión simplificada de sendTripSummary 
+      // que lea el CSV y lo envíe. Por ahora, para no complicar el flujo
+      // solo avisamos. En una fase posterior podemos automatizar la subida.
+    }
+    file = root.openNextFile();
+  }
+}
+
+void initSD() {
+  Serial.println("[SD] Inicializando SPI...");
+  SPI.begin(BOARD_SCK_PIN, BOARD_MISO_PIN, BOARD_MOSI_PIN);
+  if (!SD.begin(BOARD_SD_CS_PIN)) {
+    Serial.println("[SD] Error: No se pudo montar la tarjeta.");
+  } else {
+    uint8_t cardType = SD.cardType();
+    if (cardType == CARD_NONE) {
+      Serial.println("[SD] Error: No hay tarjeta insertada.");
+      return;
+    }
+    Serial.printf("[SD] Tarjeta montada (Tipo: %d). Tamaño: %llu MB\n", cardType, SD.cardSize() / (1024 * 1024));
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -594,8 +710,7 @@ void setup() {
   pinMode(CAN_ACTIVITY_LED_PIN, OUTPUT);
   digitalWrite(CAN_ACTIVITY_LED_PIN, LOW); // LED apagado inicialmente
 
-  // Asegurar que el pin 32 (CS de SD en Lilygo) no esté bloqueando el CAN
-  pinMode(32, INPUT_PULLUP); 
+  initSD();
 
   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
@@ -703,30 +818,11 @@ void enterDeepSleep(const char* reason, uint32_t seconds = 0) {
   esp_deep_sleep_start();
 }
 
-// Variables para seguimiento de trayectos
-float tripStartLat = 0, tripStartLon = 0;
-int tripStartBatA = -1, tripStartBatB = -1;
-float tripTotalSpeed = 0;
-uint32_t tripPointsCount = 0;
-float tripDistance = 0;
-float lastTripLat = 0, lastTripLon = 0;
-
-// Variables para detección de robo
-bool isTheftEventActive = false;
-time_t theftStartTime = 0;
-float theftStartLat = 0, theftStartLon = 0;
-int theftStartBat = -1;
-float theftMaxSpeed = 0;
-float theftDistance = 0;
-float lastTheftLat = 0, lastTheftLon = 0;
-uint32_t lastMovementTime = 0;
-const uint32_t movementTimeoutTheft = 120000; // 2 minutos sin movimiento = fin evento
-
 void sendTheftEvent() {
   Serial.printf("\n[THEFT_SEND] Enviando evento... Distancia: %.2f km\n", theftDistance);
   
-  if (theftDistance < 0.1) {
-    Serial.println("[THEFT_SEND] Distancia muy corta, descartando");
+  if (theftDistance < THEFT_MIN_DISTANCE_SEND) {
+    Serial.println("[THEFT_SEND] Distancia insuficiente para confirmar robo, descartando");
     return;
   }
   
@@ -735,12 +831,18 @@ void sendTheftEvent() {
     return;
   }
 
+  // Asegurar que el último punto esté en el recorrido si ha cambiado
+  if (lastTheftLat != 0 && (theftPointsCount == 0 || lastPathPointTime != millis())) {
+    theftPathJson += ",[" + String(lastTheftLat, 6) + "," + String(lastTheftLon, 6) + "]";
+    theftPointsCount++;
+  }
+
   time_t now;
   time(&now);
 
   int endBat = (batA.soc != -1) ? batA.soc : ((batB.soc != -1) ? batB.soc : -1);
-  Serial.printf("[THEFT_SEND] Vehículo: %s | Bat: %d→%d%% | Distancia: %.2fkm | Vel: %.2f\n", 
-    VEHICLE_ID, theftStartBat, endBat, theftDistance, theftMaxSpeed);
+  Serial.printf("[THEFT_SEND] Vehículo: %s | Bat: %d→%d%% | Distancia: %.2fkm | Puntos: %d\n", 
+    VEHICLE_ID, theftStartBat, endBat, theftDistance, theftPointsCount);
   
   sendAT("AT+HTTPTERM", 3000);
   sendAT("AT+HTTPINIT", 3000);
@@ -760,6 +862,10 @@ void sendTheftEvent() {
   
   sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
 
+  // Priorizar recorrido completo desde SD
+  String fullPath = readPathFromSD(currentTheftFile);
+  if (fullPath == "") fullPath = theftPathJson; // Fallback a RAM
+
   String tripBody = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":\"" + formatISO8601(theftStartTime) + 
                     "\",\"end_time\":\"" + formatISO8601(now) + 
                     "\",\"distance\":" + String(theftDistance, 2) +
@@ -768,8 +874,7 @@ void sendTheftEvent() {
                     ",\"consumption\":" + String(max(0, theftStartBat - endBat)) +
                     ",\"start_battery_level\":" + String(theftStartBat) +
                     ",\"end_battery_level\":" + String(endBat) +
-                    ",\"path\":[[" + String(theftStartLat, 6) + "," + String(theftStartLon, 6) + "],[" + 
-                    String(lastTheftLat, 6) + "," + String(lastTheftLon, 6) + "]]" +
+                    ",\"path\":[" + fullPath + "]" +
                     ",\"is_theft_detected\":true}";
 
   Serial.println(getTimestamp() + " [TRIP_INSERT] " + tripBody.substring(0, 150));
@@ -807,6 +912,12 @@ void sendTripSummary() {
   int consumptionA = (tripStartBatA != -1 && endBatA != -1) ? (tripStartBatA - endBatA) : 0;
   int consumptionB = (tripStartBatB != -1 && endBatB != -1) ? (tripStartBatB - endBatB) : 0;
 
+  // Asegurar que el último punto esté en el recorrido
+  if (lastTripLat != 0 && (tripPointsStored == 0 || lastTripPathPointTime != millis())) {
+    tripPathJson += ",[" + String(lastTripLat, 6) + "," + String(lastTripLon, 6) + "]";
+    tripPointsStored++;
+  }
+
   // ---------- HTTP CONFIG ----------
   sendAT("AT+HTTPTERM");
   sendAT("AT+HTTPSSL=1");
@@ -836,6 +947,10 @@ sendAT("AT+HTTPPARA=\"SSLCFG\",1");
 #endif
   sendAT(ud.c_str());
 
+  // Priorizar recorrido completo desde SD
+  String fullPath = readPathFromSD(currentTripFile);
+  if (fullPath == "") fullPath = tripPathJson; // Fallback a RAM
+
   String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") + 
                 ",\"trip_start\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") + 
                 ",\"end_time\":" + (now > 0 ? "\"" + formatISO8601(now) + "\"" : "null") + 
@@ -847,8 +962,7 @@ sendAT("AT+HTTPPARA=\"SSLCFG\",1");
                 ",\"consumption\":" + String(consumptionA + consumptionB) + 
                 ",\"start_battery_level\":" + String(tripStartBatA) + 
                 ",\"end_battery_level\":" + String(endBatA) + 
-                ",\"path\":[[" + String(tripStartLat, 6) + "," + String(tripStartLon, 6) + "],[" + 
-                String(lastTripLat, 6) + "," + String(lastTripLon, 6) + "]]}";
+                ",\"path\":[" + fullPath + "]}";
 
   Serial.println(getTimestamp() + " [TRIP_END] " + body);
 
@@ -873,6 +987,9 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2) {
 void loop() {
   can_update(); 
   gps_update(); 
+
+  // Variable de batería para uso en toda la función loop
+  int currentBat = (batA.soc != -1) ? batA.soc : ((batB.soc != -1) ? batB.soc : -1);
 
   // Asegurar que el LED se apague si no hay actividad CAN reciente
   if (millis() - lastCanActivityTime > 100) {
@@ -906,20 +1023,51 @@ void loop() {
       tripDistance = 0;
       lastTripLat = startLat;
       lastTripLon = startLon;
-      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO.");
+      
+      // Iniciar JSON del recorrido
+      tripPathJson = "[" + String(startLat, 6) + "," + String(startLon, 6) + "]";
+      tripPointsStored = 1;
+      lastTripPathPointTime = millis();
+      
+      // Crear archivo en SD
+      currentTripFile = "/trips/T_" + String(tripStartTime) + ".csv";
+      logPointToSD(currentTripFile, startLat, startLon, gps_get_speed(), tripStartBatA);
+
+      Serial.println("\n" + getTimestamp() + " [TRIP] Trayecto INICIADO. SD: " + currentTripFile);
     }
 
     // ACUMULACIÓN DE DATOS
     float currentLat = gps_get_lat();
     float currentLon = gps_get_lon();
     float currentSpeed = gps_get_speed();
+    currentBat = (batA.soc != -1) ? batA.soc : ((batB.soc != -1) ? batB.soc : -1);
 
     if (currentLat != 0) {
       if (lastTripLat != 0) {
-        tripDistance += calculateDistance(lastTripLat, lastTripLon, currentLat, currentLon);
+        float dist = calculateDistance(lastTripLat, lastTripLon, currentLat, currentLon);
+        if (dist > 0.001) { // 1 metro
+          tripDistance += dist;
+          lastTripLat = currentLat;
+          lastTripLon = currentLon;
+          
+          // Guardar en SD siempre que haya movimiento relevante para tener máxima resolución
+          static uint32_t lastSDWrite = 0;
+          if (millis() - lastSDWrite > 10000) { // Máximo cada 10s en SD
+            logPointToSD(currentTripFile, currentLat, currentLon, currentSpeed, currentBat);
+            lastSDWrite = millis();
+          }
+        }
+      } else {
+        lastTripLat = currentLat;
+        lastTripLon = currentLon;
       }
-      lastTripLat = currentLat;
-      lastTripLon = currentLon;
+
+      // Almacenar punto de recorrido en RAM (resumen rápido)
+      if (millis() - lastTripPathPointTime > tripPathPointInterval && tripPointsStored < MAX_TRIP_POINTS) {
+        tripPathJson += ",[" + String(currentLat, 6) + "," + String(currentLon, 6) + "]";
+        tripPointsStored++;
+        lastTripPathPointTime = millis();
+      }
     }
     
     tripTotalSpeed += currentSpeed;
@@ -942,7 +1090,7 @@ void loop() {
   }
   
   // 2. DETECCIÓN DE MOVIMIENTO / ROBO
-  bool isMoving = gps_get_speed() > 2.0;
+  bool isMoving = gps_get_speed() >= THEFT_SPEED_THRESHOLD;
   bool isCanActive = (lastCanActivityTime > 0 && (millis() - lastCanActivityTime < 5000));
   
   if (isMoving) {
@@ -951,36 +1099,62 @@ void loop() {
   
   // ANTI-ROBO: Movimiento sin CAN activo
   if (isMoving && !isCanActive) {
+    float currentLat = gps_get_lat();
+    float currentLon = gps_get_lon();
+    float currentSpeed = gps_get_speed();
+
     if (!isTheftEventActive) {
       isTheftEventActive = true;
       time(&theftStartTime);
-      theftStartLat = gps_get_lat();
-      theftStartLon = gps_get_lon();
+      theftStartLat = currentLat;
+      theftStartLon = currentLon;
       theftStartBat = (batA.soc != -1) ? batA.soc : ((batB.soc != -1) ? batB.soc : -1);
-      theftMaxSpeed = 0;
+      theftMaxSpeed = currentSpeed;
       theftDistance = 0;
-      lastTheftLat = theftStartLat;
-      lastTheftLon = theftStartLon;
+      lastTheftLat = currentLat;
+      lastTheftLon = currentLon;
       lastMovementTime = millis();
-      Serial.printf("\n[THEFT_DETECTED] ROBO!!! GPS: %.6f, %.6f | Speed: %.2f km/h | Bat: %d%%\n", 
-        theftStartLat, theftStartLon, gps_get_speed(), theftStartBat);
+      
+      // Iniciar JSON del recorrido
+      theftPathJson = "[" + String(currentLat, 6) + "," + String(currentLon, 6) + "]";
+      theftPointsCount = 1;
+      lastPathPointTime = millis();
+
+      // Iniciar SD para robo
+      currentTheftFile = "/trips/R_" + String(theftStartTime) + ".csv";
+      logPointToSD(currentTheftFile, currentLat, currentLon, currentSpeed, theftStartBat);
+
+      Serial.printf("\n[THEFT_DETECTED] Posible ROBO!!! GPS: %.6f, %.6f | SD: %s\n", 
+        theftStartLat, theftStartLon, currentTheftFile.c_str());
     } else {
       // Actualizar datos del evento
-      float currentLat = gps_get_lat();
-      float currentLon = gps_get_lon();
-      float currentSpeed = gps_get_speed();
-      
       if (currentLat != 0 && lastTheftLat != 0) {
-        theftDistance += calculateDistance(lastTheftLat, lastTheftLon, currentLat, currentLon);
+        float dist = calculateDistance(lastTheftLat, lastTheftLon, currentLat, currentLon);
+        if (dist > 0.001) { // Solo si se ha movido algo relevante (1 metro)
+          theftDistance += dist;
+          lastTheftLat = currentLat;
+          lastTheftLon = currentLon;
+          lastMovementTime = millis();
+          
+          // Registro alta frecuencia en SD
+          static uint32_t lastSDTheftWrite = 0;
+          if (millis() - lastSDTheftWrite > 5000) { // Cada 5s en robo
+             logPointToSD(currentTheftFile, currentLat, currentLon, currentSpeed, currentBat);
+             lastSDTheftWrite = millis();
+          }
+        }
       }
       
       if (currentSpeed > theftMaxSpeed) {
         theftMaxSpeed = currentSpeed;
       }
-      
-      lastTheftLat = currentLat;
-      lastTheftLon = currentLon;
-      lastMovementTime = millis();
+
+      // Almacenar punto de recorrido cada X segundos
+      if (millis() - lastPathPointTime > pathPointInterval && theftPointsCount < MAX_THEFT_POINTS) {
+        theftPathJson += ",[" + String(currentLat, 6) + "," + String(currentLon, 6) + "]";
+        theftPointsCount++;
+        lastPathPointTime = millis();
+      }
     }
   }
   

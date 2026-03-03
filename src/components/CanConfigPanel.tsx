@@ -205,7 +205,7 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
   };
 
   return (
-    <div className="bg-zinc-900 border border-white/10 shadow-2xl rounded-[2.5rem] p-8 max-w-5xl mx-auto overflow-hidden relative">
+    <div className="bg-zinc-900 border border-white/10 shadow-2xl rounded-[2.5rem] p-4 md:p-8 max-w-5xl mx-auto overflow-hidden relative">
       <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
         <Settings size={200} />
       </div>
@@ -262,8 +262,8 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
               <span className="text-[10px] font-black tracking-widest uppercase">Configuración de Sistema</span>
             </div>
             
-            <div className="border border-white/5 p-8 rounded-3xl bg-zinc-950/30">
-              <div className="flex items-center justify-between gap-8">
+            <div className="border border-white/5 p-6 md:p-8 rounded-3xl bg-zinc-950/30">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-white">
                     <Clock size={16} className="text-blue-400" />
@@ -273,12 +273,12 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
                     El ESP32 enviará una trama con la hora sincronizada por GPS/NTP a este ID específico del bus.
                   </p>
                 </div>
-                <div className="text-right flex gap-4">
-                  <div>
+                <div className="flex flex-wrap md:flex-nowrap gap-4">
+                  <div className="flex-1 min-w-[100px]">
                     <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">ID Trama (Hex)</label>
                     <input 
                       type="text" 
-                      className="w-32 p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-center text-sm focus:border-blue-500 outline-none" 
+                      className="w-full p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-center text-sm focus:border-blue-500 outline-none" 
                       value={`0x${config.time_tx_id.toString(16).toUpperCase()}`}
                       onChange={(e) => {
                         const val = parseInt(e.target.value.replace('0x', ''), 16);
@@ -286,20 +286,20 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
                       }}
                     />
                   </div>
-                  <div>
-                    <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">Byte Hora</label>
+                  <div className="w-20 md:w-20">
+                    <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">Hora</label>
                     <input 
                       type="number" 
-                      className="w-20 p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-center text-sm focus:border-blue-500 outline-none" 
+                      className="w-full p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-center text-sm focus:border-blue-500 outline-none" 
                       value={config.time_hour_byte}
                       onChange={(e) => setConfig({ ...config, time_hour_byte: parseInt(e.target.value) || 0 })}
                     />
                   </div>
-                  <div>
-                    <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">Byte Minuto</label>
+                  <div className="w-20 md:w-20">
+                    <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">Min</label>
                     <input 
                       type="number" 
-                      className="w-20 p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-center text-sm focus:border-blue-500 outline-none" 
+                      className="w-full p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-center text-sm focus:border-blue-500 outline-none" 
                       value={config.time_min_byte}
                       onChange={(e) => setConfig({ ...config, time_min_byte: parseInt(e.target.value) || 0 })}
                     />

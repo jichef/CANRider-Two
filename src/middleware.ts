@@ -57,9 +57,9 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   // Si no hay usuario y no estamos en la página de login ni en archivos estáticos, redireccionar a login
-  if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/api')) {
+  /* if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/api')) {
     return NextResponse.redirect(new URL('/login', request.url))
-  }
+  } */
 
   // Si hay usuario y estamos en login, redireccionar a home
   if (user && request.nextUrl.pathname.startsWith('/login')) {

@@ -80,31 +80,46 @@ void loadCanConfigFromSupabase(const char* motorcycle_id) {
   String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
   sendAT(urlCmd.c_str(), 3000);
   
-  sendAT("AT+HTTPACTION=0", 15000);
+  sendAT("AT+HTTPACTION=0", 3000);
+  
+  delay(500);
   
   uint32_t t = millis();
   String response = "";
   bool foundAction = false;
+  uint32_t lastDataTime = millis();
   
-  while (millis() - t < 40000) {
-    while (SerialAT.available()) {
+  while (millis() - t < 30000) {
+    if (SerialAT.available()) {
       char c = SerialAT.read();
       response += c;
       Serial.write(c);
+      lastDataTime = millis();
+      
+      int httpIdx = response.indexOf("+HTTPACTION:");
+      if (httpIdx != -1) {
+        int newlineIdx = response.indexOf("\n", httpIdx);
+        if (newlineIdx != -1) {
+          foundAction = true;
+          break;
+        }
+      }
+    } else {
+      if (foundAction || (millis() - lastDataTime > 2000 && response.indexOf("+HTTPACTION:") != -1)) {
+        break;
+      }
     }
-    if (response.indexOf("+HTTPACTION:") != -1) {
-      foundAction = true;
-      delay(500);
-      break;
-    }
+    delay(10);
   }
   
   if (!foundAction) {
-    Serial.println("\n[CAN_CONFIG] No HTTP response received!");
+    Serial.println("\n[CAN_CONFIG] ERROR: No complete HTTPACTION response!");
+    Serial.printf("[CAN_CONFIG] Response length: %d bytes\n", response.length());
+    Serial.println("[CAN_CONFIG] Response content: " + response);
     return;
   }
   
-  Serial.println("\n[CAN_CONFIG] Response received: " + response.substring(0, 150));
+  Serial.println("\n[CAN_CONFIG] Response received successfully");
 
   if (response.indexOf(",200,") != -1) {
     int httpIdx = response.indexOf("+HTTPACTION:");
@@ -121,19 +136,25 @@ void loadCanConfigFromSupabase(const char* motorcycle_id) {
       Serial.println("[CAN_CONFIG] Reading " + String(len) + " bytes...");
       SerialAT.println(readCmd);
       
-      delay(500);
+      delay(1000);
       String body = "";
       t = millis();
-      while (millis() - t < 10000) {
-        while (SerialAT.available()) {
+      uint32_t lastDataTime = millis();
+      
+      while (millis() - t < 30000) {
+        if (SerialAT.available()) {
           char c = SerialAT.read();
           body += c;
+          Serial.write(c);
+          lastDataTime = millis();
+        } else {
+          if (body.indexOf("[") != -1 && body.indexOf("}") != -1) break;
+          if (millis() - lastDataTime > 1500 && body.length() > 50) break;
         }
-        if (body.indexOf("}") != -1 && body.indexOf("[") != -1) break;
-        delay(50);
+        delay(10);
       }
       
-      Serial.println("\n[CAN_CONFIG] Body: " + body.substring(0, 200));
+      Serial.println("\n[CAN_CONFIG] Body length: " + String(body.length()) + " bytes");
 
       if (body.length() > 0) {
         Serial.println(getTimestamp() + " [CAN_CONFIG] Got response: " + body.substring(0, 200));

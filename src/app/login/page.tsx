@@ -118,6 +118,15 @@ export default function LoginPage() {
                 </>
               )}
             </button>
+
+            {/* Botón temporal de acceso directo */}
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-bold py-4 rounded-2xl transition-all text-[10px] tracking-[0.2em] uppercase border border-white/5"
+            >
+              ACCESO_TEMPORAL_SIN_PASSWORD
+            </button>
           </form>
 
           <div className="mt-10 pt-8 border-t border-white/5 text-center relative z-20">
