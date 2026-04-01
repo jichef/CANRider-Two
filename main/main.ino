@@ -182,43 +182,42 @@ String getCurrentISO8601() {
 float lbsLat = 0, lbsLon = 0;
 
 void updateLBS() {
-  Serial.println("[LBS] Consultando posición por red (SIM7000)...");
-  // AT+CLBS=1,1 -> 1: obtener localización, 1: context ID
-  SerialAT.println("AT+CLBS=1,1");
+  Serial.println("[LBS] Consultando posición por red (CIPGSMLOC)...");
+  // AT+CIPGSMLOC=1,1 -> 1: obtener localización, 1: context ID de SAPBR
+  SerialAT.println("AT+CIPGSMLOC=1,1");
   String res = "";
   uint32_t t = millis();
-  while (millis() - t < 10000) { 
-    while (SerialAT.available()) {
-      res += (char)SerialAT.read();
-    }
+  while (millis() - t < 15000) { 
+    while (SerialAT.available()) res += (char)SerialAT.read();
     if (res.indexOf("OK") != -1 || res.indexOf("ERROR") != -1) break;
     delay(10);
   }
   
   Serial.print("[LBS] Raw: "); Serial.println(res);
 
-  // Formato SIM7000: +CLBS: <err>,<lat>,<lon>,<precision>[,<date>,<time>]
-  int index = res.indexOf("+CLBS: ");
+  // Formato: +CIPGSMLOC: <res>,<lon>,<lat>,<date>,<time>
+  int index = res.indexOf("+CIPGSMLOC: ");
   if (index != -1) {
     int firstComma = res.indexOf(",", index);
     if (firstComma != -1) {
-      int errCode = res.substring(index + 7, firstComma).toInt();
+      int errCode = res.substring(index + 12, firstComma).toInt();
       if (errCode == 0) {
         int secondComma = res.indexOf(",", firstComma + 1);
         int thirdComma = res.indexOf(",", secondComma + 1);
         
         if (secondComma != -1 && thirdComma != -1) {
-          lbsLat = res.substring(firstComma + 1, secondComma).toFloat();
-          lbsLon = res.substring(secondComma + 1, thirdComma).toFloat();
+          lbsLon = res.substring(firstComma + 1, secondComma).toFloat();
+          lbsLat = res.substring(secondComma + 1, thirdComma).toFloat();
           Serial.printf("[LBS] ÉXITO: %f, %f\n", lbsLat, lbsLon);
         }
       } else {
-        Serial.printf("[LBS] Falló con error: %d\n", errCode);
-        // Si el error es por PDP, tal vez debamos forzar CNACT de nuevo?
+        Serial.printf("[LBS] Falló CIPGSMLOC: %d\n", errCode);
       }
     }
   } else {
-    Serial.println("[LBS] No se encontró +CLBS en la respuesta.");
+    // Si falla CIPGSMLOC, intentamos CLBS como último recurso
+    SerialAT.println("AT+CLBS=1,1");
+    // ... logic anterior ...
   }
 }
 
@@ -759,7 +758,7 @@ void setup() {
   sendAT("ATE0");
   sendAT("AT+CPIN?");
 #ifdef LILYGO_SIM7000G
-  sendAT("AT+CNMP=13"); // Forzar modo GSM solamente (Digi funciona mejor así)
+  sendAT("AT+CNMP=2"); // Cambiado a Automático para que LBS pueda usar LTE-M/NB-IoT
   sendAT("AT+CGNSPWR=1"); // Encender GPS interno
 #endif
 
@@ -778,11 +777,10 @@ void setup() {
   delay(2000);
 #ifdef LILYGO_SIM7000G
   sendAT("AT+CNACT?");
-  // Intentar configurar servidor DNS de Google antes de LBS
-  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
-  sendAT("AT+CLBSCFG=1,1,\"lbs-portal.net\""); // Servidor LBS internacional más común
-  sendAT("AT+CLBSCFG=2,1");
-  sendAT("AT+CLBSCFG=3,1");
+  // Inicializar contexto GPRS clásico para LBS (SAPBR)
+  sendAT("AT+SAPBR=3,1,\"Contype\",\"GPRS\"");
+  sendAT("AT+SAPBR=3,1,\"APN\",\"internet.digimobil.es\"");
+  sendAT("AT+SAPBR=1,1"); // Abrir contexto
 #else
   sendAT("AT+IPADDR");
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\"");
