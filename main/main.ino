@@ -201,22 +201,24 @@ void updateLBS() {
   int index = res.indexOf("+CLBS: ");
   if (index != -1) {
     int firstComma = res.indexOf(",", index);
-    int secondComma = res.indexOf(",", firstComma + 1);
-    int thirdComma = res.indexOf(",", secondComma + 1);
-    
-    if (firstComma != -1 && secondComma != -1 && thirdComma != -1) {
-      // El primer campo es el código de error (0 = éxito)
-      lbsLat = res.substring(firstComma + 1, secondComma).toFloat();
-      lbsLon = res.substring(secondComma + 1, thirdComma).toFloat();
-      Serial.printf("[LBS] ÉXITO: %f, %f\n", lbsLat, lbsLon);
-    } else if (firstComma != -1 && secondComma != -1) {
-      // Por si acaso algunas versiones no traen error o precisión
-      lbsLat = res.substring(index + 7, firstComma).toFloat();
-      lbsLon = res.substring(firstComma + 1, secondComma).toFloat();
-      Serial.printf("[LBS] ÉXITO (formato corto): %f, %f\n", lbsLat, lbsLon);
+    if (firstComma != -1) {
+      int errCode = res.substring(index + 7, firstComma).toInt();
+      if (errCode == 0) {
+        int secondComma = res.indexOf(",", firstComma + 1);
+        int thirdComma = res.indexOf(",", secondComma + 1);
+        
+        if (secondComma != -1 && thirdComma != -1) {
+          lbsLat = res.substring(firstComma + 1, secondComma).toFloat();
+          lbsLon = res.substring(secondComma + 1, thirdComma).toFloat();
+          Serial.printf("[LBS] ÉXITO: %f, %f\n", lbsLat, lbsLon);
+        }
+      } else {
+        Serial.printf("[LBS] Falló con error: %d\n", errCode);
+        // Si el error es por PDP, tal vez debamos forzar CNACT de nuevo?
+      }
     }
   } else {
-    Serial.println("[LBS] No se obtuvo fix por red.");
+    Serial.println("[LBS] No se encontró +CLBS en la respuesta.");
   }
 }
 
@@ -352,64 +354,8 @@ void syncTimeHTTP() {
   sendAT("AT+HTTPTERM");
 }
 
-void syncTimeNTP() {
-  if (!checkNetwork()) return;
-  Serial.println("[TIME] Sincronizando vía NTP...");
-  sendAT("AT+CNTP=\"pool.ntp.org\",0");
-  sendAT("AT+CNTP");
-  delay(2000);
-}
-
-void syncTimeCell() {
-  if (!checkNetwork()) return;
-  Serial.println("[TIME] Obteniendo hora de la red celular...");
-  // AT+CLBS=1,1 devuelve lat,lon,precision,date,time
-  SerialAT.println("AT+CLBS=1,1");
-  String res = "";
-  uint32_t t = millis();
-  while (millis() - t < 5000) {
-    while (SerialAT.available()) res += (char)SerialAT.read();
-    if (res.indexOf("+CLBS:") != -1) break;
-  }
-
-  int lastComma = res.lastIndexOf(",");
-  if (lastComma != -1) {
-    // Formato: ...precision,YYYY/MM/DD,HH:MM:SS
-    int dateComma = res.lastIndexOf(",", lastComma - 1);
-    if (dateComma != -1) {
-      String datePart = res.substring(dateComma + 1, lastComma);
-      String timePart = res.substring(lastComma + 1);
-      timePart.trim();
-      
-      struct tm tm_info;
-      memset(&tm_info, 0, sizeof(struct tm));
-      int yy, mm, dd, hh, min, ss;
-      if (sscanf(datePart.c_str(), "%d/%d/%d", &yy, &mm, &dd) == 3 &&
-          sscanf(timePart.c_str(), "%d:%d:%d", &hh, &min, &ss) == 3) {
-        tm_info.tm_year = yy - 1900;
-        tm_info.tm_mon = mm - 1;
-        tm_info.tm_mday = dd;
-        tm_info.tm_hour = hh;
-        tm_info.tm_min = min;
-        tm_info.tm_sec = ss;
-
-        int totalOffset = manualConfig.timezone_offset + (manualConfig.dst_mode ? 1 : 0);
-        char tzBuf[15];
-        snprintf(tzBuf, sizeof(tzBuf), "UTC%+d", -totalOffset);
-        setenv("TZ", tzBuf, 1);
-        tzset();
-
-        time_t t_now = mktime(&tm_info);
-        struct timeval tv = { .tv_sec = t_now };
-        settimeofday(&tv, NULL);
-        Serial.printf("[TIME] Sincronización Celular Exitosa (Offset %d): %02d:%02d:%02d\n", totalOffset, hh, min, ss);
-      }
-    }
-  }
-}
-
 void syncNetworkTime() {
-  // 1. Intentar GPS
+  // 1. Intentar GPS (Máxima precisión)
   if (gps_get_lat() != 0) {
     String gpsTime = gps_get_time();
     if (gpsTime.length() > 18) {
@@ -439,42 +385,25 @@ void syncNetworkTime() {
     }
   }
 
-  // 2. Intentar Cell Network (Más rápido que HTTP)
-  syncTimeCell();
-
-  // 3. Intentar HTTP API
-  if (time(NULL) < 1700000000) syncTimeHTTP();
-
-  // 4. NTP Backup
-  if (time(NULL) < 1700000000) syncTimeNTP();
-
-  // 5. Final Backup: Módem (AT+CCLK)
-  if (time(NULL) < 1700000000) {
-    // Limpiar buffer antes de pedir la hora (como en OLD)
-    while (SerialAT.available()) SerialAT.read();
-    
-    SerialAT.println("AT+CCLK?");
-    String res = "";
-    uint32_t t = millis();
-    while (millis() - t < 1500) {
-      while (SerialAT.available()) res += (char)SerialAT.read();
-      if (res.indexOf("OK") != -1) break;
-    }
-    
-    int start = res.indexOf("\"");
-    int end = res.lastIndexOf("\"");
-    if (start != -1 && end != -1 && end > start) {
-      String cclk = res.substring(start + 1, end); 
-      struct tm tm_info;
-      memset(&tm_info, 0, sizeof(struct tm));
-      int yy, mm, dd, hh, min, ss;
-      if (sscanf(cclk.c_str(), "%d/%d/%d,%d:%d:%d", &yy, &mm, &dd, &hh, &min, &ss) == 6) {
-        // Validar que no sea 00:00:00 (error transitorio de OLD)
-        if (hh == 0 && min == 0 && ss == 0 && yy == 0) {
-           Serial.println("[TIME] CCLK devolvió 00:00:00, descartando.");
-           return;
-        }
-        
+  // 2. Intentar la hora del Módem (NITZ / PSUTTZ ya la habrá ajustado)
+  while (SerialAT.available()) SerialAT.read();
+  SerialAT.println("AT+CCLK?");
+  String res = "";
+  uint32_t t = millis();
+  while (millis() - t < 1000) {
+    while (SerialAT.available()) res += (char)SerialAT.read();
+    if (res.indexOf("OK") != -1) break;
+  }
+  
+  int start = res.indexOf("\"");
+  int end = res.lastIndexOf("\"");
+  if (start != -1 && end != -1 && end > start) {
+    String cclk = res.substring(start + 1, end); 
+    struct tm tm_info;
+    memset(&tm_info, 0, sizeof(struct tm));
+    int yy, mm, dd, hh, min, ss;
+    if (sscanf(cclk.c_str(), "%d/%d/%d,%d:%d:%d", &yy, &mm, &dd, &hh, &min, &ss) == 6) {
+      if (yy > 20) { // Validar que sea un año actual
         tm_info.tm_year = yy + 100; 
         tm_info.tm_mon = mm - 1;
         tm_info.tm_mday = dd;
@@ -491,10 +420,13 @@ void syncNetworkTime() {
         time_t t_now = mktime(&tm_info);
         struct timeval tv = { .tv_sec = t_now };
         settimeofday(&tv, NULL);
-        Serial.printf("[TIME] Sincronización por Módem completa (Offset %d).\n", totalOffset);
+        Serial.printf("[TIME] Sincronización NITZ (Módem) exitosa (Offset %d).\n", totalOffset);
+        return;
       }
     }
   }
+
+  Serial.println("[TIME] NITZ no disponible aún. Se reintentará en el próximo ciclo.");
 }
 
 char *generate_telemetry_json(int rssi, int bat, float lat, float lon, String locType, String timestamp) {
@@ -509,26 +441,6 @@ char *generate_telemetry_json(int rssi, int bat, float lat, float lon, String lo
   cJSON_AddNumberToObject(root, "signal_strength", rssi);
   cJSON_AddStringToObject(root, "location_type", locType.c_str());
   cJSON_AddBoolToObject(root, "is_trip_active", isTripActive);
-  cJSON_AddBoolToObject(root, "is_theft_active", isTheftEventActive);
-  cJSON_AddNumberToObject(root, "trip_duration", tripDuration);
-  cJSON_AddNumberToObject(root, "duration", tripDuration);
-  
-  if (tripStartTime > 0) {
-    cJSON_AddStringToObject(root, "start_time", formatISO8601(tripStartTime).c_str());
-    cJSON_AddStringToObject(root, "trip_start", formatISO8601(tripStartTime).c_str());
-  } else {
-    cJSON_AddNullToObject(root, "start_time");
-    cJSON_AddNullToObject(root, "trip_start");
-  }
-
-  if (tripEndTime > 0) {
-    cJSON_AddStringToObject(root, "end_time", formatISO8601(tripEndTime).c_str());
-    cJSON_AddStringToObject(root, "trip_end", formatISO8601(tripEndTime).c_str());
-  } else {
-    cJSON_AddNullToObject(root, "end_time");
-    cJSON_AddNullToObject(root, "trip_end");
-  }
-
   cJSON_AddStringToObject(root, "date", timestamp.substring(0, 10).c_str());
   cJSON_AddStringToObject(root, "timestamp", timestamp.c_str());
 
@@ -578,14 +490,14 @@ bool postToSupabase(String path, String json) {
   sslClient.print(json);
 
   String raw = "";
-  raw.reserve(512);
+  raw.reserve(1024); // Aumentado para ver el error completo
   unsigned long rStart = millis();
   unsigned long lastByte = millis();
   while (millis() - rStart < 15000UL) {
     while (sslClient.available()) {
       raw += (char)sslClient.read();
       lastByte = millis();
-      if (raw.length() >= 512) goto raw_done;
+      if (raw.length() >= 1024) goto raw_done;
     }
     if (!sslClient.connected()) break;
     if (raw.length() > 0 && millis() - lastByte > 3000UL) break;
@@ -595,7 +507,8 @@ raw_done:
   sslClient.stop();
 
   if (raw.indexOf("HTTP/1.1 2") != -1) return true;
-  Serial.print("[HTTP] Response: "); Serial.println(raw.substring(0, 100));
+  Serial.println("[HTTP] Error detectado:");
+  Serial.println(raw); // Imprimir respuesta completa para depurar el 400
   return false;
 }
 
@@ -865,6 +778,11 @@ void setup() {
   delay(2000);
 #ifdef LILYGO_SIM7000G
   sendAT("AT+CNACT?");
+  // Intentar configurar servidor DNS de Google antes de LBS
+  sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
+  sendAT("AT+CLBSCFG=1,1,\"lbs-portal.net\""); // Servidor LBS internacional más común
+  sendAT("AT+CLBSCFG=2,1");
+  sendAT("AT+CLBSCFG=3,1");
 #else
   sendAT("AT+IPADDR");
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\"");
