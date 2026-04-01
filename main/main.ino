@@ -182,32 +182,41 @@ String getCurrentISO8601() {
 float lbsLat = 0, lbsLon = 0;
 
 void updateLBS() {
-  // Para SIM7000G, LBS requiere que el servicio esté activo
-  SerialAT.println("AT+CLBS=1"); // En SIM7000G suele ser solo =1
+  Serial.println("[LBS] Consultando posición por red (SIM7000)...");
+  // AT+CLBS=1,1 -> 1: obtener localización, 1: context ID
+  SerialAT.println("AT+CLBS=1,1");
   String res = "";
   uint32_t t = millis();
-  while (millis() - t < 5000) { // LBS puede tardar un poco más
-    while (SerialAT.available()) res += (char)SerialAT.read();
+  while (millis() - t < 10000) { 
+    while (SerialAT.available()) {
+      res += (char)SerialAT.read();
+    }
     if (res.indexOf("OK") != -1 || res.indexOf("ERROR") != -1) break;
+    delay(10);
   }
   
-  // Formato SIM7000G: +CLBS: <error_code>,<lat>,<lon>,<precision>
+  Serial.print("[LBS] Raw: "); Serial.println(res);
+
+  // Formato SIM7000: +CLBS: <err>,<lat>,<lon>,<precision>[,<date>,<time>]
   int index = res.indexOf("+CLBS: ");
   if (index != -1) {
     int firstComma = res.indexOf(",", index);
     int secondComma = res.indexOf(",", firstComma + 1);
     int thirdComma = res.indexOf(",", secondComma + 1);
     
-    // El primer valor es el código de error (0 = éxito)
-    int errorCode = res.substring(index + 7, firstComma).toInt();
-    
-    if (errorCode == 0 && secondComma != -1) {
+    if (firstComma != -1 && secondComma != -1 && thirdComma != -1) {
+      // El primer campo es el código de error (0 = éxito)
       lbsLat = res.substring(firstComma + 1, secondComma).toFloat();
       lbsLon = res.substring(secondComma + 1, thirdComma).toFloat();
-      Serial.printf("\n[LBS] Posición por red OK: %f, %f\n", lbsLat, lbsLon);
-    } else {
-      Serial.printf("\n[LBS] Fallo en red (Error: %d)\n", errorCode);
+      Serial.printf("[LBS] ÉXITO: %f, %f\n", lbsLat, lbsLon);
+    } else if (firstComma != -1 && secondComma != -1) {
+      // Por si acaso algunas versiones no traen error o precisión
+      lbsLat = res.substring(index + 7, firstComma).toFloat();
+      lbsLon = res.substring(firstComma + 1, secondComma).toFloat();
+      Serial.printf("[LBS] ÉXITO (formato corto): %f, %f\n", lbsLat, lbsLon);
     }
+  } else {
+    Serial.println("[LBS] No se obtuvo fix por red.");
   }
 }
 
@@ -500,6 +509,26 @@ char *generate_telemetry_json(int rssi, int bat, float lat, float lon, String lo
   cJSON_AddNumberToObject(root, "signal_strength", rssi);
   cJSON_AddStringToObject(root, "location_type", locType.c_str());
   cJSON_AddBoolToObject(root, "is_trip_active", isTripActive);
+  cJSON_AddBoolToObject(root, "is_theft_active", isTheftEventActive);
+  cJSON_AddNumberToObject(root, "trip_duration", tripDuration);
+  cJSON_AddNumberToObject(root, "duration", tripDuration);
+  
+  if (tripStartTime > 0) {
+    cJSON_AddStringToObject(root, "start_time", formatISO8601(tripStartTime).c_str());
+    cJSON_AddStringToObject(root, "trip_start", formatISO8601(tripStartTime).c_str());
+  } else {
+    cJSON_AddNullToObject(root, "start_time");
+    cJSON_AddNullToObject(root, "trip_start");
+  }
+
+  if (tripEndTime > 0) {
+    cJSON_AddStringToObject(root, "end_time", formatISO8601(tripEndTime).c_str());
+    cJSON_AddStringToObject(root, "trip_end", formatISO8601(tripEndTime).c_str());
+  } else {
+    cJSON_AddNullToObject(root, "end_time");
+    cJSON_AddNullToObject(root, "trip_end");
+  }
+
   cJSON_AddStringToObject(root, "date", timestamp.substring(0, 10).c_str());
   cJSON_AddStringToObject(root, "timestamp", timestamp.c_str());
 
@@ -541,6 +570,7 @@ bool postToSupabase(String path, String json) {
   sslClient.print("POST "); sslClient.print(path); sslClient.print(" HTTP/1.1\r\n");
   sslClient.print("Host: "); sslClient.print(host); sslClient.print("\r\n");
   sslClient.print("apikey: "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
+  sslClient.print("Authorization: Bearer "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
   sslClient.print("Content-Type: application/json\r\n");
   sslClient.print("Prefer: return=minimal\r\n");
   sslClient.print("Content-Length: "); sslClient.print(json.length()); sslClient.print("\r\n");
@@ -835,13 +865,10 @@ void setup() {
   delay(2000);
 #ifdef LILYGO_SIM7000G
   sendAT("AT+CNACT?");
-  // Configurar LBS (Location Based Service)
-  sendAT("AT+CLBSCFG=1,1"); // Cambiado a 1,1 que es más común en SIM7000G
 #else
   sendAT("AT+IPADDR");
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\"");
 #endif
-  sendAT("AT+CLBSCFG=1,3");             
   
   syncNetworkTime();
   delay(2000);

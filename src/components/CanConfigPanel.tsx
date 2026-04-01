@@ -14,6 +14,7 @@ interface CanRule {
 }
 
 interface CanConfig {
+  id?: number;
   batA: { v: CanRule; c: CanRule; s: CanRule; t: CanRule };
   batB: { v: CanRule; c: CanRule; s: CanRule; t: CanRule };
   time_tx_id: number;
@@ -66,6 +67,7 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
 
       if (data) {
         setConfig({
+          id: data.id,
           batA: {
             v: { id: data.v_id, start: data.v_start, len: data.v_len, factor: data.v_factor, be: data.v_be },
             c: { id: data.c_id, start: data.c_start, len: data.c_len, factor: data.c_factor, be: data.c_be, signed: data.c_signed },
@@ -96,9 +98,10 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
     if (!supabase) return;
     setSaving(true);
     try {
-      const { error } = await supabase
+      const { data: result, error } = await supabase
         .from('can_configurations')
         .upsert({
+          id: config.id, // Si existe, hará UPDATE, si no, INSERT
           motorcycle_id: motorcycleId,
           // Bat A
           v_id: config.batA.v.id, v_start: config.batA.v.start, v_len: config.batA.v.len, v_factor: config.batA.v.factor, v_be: config.batA.v.be,
@@ -117,8 +120,12 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
           timezone_offset: config.timezone_offset,
           dst_mode: config.dst_mode,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'motorcycle_id' })
+        .select('id')
+        .single();
+      
       if (error) throw error;
+      if (result) setConfig({ ...config, id: result.id });
       alert('Configuración guardada correctamente');
     } catch (err) {
       console.error('Error saving CAN config:', err);
