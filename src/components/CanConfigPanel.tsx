@@ -19,6 +19,8 @@ interface CanConfig {
   time_tx_id: number;
   time_hour_byte: number;
   time_min_byte: number;
+  timezone_offset: number;
+  dst_mode: boolean;
 }
 
 export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string }) {
@@ -39,7 +41,9 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
     },
     time_tx_id: 0x510,
     time_hour_byte: 5,
-    time_min_byte: 6
+    time_min_byte: 6,
+    timezone_offset: 0,
+    dst_mode: false
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,7 +80,9 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
           },
           time_tx_id: data.time_tx_id,
           time_hour_byte: data.time_hour_byte ?? 5,
-          time_min_byte: data.time_min_byte ?? 6
+          time_min_byte: data.time_min_byte ?? 6,
+          timezone_offset: data.timezone_offset ?? 0,
+          dst_mode: data.dst_mode ?? false
         });
       }
     } catch (err) {
@@ -108,6 +114,8 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
           time_tx_id: config.time_tx_id,
           time_hour_byte: config.time_hour_byte,
           time_min_byte: config.time_min_byte,
+          timezone_offset: config.timezone_offset,
+          dst_mode: config.dst_mode,
           updated_at: new Date().toISOString()
         });
       if (error) throw error;
@@ -303,6 +311,43 @@ export default function CanConfigPanel({ motorcycleId }: { motorcycleId: string 
                       value={config.time_min_byte}
                       onChange={(e) => setConfig({ ...config, time_min_byte: parseInt(e.target.value) || 0 })}
                     />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-white/5 p-6 md:p-8 rounded-3xl bg-zinc-950/30">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-white">
+                    <Settings size={16} className="text-orange-400" />
+                    <h3 className="font-bold text-xs tracking-widest uppercase">Zona Horaria y Horario de Verano</h3>
+                  </div>
+                  <p className="text-[9px] text-zinc-600 font-mono leading-relaxed max-w-md">
+                    Ajuste el desfase horario (UTC) y active el modo verano si es necesario para la correcta sincronización de la moto.
+                  </p>
+                </div>
+                <div className="flex gap-4 items-center">
+                  <div>
+                    <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">UTC Offset</label>
+                    <select 
+                      className="p-3 bg-zinc-900 border border-white/5 rounded-xl text-white font-mono text-sm focus:border-blue-500 outline-none"
+                      value={config.timezone_offset}
+                      onChange={(e) => setConfig({ ...config, timezone_offset: parseInt(e.target.value) })}
+                    >
+                      {Array.from({ length: 25 }, (_, i) => i - 12).map(offset => (
+                        <option key={offset} value={offset}>UTC {offset >= 0 ? '+' : ''}{offset}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <label className="text-[9px] text-zinc-600 block mb-2 uppercase font-black">Modo Verano</label>
+                    <button 
+                      onClick={() => setConfig({ ...config, dst_mode: !config.dst_mode })}
+                      className={`w-12 h-6 rounded-full transition-all relative ${config.dst_mode ? 'bg-orange-500' : 'bg-zinc-700'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${config.dst_mode ? 'left-7' : 'left-1'}`} />
+                    </button>
                   </div>
                 </div>
               </div>

@@ -1,10 +1,12 @@
-#define LILYGO_T_A7670
-// #define LILYGO_SIM7000G
+// #define LILYGO_T_A7670
+#define LILYGO_SIM7000G
 #include <time.h>
 #include <sys/time.h>
 #include <SPI.h>
 #include <SD.h>
 #include "AT/utilities.h"
+#include <TinyGsmClient.h>
+#include <cJSON.h>
 #include "config.h"
 #include "gps.h"
 #include "can_decoder.h"
@@ -21,6 +23,8 @@
 #ifndef CAN_ACTIVITY_LED_PIN
 #define CAN_ACTIVITY_LED_PIN 23
 #endif
+
+TinyGsm modem(SerialAT);
 
 /*
 config.h DEBE CONTENER:
@@ -98,18 +102,26 @@ String getTimestamp() {
   return String(buf);
 }
 
-void sendAT(const char *cmd, uint32_t timeout = 3000) {
+String sendATReturn(const char *cmd, uint32_t timeout) {
   Serial.print(getTimestamp() + " >> ");
   Serial.println(cmd);
   SerialAT.println(cmd);
 
+  String res = "";
   uint32_t t = millis();
   while (millis() - t < timeout) {
     while (SerialAT.available()) {
-      Serial.write(SerialAT.read());
+      char c = SerialAT.read();
+      res += c;
+      Serial.write(c);
     }
   }
   Serial.println();
+  return res;
+}
+
+void sendAT(const char *cmd, uint32_t timeout) {
+  sendATReturn(cmd, timeout);
 }
 // --------------------------------------------------
 
@@ -170,24 +182,31 @@ String getCurrentISO8601() {
 float lbsLat = 0, lbsLon = 0;
 
 void updateLBS() {
-  // AT+CLBS=1,1 -> Obtener lat/lon desde la red
-  SerialAT.println("AT+CLBS=1,1");
+  // Para SIM7000G, LBS requiere que el servicio esté activo
+  SerialAT.println("AT+CLBS=1"); // En SIM7000G suele ser solo =1
   String res = "";
   uint32_t t = millis();
-  while (millis() - t < 3000) {
+  while (millis() - t < 5000) { // LBS puede tardar un poco más
     while (SerialAT.available()) res += (char)SerialAT.read();
+    if (res.indexOf("OK") != -1 || res.indexOf("ERROR") != -1) break;
   }
   
-  // Formato esperado: +CLBS: <lat>,<lon>,<precision>,<date>,<time>
+  // Formato SIM7000G: +CLBS: <error_code>,<lat>,<lon>,<precision>
   int index = res.indexOf("+CLBS: ");
   if (index != -1) {
     int firstComma = res.indexOf(",", index);
     int secondComma = res.indexOf(",", firstComma + 1);
     int thirdComma = res.indexOf(",", secondComma + 1);
-    if (secondComma != -1) {
+    
+    // El primer valor es el código de error (0 = éxito)
+    int errorCode = res.substring(index + 7, firstComma).toInt();
+    
+    if (errorCode == 0 && secondComma != -1) {
       lbsLat = res.substring(firstComma + 1, secondComma).toFloat();
       lbsLon = res.substring(secondComma + 1, thirdComma).toFloat();
-      Serial.printf("\n[LBS] Posición por red: %f, %f\n", lbsLat, lbsLon);
+      Serial.printf("\n[LBS] Posición por red OK: %f, %f\n", lbsLat, lbsLon);
+    } else {
+      Serial.printf("\n[LBS] Fallo en red (Error: %d)\n", errorCode);
     }
   }
 }
@@ -207,7 +226,8 @@ bool checkNetwork() {
   }
   
   Serial.println("\n" + getTimestamp() + " [NET] SIM7000 Red caída. Intentando abrir...");
-  sendAT("AT+CNACT=1,\"" APN "\"", 5000);
+  sendAT("AT+CNACT=0", 2000); // Asegurar que esté cerrado
+  sendAT("AT+CNACT=1", 10000); // Abrir usando el APN ya configurado en CGDCONT
 #else
   SerialAT.println("AT+NETOPEN?");
   String res = "";
@@ -303,14 +323,18 @@ void syncTimeHTTP() {
         tm_info.tm_year -= 1900;
         tm_info.tm_mon -= 1;
 
-        // Forzar siempre a UTC internamente para evitar desfases con Supabase/Vercel
-        setenv("TZ", "UTC0", 1);
+        // Aplicar zona horaria y DST de la configuración
+        int totalOffset = manualConfig.timezone_offset + (manualConfig.dst_mode ? 1 : 0);
+        char tzBuf[15];
+        snprintf(tzBuf, sizeof(tzBuf), "UTC%+d", -totalOffset); // Formato para setenv es invertido
+        setenv("TZ", tzBuf, 1);
         tzset();
+        
         time_t t_now = mktime(&tm_info);
         struct timeval tv = { .tv_sec = t_now };
         settimeofday(&tv, NULL);
         
-        Serial.printf("[TIME] Sincronización HTTP Exitosa (UTC): %ld\n", t_now);
+        Serial.printf("[TIME] Sincronización HTTP Exitosa (Offset %d): %ld\n", totalOffset, t_now);
       }
     }
   } else {
@@ -360,12 +384,16 @@ void syncTimeCell() {
         tm_info.tm_min = min;
         tm_info.tm_sec = ss;
 
-        setenv("TZ", "UTC0", 1);
+        int totalOffset = manualConfig.timezone_offset + (manualConfig.dst_mode ? 1 : 0);
+        char tzBuf[15];
+        snprintf(tzBuf, sizeof(tzBuf), "UTC%+d", -totalOffset);
+        setenv("TZ", tzBuf, 1);
         tzset();
+
         time_t t_now = mktime(&tm_info);
         struct timeval tv = { .tv_sec = t_now };
         settimeofday(&tv, NULL);
-        Serial.printf("[TIME] Sincronización Celular Exitosa: %02d:%02d:%02d\n", hh, min, ss);
+        Serial.printf("[TIME] Sincronización Celular Exitosa (Offset %d): %02d:%02d:%02d\n", totalOffset, hh, min, ss);
       }
     }
   }
@@ -387,12 +415,16 @@ void syncNetworkTime() {
         tm_info.tm_min = min;
         tm_info.tm_sec = ss;
         
-        setenv("TZ", "UTC0", 1);
+        int totalOffset = manualConfig.timezone_offset + (manualConfig.dst_mode ? 1 : 0);
+        char tzBuf[15];
+        snprintf(tzBuf, sizeof(tzBuf), "UTC%+d", -totalOffset);
+        setenv("TZ", tzBuf, 1);
         tzset();
+
         time_t t_now = mktime(&tm_info);
         struct timeval tv = { .tv_sec = t_now };
         settimeofday(&tv, NULL);
-        Serial.println("[TIME] Sincronizado mediante GPS.");
+        Serial.printf("[TIME] Sincronizado mediante GPS (Offset %d).\n", totalOffset);
         return;
       }
     }
@@ -441,15 +473,142 @@ void syncNetworkTime() {
         tm_info.tm_min = min;
         tm_info.tm_sec = ss;
         
-        setenv("TZ", "UTC0", 1);
+        int totalOffset = manualConfig.timezone_offset + (manualConfig.dst_mode ? 1 : 0);
+        char tzBuf[15];
+        snprintf(tzBuf, sizeof(tzBuf), "UTC%+d", -totalOffset);
+        setenv("TZ", tzBuf, 1);
         tzset();
+
         time_t t_now = mktime(&tm_info);
         struct timeval tv = { .tv_sec = t_now };
         settimeofday(&tv, NULL);
-        Serial.println("[TIME] Sincronización por Módem completa.");
+        Serial.printf("[TIME] Sincronización por Módem completa (Offset %d).\n", totalOffset);
       }
     }
   }
+}
+
+char *generate_telemetry_json(int rssi, int bat, float lat, float lon, String locType, String timestamp) {
+  cJSON *root = cJSON_CreateObject();
+  if (root == NULL) return NULL;
+
+  cJSON_AddStringToObject(root, "motorcycle_id", VEHICLE_ID);
+  cJSON_AddNumberToObject(root, "speed", gps_get_speed());
+  cJSON_AddNumberToObject(root, "battery_level", bat);
+  cJSON_AddNumberToObject(root, "latitude", lat);
+  cJSON_AddNumberToObject(root, "longitude", lon);
+  cJSON_AddNumberToObject(root, "signal_strength", rssi);
+  cJSON_AddStringToObject(root, "location_type", locType.c_str());
+  cJSON_AddBoolToObject(root, "is_trip_active", isTripActive);
+  cJSON_AddStringToObject(root, "date", timestamp.substring(0, 10).c_str());
+  cJSON_AddStringToObject(root, "timestamp", timestamp.c_str());
+
+  if (batA.soc != -1) {
+    cJSON_AddNumberToObject(root, "moto_battery", batA.soc);
+    cJSON_AddNumberToObject(root, "bat_a_volts", batA.voltage);
+    cJSON_AddNumberToObject(root, "bat_a_amps", batA.current);
+    cJSON_AddNumberToObject(root, "bat_a_temp", batA.temp);
+    cJSON_AddBoolToObject(root, "is_charging", batA.is_charging);
+  }
+
+  if (batB.soc != -1) {
+    cJSON_AddNumberToObject(root, "moto_battery_b", batB.soc);
+    cJSON_AddNumberToObject(root, "bat_b_volts", batB.voltage);
+    cJSON_AddNumberToObject(root, "bat_b_amps", batB.current);
+    cJSON_AddNumberToObject(root, "bat_b_temp", batB.temp);
+    cJSON_AddBoolToObject(root, "is_charging_b", batB.is_charging);
+  }
+
+  char *json_str = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+  return json_str;
+}
+
+bool postToSupabase(String path, String json) {
+  TinyGsmClientSecure sslClient(modem);
+  String host = SUPABASE_URL;
+  if (host.startsWith("https://")) host.remove(0, 8);
+  if (host.startsWith("http://"))  host.remove(0, 7);
+  
+  int slashIdx = host.indexOf('/');
+  if (slashIdx >= 0) host = host.substring(0, slashIdx);
+
+  if (!sslClient.connect(host.c_str(), 443)) {
+    Serial.println("[HTTP] SSL connect failed!");
+    return false;
+  }
+
+  sslClient.print("POST "); sslClient.print(path); sslClient.print(" HTTP/1.1\r\n");
+  sslClient.print("Host: "); sslClient.print(host); sslClient.print("\r\n");
+  sslClient.print("apikey: "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
+  sslClient.print("Content-Type: application/json\r\n");
+  sslClient.print("Prefer: return=minimal\r\n");
+  sslClient.print("Content-Length: "); sslClient.print(json.length()); sslClient.print("\r\n");
+  sslClient.print("\r\n");
+  sslClient.print(json);
+
+  String raw = "";
+  raw.reserve(512);
+  unsigned long rStart = millis();
+  unsigned long lastByte = millis();
+  while (millis() - rStart < 15000UL) {
+    while (sslClient.available()) {
+      raw += (char)sslClient.read();
+      lastByte = millis();
+      if (raw.length() >= 512) goto raw_done;
+    }
+    if (!sslClient.connected()) break;
+    if (raw.length() > 0 && millis() - lastByte > 3000UL) break;
+    delay(10);
+  }
+raw_done:
+  sslClient.stop();
+
+  if (raw.indexOf("HTTP/1.1 2") != -1) return true;
+  Serial.print("[HTTP] Response: "); Serial.println(raw.substring(0, 100));
+  return false;
+}
+
+String getFromSupabase(String path) {
+  TinyGsmClientSecure sslClient(modem);
+  String host = SUPABASE_URL;
+  if (host.startsWith("https://")) host.remove(0, 8);
+  if (host.startsWith("http://"))  host.remove(0, 7);
+  
+  int slashIdx = host.indexOf('/');
+  if (slashIdx >= 0) host = host.substring(0, slashIdx);
+
+  if (!sslClient.connect(host.c_str(), 443)) {
+    Serial.println("[HTTP] SSL connect failed!");
+    return "";
+  }
+
+  sslClient.print("GET "); sslClient.print(path); sslClient.print(" HTTP/1.1\r\n");
+  sslClient.print("Host: "); sslClient.print(host); sslClient.print("\r\n");
+  sslClient.print("apikey: "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
+  sslClient.print("Connection: close\r\n");
+  sslClient.print("\r\n");
+
+  String raw = "";
+  raw.reserve(1024);
+  unsigned long rStart = millis();
+  unsigned long lastByte = millis();
+  while (millis() - rStart < 15000UL) {
+    while (sslClient.available()) {
+      raw += (char)sslClient.read();
+      lastByte = millis();
+      if (raw.length() >= 1024) goto get_done;
+    }
+    if (!sslClient.connected()) break;
+    if (raw.length() > 0 && millis() - lastByte > 3000UL) break;
+    delay(10);
+  }
+get_done:
+  sslClient.stop();
+
+  int sepIdx = raw.indexOf("\r\n\r\n");
+  if (sepIdx >= 0) return raw.substring(sepIdx + 4);
+  return "";
 }
 
 void sendTelemetry() {
@@ -461,124 +620,35 @@ void sendTelemetry() {
 
   int rssi = getRSSI();
   int bat = getBatteryLevel();
-  
-  // ---------- HTTP CONFIG ----------
-  sendAT("AT+HTTPTERM");
-  sendAT("AT+HTTPINIT");
-#ifdef LILYGO_SIM7000G
-  sendAT("AT+HTTPPARA=\"CID\",1");
-  sendAT("AT+HTTPSSL=1");
-  // Intentamos añadir cabeceras individuales si el firmware lo permite
-  String h1 = "AT+HTTPPARA=\"HEADER\",\"apikey: " + String(SUPABASE_KEY) + "\"";
-  sendAT(h1.c_str());
-  String h2 = "AT+HTTPPARA=\"HEADER\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
-  sendAT(h2.c_str());
-#else
-  sendAT("AT+HTTPPARA=\"SSLCFG\",0");
-#endif
 
-  String fullUrl = String(SUPABASE_URL) + "?apikey=" + String(SUPABASE_KEY);
-  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + fullUrl + "\"";
-  sendAT(urlCmd.c_str());
-
-  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
-
-  // ---------- BODY ----------
   float finalLat = gps_get_lat();
   float finalLon = gps_get_lon();
-  
   String locType = "gps";
-  // Si no hay GPS, intentamos LBS
+
   if (finalLat == 0) {
     updateLBS();
     finalLat = lbsLat;
     finalLon = lbsLon;
     locType = "lbs";
   }
-  
+
   String timestamp = getCurrentISO8601();
-  
-  // Calcular duración si el trayecto está activo
+
   if (isTripActive) {
     time_t now_unix;
     time(&now_unix);
     tripDuration = (uint32_t)(now_unix - tripStartTime);
   }
 
-  String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\",\"speed\":" + String(gps_get_speed()) + 
-                ",\"battery_level\":" + String(bat) + ",\"latitude\":" + String(finalLat, 6) + 
-                ",\"longitude\":" + String(finalLon, 6) + 
-                ",\"signal_strength\":" + String(rssi) +
-                ",\"location_type\":\"" + locType + "\"" +
-                ",\"is_trip_active\":" + (isTripActive ? "true" : "false") +
-                ",\"is_theft_active\":" + (isTheftEventActive ? "true" : "false") +
-                ",\"trip_duration\":" + String(tripDuration) +
-                ",\"duration\":" + String(tripDuration) +
-                ",\"start_time\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") +
-                ",\"trip_start\":" + (tripStartTime > 0 ? "\"" + formatISO8601(tripStartTime) + "\"" : "null") +
-                ",\"end_time\":" + (tripEndTime > 0 ? "\"" + formatISO8601(tripEndTime) + "\"" : "null") +
-                ",\"trip_end\":" + (tripEndTime > 0 ? "\"" + formatISO8601(tripEndTime) + "\"" : "null");
-  
-  if (timestamp != "") {
-    body += ",\"timestamp\":\"" + timestamp + "\"";
-    body += ",\"date\":\"" + timestamp.substring(0, 10) + "\"";
-  }
-  
-  if (batA.soc != -1) {
-    body += ",\"moto_battery\":" + String(batA.soc);
-    body += ",\"bat_a_volts\":" + String(batA.voltage);
-    body += ",\"bat_a_amps\":" + String(batA.current);
-    body += ",\"bat_a_temp\":" + String(batA.temp);
-    body += ",\"is_charging\":" + String(batA.is_charging ? "true" : "false");
-  }
-  if (batB.soc != -1) {
-    body += ",\"moto_battery_b\":" + String(batB.soc);
-    body += ",\"bat_b_volts\":" + String(batB.voltage);
-    body += ",\"bat_b_amps\":" + String(batB.current);
-    body += ",\"bat_b_temp\":" + String(batB.temp);
-    body += ",\"is_charging_b\":" + String(batB.is_charging ? "true" : "false");
-  }
-  
-  body += "}"; 
+  char *json = generate_telemetry_json(rssi, bat, finalLat, finalLon, locType, timestamp);
+  if (json == NULL) return;
 
-  Serial.println(getTimestamp() + " [SEND] " + body);
-
-  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
-  sendAT(dcmd.c_str()); 
-  SerialAT.print(body);
-  delay(500);
-
-  // ---------- POST ----------
-  Serial.println(getTimestamp() + " [HTTP] Iniciando POST...");
-  SerialAT.println("AT+HTTPACTION=1");
+  Serial.println(getTimestamp() + " [SEND] " + String(json));
   
-  // Esperar activamente al código de respuesta (+HTTPACTION: 1,XXX,LEN)
-  String actionRes = "";
-  uint32_t tAction = millis();
-  while (millis() - tAction < 15000) {
-    while (SerialAT.available()) {
-      char c = SerialAT.read();
-      actionRes += c;
-      Serial.write(c);
-    }
-    if (actionRes.indexOf("+HTTPACTION:") != -1 && actionRes.indexOf("\n", actionRes.indexOf("+HTTPACTION:")) != -1) break;
+  if (postToSupabase("/rest/v1/telemetry", String(json))) {
+    Serial.println(getTimestamp() + " [OK] Telemetría enviada.");
   }
-
-  // Si hubo error 400, leer el cuerpo de la respuesta obligatoriamente
-  if (actionRes.indexOf(",400,") != -1) {
-    int firstComma = actionRes.indexOf(",400,");
-    int secondComma = actionRes.indexOf(",", firstComma + 5);
-    String lenStr = actionRes.substring(firstComma + 5, secondComma);
-    lenStr.trim();
-    
-    Serial.printf("\n[DEBUG] Error 400 detectado (%s bytes). Motivo: ", lenStr.c_str());
-    String readCmd = "AT+HTTPREAD=0," + lenStr;
-    sendAT(readCmd.c_str(), 3000);
-  }
-  
-  sendAT("AT+HTTPTERM");
-
-  Serial.println(getTimestamp() + " [OK] Telemetría enviada.");
+  free(json);
 }
 
 void canBusTask(void *pvParameters) {
@@ -716,8 +786,9 @@ void setup() {
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
   delay(100);
   digitalWrite(BOARD_PWRKEY_PIN, HIGH);
-  delay(2000);
+  delay(1200); // Pulso de encendido
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
+  delay(2000);
 
 #ifndef MODEM_BAUDRATE
 #define MODEM_BAUDRATE 115200
@@ -727,7 +798,8 @@ void setup() {
   
   if (can_setup(CAN_RX_PIN, CAN_TX_PIN)) {
     Serial.println(getTimestamp() + " [CAN] OK. Ejecutando en Loop principal...");
-    // xTaskCreatePinnedToCore(canBusTask, "CAN_Task", 4096, NULL, 5, NULL, 0); // Core 0 desactivado para test
+
+  xTaskCreatePinnedToCore(canBusTask, "CAN_Task", 4096, NULL, 5, NULL, 0); 
   } else {
     Serial.println(getTimestamp() + " [ERROR] Falló inicialización CAN");
   }
@@ -744,13 +816,17 @@ void setup() {
   sendAT("ATE0");
   sendAT("AT+CPIN?");
 #ifdef LILYGO_SIM7000G
+  sendAT("AT+CNMP=13"); // Forzar modo GSM solamente (Digi funciona mejor así)
   sendAT("AT+CGNSPWR=1"); // Encender GPS interno
 #endif
 
   // ---------- NETWORK ----------
   sendAT("AT+CTZU=1"); // Automatic Time Zone Update
 #ifdef LILYGO_SIM7000G
-  sendAT("AT+CNACT=1,\"" APN "\"", 5000);
+  sendAT("AT+CGATT=1", 5000); // Forzar adjuntar GPRS
+  sendAT("AT+CGDCONT=1,\"IP\",\"" APN "\"", 3000); // Configurar APN en el contexto 1
+  delay(2000);
+  sendAT("AT+CNACT=1,\"" APN "\"", 10000);
 #else
   sendAT("AT+CGDCONT=1,\"IP\",\"" APN "\"");
   sendAT("AT+CGACT=1,1");
@@ -759,10 +835,12 @@ void setup() {
   delay(2000);
 #ifdef LILYGO_SIM7000G
   sendAT("AT+CNACT?");
+  // Configurar LBS (Location Based Service)
+  sendAT("AT+CLBSCFG=1,1"); // Cambiado a 1,1 que es más común en SIM7000G
 #else
   sendAT("AT+IPADDR");
-#endif
   sendAT("AT+CDNSCFG=\"8.8.8.8\",\"1.1.1.1\"");
+#endif
   sendAT("AT+CLBSCFG=1,3");             
   
   syncNetworkTime();
@@ -772,10 +850,10 @@ void setup() {
   sendAT("AT+HTTPTERM", 3000);
 #endif
 #ifdef LILYGO_SIM7000G
-  sendAT("AT+CSSLCFG=\"sslversion\",1,3");      // TLS 1.2, Perfil 1
-  sendAT("AT+CSSLCFG=\"authmode\",1,0");        // Sin CA
-  sendAT("AT+CSSLCFG=\"ignorertctime\",1,1");   // Sin RTC
-  sendAT("AT+CSSLCFG=\"sni\",1,\"jmisxaxqwtkudvkytkha.supabase.co\"");
+  sendAT("AT+CSSLCFG=\"sslversion\",0,3");      // TLS 1.2
+  sendAT("AT+CSSLCFG=\"authmode\",0,0");        // Sin CA
+  sendAT("AT+CSSLCFG=\"ignorertctime\",0,1");   // Sin RTC
+  sendAT("AT+CSSLCFG=\"sni\",0,\"jmisxaxqwtkudvkytkha.supabase.co\"");
 #else
   sendAT("AT+CSSLCFG=\"sslversion\",0,4");      // TLS 1.2
   sendAT("AT+CSSLCFG=\"authmode\",0,0");        // Sin CA
@@ -844,24 +922,6 @@ void sendTheftEvent() {
   Serial.printf("[THEFT_SEND] Vehículo: %s | Bat: %d→%d%% | Distancia: %.2fkm | Puntos: %d\n", 
     VEHICLE_ID, theftStartBat, endBat, theftDistance, theftPointsCount);
   
-  sendAT("AT+HTTPTERM", 3000);
-  sendAT("AT+HTTPINIT", 3000);
-#ifdef LILYGO_SIM7000G
-  sendAT("AT+HTTPPARA=\"CID\",1", 3000);
-  sendAT("AT+HTTPSSL=1", 3000);
-#else
-  sendAT("AT+HTTPPARA=\"SSLCFG\",0", 3000);
-#endif
-
-  // Enviar a trips como recorrido normal marcado como robo
-  String url = String(SUPABASE_URL);
-  url.replace("telemetry", "trips");
-  url += "?apikey=" + String(SUPABASE_KEY);
-  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
-  sendAT(urlCmd.c_str(), 3000);
-  
-  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"", 3000);
-
   // Priorizar recorrido completo desde SD
   String fullPath = readPathFromSD(currentTheftFile);
   if (fullPath == "") fullPath = theftPathJson; // Fallback a RAM
@@ -879,23 +939,9 @@ void sendTheftEvent() {
 
   Serial.println(getTimestamp() + " [TRIP_INSERT] " + tripBody.substring(0, 150));
 
-  String dcmd = "AT+HTTPDATA=" + String(tripBody.length()) + ",5000";
-  sendAT(dcmd.c_str(), 3000);
-  SerialAT.print(tripBody);
-  delay(500);
-
-  SerialAT.println("AT+HTTPACTION=1");
-  uint32_t t = millis();
-  String actionRes = "";
-  while (millis() - t < 15000) {
-    while (SerialAT.available()) {
-      actionRes += (char)SerialAT.read();
-    }
-    if (actionRes.indexOf("+HTTPACTION:") != -1) break;
+  if (postToSupabase("/rest/v1/trips", tripBody)) {
+    Serial.println(getTimestamp() + " [TRIP_INSERT] Evento de robo guardado en Supabase");
   }
-  
-  sendAT("AT+HTTPTERM", 3000);
-  Serial.println(getTimestamp() + " [TRIP_INSERT] Trip guardado en Supabase");
 }
 
 void sendTripSummary() {
@@ -918,35 +964,6 @@ void sendTripSummary() {
     tripPointsStored++;
   }
 
-  // ---------- HTTP CONFIG ----------
-  sendAT("AT+HTTPTERM");
-  sendAT("AT+HTTPSSL=1");
-sendAT("AT+HTTPPARA=\"CID\",1");
-sendAT("AT+HTTPPARA=\"SSLCFG\",1");
-  sendAT("AT+HTTPINIT");
-#ifdef LILYGO_SIM7000G
-  sendAT("AT+HTTPPARA=\"CID\",1");
-  sendAT("AT+HTTPSSL=1");
-#else
-  sendAT("AT+HTTPPARA=\"SSLCFG\",0");
-#endif
-
-  String url = String(SUPABASE_URL);
-  url.replace("telemetry", "trips");
-  url += "?apikey=";
-  url += SUPABASE_KEY;
-  String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
-  sendAT(urlCmd.c_str());
-
-  sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"");
-#ifdef LILYGO_SIM7000G
-  String authHeader = "Authorization: Bearer " + String(SUPABASE_KEY);
-  String ud = "AT+HTTPPARA=\"HEADER\",\"" + authHeader + "\"";
-#else
-  String ud = "AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer " + String(SUPABASE_KEY) + "\"";
-#endif
-  sendAT(ud.c_str());
-
   // Priorizar recorrido completo desde SD
   String fullPath = readPathFromSD(currentTripFile);
   if (fullPath == "") fullPath = tripPathJson; // Fallback a RAM
@@ -964,15 +981,11 @@ sendAT("AT+HTTPPARA=\"SSLCFG\",1");
                 ",\"end_battery_level\":" + String(endBatA) + 
                 ",\"path\":[" + fullPath + "]}";
 
-  Serial.println(getTimestamp() + " [TRIP_END] " + body);
+  Serial.println(getTimestamp() + " [TRIP_END] " + body.substring(0, 150));
 
-  String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
-  sendAT(dcmd.c_str()); 
-  SerialAT.print(body);
-  delay(500);
-
-  sendAT("AT+HTTPACTION=1", 15000);
-  sendAT("AT+HTTPTERM");
+  if (postToSupabase("/rest/v1/trips", body)) {
+    Serial.println(getTimestamp() + " [TRIP_END] Trip guardado en Supabase");
+  }
 }
 
 float calculateDistance(float lat1, float lon1, float lat2, float lon2) {

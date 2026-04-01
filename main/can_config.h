@@ -28,6 +28,8 @@ struct CANConfig {
     uint32_t time_tx_id = 0x510;  // ID configurable para inyección de hora
     uint8_t time_hour_byte = 5;    // Byte donde va la hora (0-7)
     uint8_t time_min_byte = 6;     // Byte donde van los minutos (0-7)
+    int8_t timezone_offset = 0;    // UTC offset
+    bool dst_mode = false;         // Horario de verano activo
 };
 
 CANConfig manualConfig;
