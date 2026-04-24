@@ -17,6 +17,7 @@ build/
 *.swo
 
 # Hardware/Build
+main/config.h
 /main/build/
 /main/sketch/
 *.bin

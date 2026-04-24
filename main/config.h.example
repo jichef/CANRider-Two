@@ -1,0 +1,12 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#define GPRS_USER ""
+#define GPRS_PASS ""
+
+#define APN "internet.digimobil.es"
+#define SUPABASE_URL "https://YOUR_PROJECT_REF.supabase.co/rest/v1/telemetry"
+#define SUPABASE_KEY "YOUR_ANON_KEY"
+#define VEHICLE_ID "YOUR_VEHICLE_UUID"
+
+#endif
