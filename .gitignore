@@ -9,6 +9,7 @@ out/
 build/
 .vercel
 *.log
+tsconfig.tsbuildinfo
 
 # IDEs
 .vscode/

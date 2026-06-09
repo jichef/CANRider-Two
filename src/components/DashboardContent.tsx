@@ -1,22 +1,24 @@
 'use client';
 
-import { 
-  Battery, 
-  MapPin, 
-  Navigation, 
-  Zap, 
-  Signal, 
-  Clock, 
+import {
+  Battery,
+  MapPin,
+  Navigation,
+  Zap,
+  Clock,
   Route as RouteIcon,
   ShieldCheck,
   Activity,
-  Smartphone
+  Thermometer,
+  Signal,
+  Cpu,
 } from 'lucide-react';
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 
-const Map = dynamic(() => import('@/components/Map'), { 
+const Map = dynamic(() => import('@/components/Map'), {
   ssr: false,
   loading: () => (
     <div className="h-full w-full bg-zinc-900 animate-pulse flex items-center justify-center min-h-[400px]">
@@ -31,39 +33,32 @@ export default function DashboardContent() {
   const [trips, setTrips] = useState<any[]>([]);
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isConfigured, setIsConfigured] = useState(true);
+  const [isConfigured] = useState(!!supabase);
   const [isStale, setIsStale] = useState(false);
 
-  // Madrid por defecto si no hay datos
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
 
   useEffect(() => {
-    // Comprobar si los datos son antiguos (más de 2 minutos)
     const checkStale = () => {
       if (telemetry?.timestamp) {
         const diff = Date.now() - new Date(telemetry.timestamp).getTime();
-        setIsStale(diff > 120000); // 2 minutos
+        setIsStale(diff > 120000);
       } else {
         setIsStale(true);
       }
     };
-
     const interval = setInterval(checkStale, 30000);
     checkStale();
     return () => clearInterval(interval);
   }, [telemetry]);
 
   useEffect(() => {
-    // Si el cliente no se pudo crear, estamos en modo offline
     if (!supabase) {
-      setIsConfigured(false);
       setLoading(false);
       return;
     }
 
-    // 1. Cargar último dato y últimos viajes
     const fetchData = async () => {
-      // Cargar telemetría
       const { data: telData } = await supabase
         .from('telemetry')
         .select('*')
@@ -78,23 +73,18 @@ export default function DashboardContent() {
         }
       }
 
-      // Cargar viajes
       const { data: tripData } = await supabase
         .from('trips')
         .select('*')
         .order('start_time', { ascending: false })
         .limit(5);
 
-      if (tripData) {
-        setTrips(tripData);
-      }
-
+      if (tripData) setTrips(tripData);
       setLoading(false);
     };
 
     fetchData();
 
-    // 2. Suscribirse a cambios en tiempo real
     const channel = supabase
       .channel('realtime_telemetry')
       .on(
@@ -110,82 +100,171 @@ export default function DashboardContent() {
       )
       .subscribe();
 
-    return () => {
-      if (supabase && channel) {
-        supabase.removeChannel(channel);
-      }
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [supabase]);
 
+  // SoC: CAN tiene prioridad sobre AT+CBC
+  const socValue = telemetry?.soc ?? telemetry?.battery_level;
+  // Carga: BMS CAN tiene prioridad sobre AT+CBC
+  const isCharging = !!(telemetry?.bms_charging || telemetry?.is_charging);
+  // Temperatura media de celdas disponibles
+  const temps = [telemetry?.temp1, telemetry?.temp2, telemetry?.temp3, telemetry?.temp4]
+    .filter((v): v is number => v != null);
+  const avgTemp = temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : undefined;
+
+  const hasCAN = telemetry?.pack_voltage != null
+    || telemetry?.battery_current != null
+    || avgTemp != null
+    || telemetry?.charge_current != null
+    || telemetry?.cell_voltage != null;
+
   const stats = [
-    { 
-      label: 'BATERÍA', 
-      value: telemetry?.battery_level !== undefined ? `${telemetry.battery_level}%` : '---', 
-      icon: Battery, 
-      color: 'text-emerald-400', 
+    {
+      label: 'SOC',
+      value: socValue != null ? `${Math.round(socValue)}` : '---',
+      unit: socValue != null ? '%' : '',
+      icon: Battery,
+      color: 'text-emerald-400',
       glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
       border: 'border-emerald-500/20'
     },
-    { 
-      label: 'VELOCIDAD', 
-      value: telemetry?.speed !== undefined ? Math.round(telemetry.speed) : '---', 
-      unit: telemetry?.speed !== undefined ? 'km/h' : '',
-      icon: Navigation, 
-      color: 'text-cyan-400', 
+    {
+      label: 'VELOCIDAD',
+      value: telemetry?.speed != null ? Math.round(telemetry.speed) : '---',
+      unit: telemetry?.speed != null ? 'km/h' : '',
+      icon: Navigation,
+      color: 'text-cyan-400',
       glow: 'shadow-[0_0_15px_rgba(34,211,238,0.3)]',
       border: 'border-cyan-500/20'
     },
-    { 
-      label: 'SISTEMA', 
-      value: telemetry ? (telemetry.is_charging ? 'CHARGING' : 'READY') : '---', 
-      icon: ShieldCheck, 
-      color: telemetry?.is_charging ? 'text-amber-400' : (telemetry ? 'text-indigo-400' : 'text-zinc-600'), 
-      glow: telemetry?.is_charging ? 'shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]',
+    {
+      label: 'TENSIÓN',
+      value: telemetry?.pack_voltage != null ? telemetry.pack_voltage.toFixed(1) : '---',
+      unit: telemetry?.pack_voltage != null ? 'V' : '',
+      icon: Zap,
+      color: 'text-amber-400',
+      glow: 'shadow-[0_0_15px_rgba(251,191,36,0.3)]',
+      border: 'border-amber-500/20'
+    },
+    {
+      label: 'SISTEMA',
+      value: telemetry ? (isCharging ? 'CHARGING' : 'READY') : '---',
+      unit: '',
+      icon: ShieldCheck,
+      color: isCharging ? 'text-amber-400' : (telemetry ? 'text-indigo-400' : 'text-zinc-600'),
+      glow: isCharging ? 'shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]',
       border: 'border-indigo-500/20'
     },
-    { 
-      label: 'SEÑAL', 
-      value: telemetry?.signal_strength !== undefined ? telemetry.signal_strength : '---', 
-      unit: telemetry?.signal_strength !== undefined ? 'dBm' : '',
-      icon: Signal, 
-      color: 'text-fuchsia-400', 
+    {
+      label: 'SEÑAL',
+      value: telemetry?.signal_strength != null ? String(telemetry.signal_strength) : '---',
+      unit: telemetry?.signal_strength != null ? 'dBm' : '',
+      icon: Signal,
+      color: telemetry?.signal_strength != null && telemetry.signal_strength > -85
+        ? 'text-fuchsia-400'
+        : 'text-zinc-600',
       glow: 'shadow-[0_0_15px_rgba(232,121,249,0.3)]',
       border: 'border-fuchsia-500/20'
     },
   ];
 
+  const canStats = [
+    {
+      label: 'CORRIENTE',
+      value: telemetry?.battery_current != null
+        ? `${telemetry.battery_current > 0 ? '+' : ''}${telemetry.battery_current.toFixed(1)}`
+        : null,
+      unit: 'A',
+      icon: Activity,
+      color: (telemetry?.battery_current ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400',
+      glow: 'shadow-[0_0_15px_rgba(52,211,153,0.2)]',
+      border: 'border-emerald-500/20',
+    },
+    {
+      label: 'TEMP CELDAS',
+      value: avgTemp != null ? avgTemp.toFixed(0) : null,
+      unit: '°C',
+      icon: Thermometer,
+      color: avgTemp != null && avgTemp > 45 ? 'text-red-400' : 'text-sky-400',
+      glow: 'shadow-[0_0_15px_rgba(56,189,248,0.2)]',
+      border: 'border-sky-500/20',
+    },
+    {
+      label: 'I CARGA',
+      value: telemetry?.charge_current != null ? telemetry.charge_current.toFixed(1) : null,
+      unit: 'A',
+      icon: Zap,
+      color: 'text-violet-400',
+      glow: 'shadow-[0_0_15px_rgba(167,139,250,0.2)]',
+      border: 'border-violet-500/20',
+    },
+    {
+      label: 'V CELDA',
+      value: telemetry?.cell_voltage != null ? telemetry.cell_voltage.toFixed(3) : null,
+      unit: 'V',
+      icon: Battery,
+      color: 'text-fuchsia-400',
+      glow: 'shadow-[0_0_15px_rgba(232,121,249,0.2)]',
+      border: 'border-fuchsia-500/20',
+    },
+  ];
+
+  const StatCard = ({ stat }: { stat: (typeof stats)[0] }) => (
+    <div className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-6 rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
+      <div className="flex items-center justify-between mb-6">
+        <div className={`p-3 rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
+          <stat.icon size={22} />
+        </div>
+        <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
+          <div className={`h-full bg-current ${stat.color} w-2/3 opacity-50`} />
+        </div>
+      </div>
+      <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
+      <div className="flex items-baseline gap-1">
+        <h3 className="text-3xl font-black text-white font-mono">{stat.value}</h3>
+        {stat.unit && <span className="text-xs font-bold text-zinc-600">{stat.unit}</span>}
+      </div>
+    </div>
+  );
+
+  void loading; // usado implícitamente via isConfigured + telemetry===null
+
   return (
     <div className="min-h-screen bg-black text-zinc-300 font-sans selection:bg-cyan-500/30 pb-24 md:pb-8">
-      {/* Fondo con resplandor radial */}
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_-20%,_#1e1b4b_0%,_#000_80%)] pointer-events-none" />
 
       <div className="relative max-w-7xl mx-auto p-4 md:p-8">
-        {/* Aviso de Conexión Pendiente */}
         {!isConfigured && (
           <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-4 animate-pulse">
             <div className="p-2 bg-amber-500/20 rounded-lg text-amber-500">
-              <Signal size={20} />
+              <ShieldCheck size={20} />
             </div>
             <div>
               <p className="text-xs font-black tracking-widest text-amber-500 uppercase">System Alert: Database Offline</p>
-              <p className="text-[10px] text-amber-500/70 uppercase">Faltan las credenciales de Supabase en .env.local. El portal está mostrando datos de simulación.</p>
+              <p className="text-[10px] text-amber-500/70 uppercase">Faltan las credenciales de Supabase en .env.local</p>
             </div>
           </div>
         )}
 
-        {/* Header */}
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-cyan-500 mb-1">
-              <Activity size={18} className="animate-pulse" />
-              <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
-            </div>
+          <div className="flex items-center gap-2 text-cyan-500">
+            <Activity size={18} className="animate-pulse" />
+            <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
           </div>
-          
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/signals"
+              className="p-2 rounded-xl bg-zinc-900 border border-white/10 text-zinc-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-colors"
+              title="Configurar señales CAN"
+            >
+              <Cpu size={18} />
+            </Link>
+
           <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
             <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
-              isConfigured && telemetry && !isStale 
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+              isConfigured && telemetry && !isStale
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                 : 'bg-red-500/10 text-red-400 border-red-500/20'
             }`}>
               <div className={`w-2 h-2 rounded-full ${
@@ -199,31 +278,34 @@ export default function DashboardContent() {
               {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
             </div>
           </div>
+          </div>
         </header>
 
-        {/* Grid de Estadísticas */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-          {stats.map((stat) => (
-            <div key={stat.label} className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-6 rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
-              <div className="flex items-center justify-between mb-6">
-                <div className={`p-3 rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
-                  <stat.icon size={22} />
-                </div>
-                <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
-                  <div className={`h-full bg-current ${stat.color} w-2/3 opacity-50`} />
-                </div>
-              </div>
-              <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
-              <div className="flex items-baseline gap-1">
-                <h3 className="text-3xl font-black text-white font-mono">{stat.value}</h3>
-                {stat.unit && <span className="text-xs font-bold text-zinc-600">{stat.unit}</span>}
-              </div>
-            </div>
-          ))}
+        {/* Stats principales */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+          {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
         </div>
 
+        {/* Stats CAN — solo visibles cuando el bus ha enviado datos */}
+        {hasCAN && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+            {canStats.map((stat) => stat.value != null && (
+              <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-5 py-4 rounded-2xl transition-all hover:bg-zinc-900/50`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <stat.icon size={14} className={stat.color} />
+                  <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase">{stat.label}</p>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className={`text-xl font-black font-mono ${stat.color}`}>{stat.value}</span>
+                  <span className="text-[10px] font-bold text-zinc-600">{stat.unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Contenedor del Mapa */}
+          {/* Mapa */}
           <div className="lg:col-span-2 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex flex-col transition-all hover:border-white/20">
             <div className="p-5 border-b border-white/5 flex items-center justify-between bg-zinc-950/20">
               <div className="flex items-center gap-3">
@@ -235,12 +317,12 @@ export default function DashboardContent() {
                     {selectedTrip ? 'ROUTE_ANALYSIS' : 'LIVE_LOCATION'}
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono uppercase">
-                    {selectedTrip ? `Trip ID: ${selectedTrip.slice(0,8)}` : 'Madrid, Spain • 40.4168° N, 3.7038° W'}
+                    {selectedTrip ? `Trip ID: ${selectedTrip.slice(0, 8)}` : 'Madrid, Spain • 40.4168° N, 3.7038° W'}
                   </span>
                 </div>
               </div>
               {selectedTrip && (
-                <button 
+                <button
                   onClick={() => setSelectedTrip(null)}
                   className="px-3 py-1 rounded-lg bg-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors"
                 >
@@ -249,15 +331,14 @@ export default function DashboardContent() {
               )}
             </div>
             <div className="flex-1 relative min-h-[450px]">
-              <Map 
-                center={currentPosition} 
-                path={trips.find(t => t.id === selectedTrip)?.path || (selectedTrip === '1' ? [[40.41678, -3.70379], [40.42, -3.71], [40.43, -3.72]] : undefined)} 
+              <Map
+                center={currentPosition}
               />
               <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_2px,3px_100%] z-20 opacity-20" />
             </div>
           </div>
 
-          {/* Historial de Viajes */}
+          {/* Historial de viajes */}
           <div className="bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl">
             <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-3">
@@ -266,25 +347,28 @@ export default function DashboardContent() {
                 </div>
                 <h2 className="text-lg font-bold text-white">HISTORIAL</h2>
               </div>
-              <button className="text-[10px] font-bold text-zinc-500 hover:text-white transition-colors tracking-widest uppercase">
-                View All
-              </button>
             </div>
-            
+
             <div className="space-y-4">
               {trips.length > 0 ? (
                 trips.map((trip) => {
-                  const date = new Date(trip.start_time).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase();
+                  const date = new Date(trip.start_time)
+                    .toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
+                    .toUpperCase();
                   const isSelected = selectedTrip === trip.id;
-                  const batteryUsed = trip.consumption || (trip.start_battery_level && trip.end_battery_level ? trip.start_battery_level - trip.end_battery_level : null);
-                  
+                  const batteryUsed = trip.consumption ?? (
+                    trip.start_battery_level != null && trip.end_battery_level != null
+                      ? trip.start_battery_level - trip.end_battery_level
+                      : null
+                  );
+
                   return (
-                    <button 
-                      key={trip.id} 
+                    <button
+                      key={trip.id}
                       onClick={() => setSelectedTrip(isSelected ? null : trip.id)}
                       className={`w-full group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
-                        isSelected 
-                          ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]' 
+                        isSelected
+                          ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]'
                           : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
                       }`}
                     >
@@ -301,9 +385,9 @@ export default function DashboardContent() {
                           </div>
                           <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
                             <Clock size={12} />
-                            {trip.duration || trip.time || 'N/A'}
+                            {trip.duration ?? trip.time ?? 'N/A'}
                           </div>
-                          {batteryUsed && (
+                          {batteryUsed != null && (
                             <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500/80">
                               <Battery size={12} />
                               -{batteryUsed}%
@@ -314,7 +398,7 @@ export default function DashboardContent() {
                       <div className={`p-2 rounded-xl transition-all ${
                         isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
                       }`}>
-                        <Zap size={14} fill={isSelected ? "currentColor" : "none"} />
+                        <Zap size={14} fill={isSelected ? 'currentColor' : 'none'} />
                       </div>
                     </button>
                   );
@@ -327,32 +411,27 @@ export default function DashboardContent() {
               )}
             </div>
 
-            {telemetry?.battery_health && (
-              <div className="mt-8 p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-transparent border border-indigo-500/20">
-                <p className="text-[10px] font-bold text-indigo-400 mb-1 tracking-widest uppercase">Battery Health</p>
-                <div className="flex items-end justify-between">
-                  <span className="text-2xl font-black text-white font-mono">{telemetry.battery_health}%</span>
-                  <span className="text-[10px] text-zinc-500 mb-1 italic">Optimal Performance</span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Navegación Inferior (Móvil) */}
+      {/* Navegación inferior (móvil) */}
       <nav className="fixed bottom-6 left-6 right-6 md:hidden z-50">
         <div className="bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-2 flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
           {[
-            { icon: Activity, label: 'Live' },
-            { icon: RouteIcon, label: 'Trips' },
-            { icon: MapPin, label: 'Map' },
-            { icon: Smartphone, label: 'Device' }
+            { icon: Activity, label: 'Live', href: '/' },
+            { icon: RouteIcon, label: 'Trips', href: '/' },
+            { icon: MapPin, label: 'Map', href: '/' },
+            { icon: Cpu, label: 'CAN', href: '/signals' },
           ].map((item, i) => (
-            <button key={item.label} className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all ${i === 0 ? 'bg-cyan-500/20 text-cyan-400' : 'text-zinc-500'}`}>
+            <Link
+              key={item.label}
+              href={item.href}
+              className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all ${i === 0 ? 'bg-cyan-500/20 text-cyan-400' : 'text-zinc-500'}`}
+            >
               <item.icon size={20} />
               <span className="text-[9px] font-black uppercase tracking-widest">{item.label}</span>
-            </button>
+            </Link>
           ))}
         </div>
       </nav>

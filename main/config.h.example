@@ -1,12 +1,32 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Copia este archivo como config.h y rellena los valores reales.
+// config.h está en .gitignore y NUNCA debe commitearse.
+
 #define GPRS_USER ""
 #define GPRS_PASS ""
 
-#define APN "internet.digimobil.es"
-#define SUPABASE_URL "https://YOUR_PROJECT_REF.supabase.co/rest/v1/telemetry"
-#define SUPABASE_KEY "YOUR_ANON_KEY"
-#define VEHICLE_ID "YOUR_VEHICLE_UUID"
+#define APN        "internet.tuoperadora.es"
+// URL base del proyecto Supabase (sin path, sin barra final)
+#define SUPABASE_URL \
+"https://XXXXXXXXXXXXXXXXXXXX.supabase.co"
+#define SUPABASE_KEY \
+"TU_SUPABASE_ANON_KEY_AQUI"
+#define VEHICLE_ID "tu-uuid-de-vehiculo-aqui"
+
+// ── CAN bus ────────────────────────────────────────────────────────────────────
+// Pines del transceptor CAN (MCP2551, TJA1050, etc.) conectado al ESP32.
+// Ajusta según tu cableado; cualquier GPIO de salida sirve.
+#define CAN_TX_PIN       21
+#define CAN_RX_PIN       22
+
+// Velocidad del bus. Macros disponibles del driver TWAI del ESP32:
+//   TWAI_TIMING_CONFIG_500KBITS()  → 500 kbps (CAN automotriz estándar)
+//   TWAI_TIMING_CONFIG_250KBITS()  → 250 kbps (J1939 / vehículos industriales)
+//   TWAI_TIMING_CONFIG_125KBITS()  → 125 kbps
+#define CAN_SPEED        TWAI_TIMING_CONFIG_500KBITS()
+// Las tramas TX se configuran desde el portal web (Supabase can_signals),
+// no hay IDs hardcodeados en el firmware.
 
 #endif
