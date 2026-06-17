@@ -2,6 +2,7 @@
 
 import {
   Battery,
+  BatteryCharging,
   MapPin,
   Navigation,
   Zap,
@@ -274,6 +275,26 @@ export default function DashboardContent() {
                 {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
               </span>
             </div>
+
+            {/* Batería interna ESP32 (AT+CBC) */}
+            {telemetry?.battery_level != null && (
+              <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all ${
+                telemetry.is_charging
+                  ? 'text-amber-400 border-amber-500/20 bg-amber-500/10'
+                  : (telemetry.battery_level < 20
+                      ? 'text-red-400 border-red-500/20 bg-red-500/10'
+                      : 'text-zinc-400 border-white/10')
+              }`}>
+                {telemetry.is_charging
+                  ? <BatteryCharging size={14} />
+                  : <Battery size={14} />}
+                <span className="text-xs font-bold font-mono">{telemetry.battery_level}%</span>
+                {telemetry.battery_voltage != null && (
+                  <span className="text-[10px] font-mono text-zinc-500">{telemetry.battery_voltage.toFixed(2)}V</span>
+                )}
+              </div>
+            )}
+
             <div className="pr-4 text-xs font-mono text-zinc-500">
               {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
             </div>

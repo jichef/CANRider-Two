@@ -4,6 +4,22 @@
 // Copia este archivo como config.h y rellena los valores reales.
 // config.h está en .gitignore y NUNCA debe commitearse.
 
+// ── Módulo modem ──────────────────────────────────────────────────────────────
+// Descomenta el módulo que tienes. Solo puede estar activo uno.
+//   A7670G  → LilyGo T-A7670G  (LTE Cat-1, recomendado para velocidad de datos)
+//   SIM7000G → LilyGo T-SIM7000G (LTE Cat-M1/NB-IoT, menor consumo)
+#define MODEM_A7670G
+// #define MODEM_SIM7000G
+
+// — Define de placa para AT/utilities.h — no tocar —
+#if defined(MODEM_A7670G)
+  #define LILYGO_T_A7670
+#elif defined(MODEM_SIM7000G)
+  #define LILYGO_SIM7000G
+#else
+  #error "Define MODEM_A7670G o MODEM_SIM7000G en config.h"
+#endif
+
 #define GPRS_USER ""
 #define GPRS_PASS ""
 

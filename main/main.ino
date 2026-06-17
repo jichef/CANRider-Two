@@ -1,24 +1,13 @@
-#define LILYGO_T_A7670
-#include "AT/utilities.h"
-#include "config.h"
+#include "config.h"        // primero: define LILYGO_T_A7670 o LILYGO_SIM7000G
+#include "AT/utilities.h"  // usa el define de placa de config.h
 #include "driver/twai.h"
+#include "structs.h"
 
 // ── Timing ────────────────────────────────────────────────────────────────────
 #define POST_INTERVAL_MS  15000UL
 #define RETRY_WAIT_MS     10000UL
 #define HTTP_FAIL_MAX     3
 #define MAX_HTTP_BODY     4096    // bytes máximos de respuesta GET
-
-// ── Referencia de tiempo ──────────────────────────────────────────────────────
-struct TimeRef {
-    bool     valid;
-    bool     hasPos;
-    float    lat, lon, speed_kmh;
-    uint8_t  hour, min, sec;
-    uint8_t  day, month;
-    uint16_t year;
-    uint32_t capturedAt;
-};
 
 static TimeRef          lastTime = {};
 static SemaphoreHandle_t timeMux = NULL;
@@ -49,37 +38,11 @@ static void storeTime(const TimeRef& t) {
 //   scale       float    -- valor_real = raw * scale + offset_val
 //   offset_val  float
 
-#define MAX_SIGNALS 32
-
-struct CANSignal {
-    uint32_t frameId;
-    char     direction;   // 'r'=RX (leer del bus), 't'=TX (emitir al bus)
-    uint16_t txIntervalMs;
-    bool     dualMode;    // true → también escucha frameId+1 (solo RX)
-    char     name[20];
-    uint8_t  byteStart;
-    uint8_t  byteLen;
-    uint8_t  bitMask;     // 0=extracción de bytes; N>0 → result=(data[byteStart]&N)?1:0
-    bool     bigEndian;
-    bool     isSigned;
-    float    scale;
-    float    offsetVal;
-    float    value;
-    bool     updated;
-};
-
 static CANSignal         canSignals[MAX_SIGNALS];
 static int               canSignalCount = 0;
 static SemaphoreHandle_t canMux         = NULL;
 
 // ── Tramas TX dinámicas (agrupadas por frame_id) ──────────────────────────────
-#define MAX_TX_FRAMES 8
-
-struct TxFrame {
-    uint32_t frameId;
-    uint32_t intervalMs;
-    uint32_t lastSentMs;
-};
 
 static TxFrame txFrames[MAX_TX_FRAMES];
 static int     txFrameCount = 0;
@@ -125,28 +88,22 @@ String queryAT(const char* cmd, const char* prefix, uint32_t timeout = 5000) {
     return "";
 }
 
-// Lee exactamente `size` bytes del cuerpo HTTP tras el encabezado +HTTPREAD.
-// Formato del módem: "+HTTPREAD: N\r\n<N bytes>\r\nOK\r\n"
-String httpReadBody(int size) {
+// ── Lectura de respuesta HTTP ─────────────────────────────────────────────────
+#if defined(MODEM_A7670G)
+// A7670G: "+HTTPREAD: N\r\n<N bytes>\r\nOK\r\n"
+static String httpReadBody(int size) {
     if (size <= 0 || size > MAX_HTTP_BODY) return "";
     String cmd = "AT+HTTPREAD=0," + String(size);
     Serial.print(">> "); Serial.println(cmd);
     SerialAT.println(cmd);
-
-    String buf;
-    bool   bodyMode  = false;
-    int    bodyBytes = 0;
+    String buf; bool bodyMode = false; int bodyBytes = 0;
     uint32_t t = millis();
-
     while (millis() - t < 10000) {
         while (SerialAT.available()) {
             char c = SerialAT.read();
             if (!bodyMode) {
                 buf += c;
-                // El encabezado termina en la primera '\n' que contiene "+HTTPREAD:"
-                if (c == '\n' && buf.indexOf("+HTTPREAD:") >= 0) {
-                    buf = ""; bodyMode = true;
-                }
+                if (c == '\n' && buf.indexOf("+HTTPREAD:") >= 0) { buf = ""; bodyMode = true; }
             } else {
                 buf += c;
                 if (++bodyBytes >= size) return buf.substring(0, size);
@@ -155,6 +112,30 @@ String httpReadBody(int size) {
     }
     return buf;
 }
+#else // SIM7000G
+// SIM7000G: "+SHREAD: N\r\n<N bytes>"
+static String sim7000ReadBody(int size) {
+    if (size <= 0 || size > MAX_HTTP_BODY) return "";
+    String cmd = "AT+SHREAD=0," + String(size);
+    Serial.print(">> "); Serial.println(cmd);
+    SerialAT.println(cmd);
+    String buf; bool bodyMode = false; int bodyBytes = 0;
+    uint32_t t = millis();
+    while (millis() - t < 10000) {
+        while (SerialAT.available()) {
+            char c = SerialAT.read();
+            if (!bodyMode) {
+                buf += c;
+                if (c == '\n' && buf.indexOf("+SHREAD:") >= 0) { buf = ""; bodyMode = true; }
+            } else {
+                buf += c;
+                if (++bodyBytes >= size) return buf.substring(0, size);
+            }
+        }
+    }
+    return buf;
+}
+#endif
 
 // ── JSON helpers (sin dependencias externas) ──────────────────────────────────
 static int32_t jsonInt(const String& j, const char* field) {
@@ -200,21 +181,17 @@ static String nextJsonObj(const String& j, int from, int& next) {
 }
 
 // ── HTTP GET genérico ─────────────────────────────────────────────────────────
-// Gestiona su propio ciclo HTTPINIT/HTTPTERM.
 // `path` ejemplo: "/rest/v1/can_signals?vehicle_id=eq.UUID&select=*"
+#if defined(MODEM_A7670G)
 String httpGet(const String& path) {
     sendAT("AT+HTTPTERM");
     if (!sendAT("AT+HTTPINIT"))               return "";
     if (!sendAT("AT+HTTPPARA=\"SSLCFG\",0")) return "";
-
     String url = String(SUPABASE_URL) + path + "&apikey=" + SUPABASE_KEY;
     String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
     if (!sendAT(urlCmd.c_str())) { sendAT("AT+HTTPTERM"); return ""; }
-
     String auth = String("AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer ") + SUPABASE_KEY + "\"";
     if (!sendAT(auth.c_str()))   { sendAT("AT+HTTPTERM"); return ""; }
-
-    // +HTTPACTION: 0,<status>,<size>
     String actionLine = queryAT("AT+HTTPACTION=0", "+HTTPACTION:", 15000);
     int c1 = actionLine.indexOf(','), c2 = actionLine.indexOf(',', c1 + 1);
     if (c1 < 0 || c2 < 0) { sendAT("AT+HTTPTERM"); return ""; }
@@ -224,11 +201,37 @@ String httpGet(const String& path) {
         Serial.printf("[GET] HTTP %d size=%d\n", status, size);
         sendAT("AT+HTTPTERM"); return "";
     }
-
     String body = httpReadBody(size);
     sendAT("AT+HTTPTERM");
     return body;
 }
+#else // SIM7000G — sesión HTTPS por petición
+String httpGet(const String& path) {
+    String confCmd = "AT+SHCONF=\"URL\",\"" + String(SUPABASE_URL) + "\"";
+    if (!sendAT(confCmd.c_str()))               return "";
+    if (!sendAT("AT+SHCONF=\"BODYLEN\",4096"))  return "";
+    if (!sendAT("AT+SHCONF=\"HEADERLEN\",512")) return "";
+    if (!sendAT("AT+SHCONN", "OK", 15000))      return "";
+    sendAT("AT+SHCHEAD");
+    String auth = "AT+SHAHEAD=\"Authorization\",\"Bearer " + String(SUPABASE_KEY) + "\"";
+    sendAT(auth.c_str());
+    String reqPath = path + "&apikey=" + SUPABASE_KEY;
+    String req = "AT+SHREQ=\"" + reqPath + "\",1";  // 1=GET
+    String actionLine = queryAT(req.c_str(), "+SHREQ:", 15000);
+    // +SHREQ: 1,200,SIZE
+    int c1 = actionLine.indexOf(','), c2 = actionLine.indexOf(',', c1 + 1);
+    if (c1 < 0 || c2 < 0) { sendAT("AT+SHDISC"); return ""; }
+    int status = actionLine.substring(c1 + 1, c2).toInt();
+    int size   = actionLine.substring(c2 + 1).toInt();
+    if (status != 200 || size <= 0) {
+        Serial.printf("[GET] HTTP %d size=%d\n", status, size);
+        sendAT("AT+SHDISC"); return "";
+    }
+    String body = sim7000ReadBody(size);
+    sendAT("AT+SHDISC");
+    return body;
+}
+#endif
 
 // ── Config CAN desde Supabase ─────────────────────────────────────────────────
 bool fetchCANConfig() {
@@ -305,20 +308,19 @@ bool fetchCANConfig() {
 // Llamada desde canTask con canMux tomado y time snapshot previo.
 // Señales de reloj: usan la hora NITZ ajustada con el tiempo transcurrido.
 // Cualquier otro nombre: byte fijo = (uint8_t)offsetVal.
-static uint8_t txSignalByte(const CANSignal& s, const TimeRef& t, uint32_t now) {
-    if (!t.valid) return (uint8_t)s.offsetVal;
+static uint8_t txSignalByte(const char* name, float offsetVal, const TimeRef& t, uint32_t now) {
+    if (!t.valid) return (uint8_t)offsetVal;
     uint32_t elapsed  = now - t.capturedAt;
     uint32_t totalSec = (uint32_t)t.hour * 3600u + (uint32_t)t.min * 60u
                       + t.sec + elapsed / 1000u;
-    if (strcmp(s.name, "clock_hours")   == 0) return (uint8_t)((totalSec / 3600u) % 24u);
-    if (strcmp(s.name, "clock_minutes") == 0) return (uint8_t)((totalSec / 60u)   % 60u);
-    if (strcmp(s.name, "clock_seconds") == 0) return (uint8_t)( totalSec          % 60u);
-    if (strcmp(s.name, "clock_day")     == 0) return t.day;
-    if (strcmp(s.name, "clock_month")   == 0) return t.month;
-    if (strcmp(s.name, "clock_year_hi") == 0) return (uint8_t)(t.year >> 8);
-    if (strcmp(s.name, "clock_year_lo") == 0) return (uint8_t)(t.year & 0xFFu);
-    // Byte fijo: el usuario define el valor con offset_val
-    return (uint8_t)s.offsetVal;
+    if (strcmp(name, "clock_hours")   == 0) return (uint8_t)((totalSec / 3600u) % 24u);
+    if (strcmp(name, "clock_minutes") == 0) return (uint8_t)((totalSec / 60u)   % 60u);
+    if (strcmp(name, "clock_seconds") == 0) return (uint8_t)( totalSec          % 60u);
+    if (strcmp(name, "clock_day")     == 0) return t.day;
+    if (strcmp(name, "clock_month")   == 0) return t.month;
+    if (strcmp(name, "clock_year_hi") == 0) return (uint8_t)(t.year >> 8);
+    if (strcmp(name, "clock_year_lo") == 0) return (uint8_t)(t.year & 0xFFu);
+    return (uint8_t)offsetVal;
 }
 
 // ── Decodificación de tramas CAN ──────────────────────────────────────────────
@@ -398,6 +400,9 @@ static float nmeaToDeg(float nmea, char hemi) {
     return (hemi == 'S' || hemi == 'W') ? -result : result;
 }
 
+// ── GPS ───────────────────────────────────────────────────────────────────────
+#if defined(MODEM_A7670G)
+// A7670G: AT+CGPSINFO → "+CGPSINFO: ddmm.mmmm,N,dddmm.mmmm,E,ddmmyy,hhmmss.s,alt,speed,course"
 void readGPS() {
     String resp = queryAT("AT+CGPSINFO", "+CGPSINFO:", 3000);
     int colon = resp.indexOf(':');
@@ -411,11 +416,11 @@ void readGPS() {
     }
     if (fi < 6 || f[0].length() == 0) return;
 
-    TimeRef t     = snapshotTime();
-    t.hasPos      = true;
-    t.lat         = nmeaToDeg(f[0].toFloat(), f[1].length() ? f[1][0] : 'N');
-    t.lon         = nmeaToDeg(f[2].toFloat(), f[3].length() ? f[3][0] : 'E');
-    t.speed_kmh   = (fi >= 8) ? f[7].toFloat() : 0.0f;
+    TimeRef t   = snapshotTime();
+    t.hasPos    = true;
+    t.lat       = nmeaToDeg(f[0].toFloat(), f[1].length() ? f[1][0] : 'N');
+    t.lon       = nmeaToDeg(f[2].toFloat(), f[3].length() ? f[3][0] : 'E');
+    t.speed_kmh = (fi >= 8) ? f[7].toFloat() : 0.0f;
     if (f[4].length() >= 6) {
         t.day = f[4].substring(0,2).toInt(); t.month = f[4].substring(2,4).toInt();
         t.year = 2000 + f[4].substring(4,6).toInt();
@@ -427,11 +432,41 @@ void readGPS() {
     t.capturedAt = millis(); t.valid = true;
     storeTime(t);
 }
+#else // SIM7000G
+// AT+CGNSINF → "+CGNSINF: run,fix,YYYYMMDDHHmmSS.sss,lat,lon,alt,speed,course,..."
+// lat/lon ya en grados decimales (positivo=N/E, negativo=S/W)
+void readGPS() {
+    String resp = queryAT("AT+CGNSINF", "+CGNSINF:", 3000);
+    int colon = resp.indexOf(':');
+    if (colon < 0) return;
+    String d = resp.substring(colon + 2); d.trim();
+
+    String f[10]; int fi = 0, prev = 0;
+    for (int i = 0; i <= (int)d.length() && fi < 10; i++) {
+        if (i == (int)d.length() || d[i] == ',') { f[fi++] = d.substring(prev, i); prev = i + 1; }
+    }
+    // f[0]=run_status f[1]=fix_status f[2]=datetime f[3]=lat f[4]=lon f[6]=speed
+    if (fi < 7 || f[1] != "1" || f[2].length() < 14) return;
+
+    TimeRef t   = snapshotTime();
+    t.hasPos    = true;
+    t.lat       = f[3].toFloat();
+    t.lon       = f[4].toFloat();
+    t.speed_kmh = f[6].toFloat();
+    // datetime: YYYYMMDDHHMMSS
+    t.year  = f[2].substring(0, 4).toInt();
+    t.month = f[2].substring(4, 6).toInt();
+    t.day   = f[2].substring(6, 8).toInt();
+    t.hour  = f[2].substring(8, 10).toInt();
+    t.min   = f[2].substring(10, 12).toInt();
+    t.sec   = f[2].substring(12, 14).toInt();
+    t.capturedAt = millis(); t.valid = true;
+    storeTime(t);
+}
+#endif
 
 // ── Batería ───────────────────────────────────────────────────────────────────
-struct BatReading { bool valid; int pct; float volts; bool charging; };
-
-BatReading readBattery() {
+static BatReading readBattery() {
     BatReading b = {};
     String resp = queryAT("AT+CBC", "+CBC:", 3000);
     int colon = resp.indexOf(':'); if (colon < 0) return b;
@@ -494,7 +529,7 @@ void canTask(void*) {
                     CANSignal& s = canSignals[i];
                     if (s.direction != 't' || s.frameId != tf.frameId) continue;
                     if (s.byteStart < 8)
-                        msg.data[s.byteStart] = txSignalByte(s, t, now);
+                        msg.data[s.byteStart] = txSignalByte(s.name, s.offsetVal, t, now);
                 }
                 twai_transmit(&msg, pdMS_TO_TICKS(5));
             }
@@ -515,11 +550,12 @@ void canTask(void*) {
 }
 
 // ── HTTP POST ─────────────────────────────────────────────────────────────────
+#if defined(MODEM_A7670G)
+
 bool setupHTTP() {
     sendAT("AT+HTTPTERM");
     if (!sendAT("AT+HTTPINIT"))               return false;
     if (!sendAT("AT+HTTPPARA=\"SSLCFG\",0")) return false;
-    // SUPABASE_URL es la URL base (sin path), construimos la URL completa aquí
     String urlCmd = String("AT+HTTPPARA=\"URL\",\"")
                     + SUPABASE_URL + "/rest/v1/telemetry?apikey=" + SUPABASE_KEY + "\"";
     if (!sendAT(urlCmd.c_str())) return false;
@@ -535,9 +571,6 @@ bool httpPost(const String& body) {
     return sendAT("AT+HTTPACTION=1", "+HTTPACTION:", 15000);
 }
 
-// ── POST a tabla arbitraria (para viajes) ────────────────────────────────────
-// Abre su propio ciclo HTTPINIT/HTTPTERM. Después de llamarlo, ir a HTTP_SETUP
-// para restaurar la sesión de telemetría.
 bool httpPostTo(const String& tablePath, const String& body) {
     bool ok = false;
     sendAT("AT+HTTPTERM");
@@ -560,6 +593,55 @@ bool httpPostTo(const String& tablePath, const String& body) {
     return ok;
 }
 
+#else // SIM7000G — cada POST es una sesión HTTPS completa (AT+SH)
+
+// Helper interno: abre conexión HTTPS SIM7000G y pone headers comunes
+static bool sim7000OpenHTTPS() {
+    String confCmd = "AT+SHCONF=\"URL\",\"" + String(SUPABASE_URL) + "\"";
+    if (!sendAT(confCmd.c_str()))               return false;
+    if (!sendAT("AT+SHCONF=\"BODYLEN\",4096"))  return false;
+    if (!sendAT("AT+SHCONF=\"HEADERLEN\",512")) return false;
+    if (!sendAT("AT+SHCONN", "OK", 15000))      return false;
+    sendAT("AT+SHCHEAD");
+    String auth = "AT+SHAHEAD=\"Authorization\",\"Bearer " + String(SUPABASE_KEY) + "\"";
+    sendAT(auth.c_str());
+    sendAT("AT+SHAHEAD=\"Content-Type\",\"application/json\"");
+    return true;
+}
+
+// setupHTTP: sin sesión persistente en SIM7000G, solo verifica conectividad
+bool setupHTTP() { return true; }
+
+bool httpPost(const String& body) {
+    if (!sim7000OpenHTTPS()) return false;
+    String dcmd = "AT+SHBOD=" + String(body.length()) + ",5000";
+    if (!sendAT(dcmd.c_str(), ">", 6000)) { sendAT("AT+SHDISC"); return false; }
+    SerialAT.print(body); delay(200);
+    String req = "AT+SHREQ=\"/rest/v1/telemetry?apikey=" + String(SUPABASE_KEY) + "\",3";
+    String result = queryAT(req.c_str(), "+SHREQ:", 15000);
+    sendAT("AT+SHDISC");
+    int c1 = result.indexOf(','), c2 = result.indexOf(',', c1 + 1);
+    if (c1 < 0) return false;
+    int status = result.substring(c1 + 1, c2 < 0 ? (int)result.length() : c2).toInt();
+    return (status == 200 || status == 201);
+}
+
+bool httpPostTo(const String& tablePath, const String& body) {
+    if (!sim7000OpenHTTPS()) return false;
+    String dcmd = "AT+SHBOD=" + String(body.length()) + ",5000";
+    if (!sendAT(dcmd.c_str(), ">", 6000)) { sendAT("AT+SHDISC"); return false; }
+    SerialAT.print(body); delay(200);
+    String req = "AT+SHREQ=\"" + tablePath + "?apikey=" + String(SUPABASE_KEY) + "\",3";
+    String result = queryAT(req.c_str(), "+SHREQ:", 15000);
+    sendAT("AT+SHDISC");
+    int c1 = result.indexOf(','), c2 = result.indexOf(',', c1 + 1);
+    if (c1 < 0) return false;
+    int status = result.substring(c1 + 1, c2 < 0 ? (int)result.length() : c2).toInt();
+    return (status == 200 || status == 201);
+}
+
+#endif
+
 // ── Seguimiento de viajes ─────────────────────────────────────────────────────
 // Un viaje comienza cuando speed >= TRIP_START_KMH y termina cuando
 // permanece por debajo de TRIP_END_KMH durante TRIP_END_MS consecutivos.
@@ -569,17 +651,7 @@ bool httpPostTo(const String& tablePath, const String& body) {
 #define TRIP_END_KMH    2.0f
 #define TRIP_END_MS     120000UL   // 2 min parado para cerrar el viaje
 
-struct TripState {
-    bool     active      = false;
-    uint32_t startMs     = 0;
-    float    startSoc    = 0;
-    float    distanceKm  = 0;
-    float    maxSpeed    = 0;
-    float    lastLat     = 0, lastLon = 0;
-    bool     hasLastPos  = false;
-    uint32_t stopSince   = 0;
-    int      sy, sm, sd, sh, smin, ss;   // fecha/hora de inicio
-} tripState;
+static TripState tripState;
 
 static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
     const float R = 6371.0f;
@@ -661,6 +733,7 @@ bool updateTrip(float speed, float soc, float lat, float lon,
 }
 
 // ── Red ───────────────────────────────────────────────────────────────────────
+#if defined(MODEM_A7670G)
 bool networkSetup() {
     if (!sendAT("ATE0"))              return false;
     if (!sendAT("AT+CPIN?", "READY")) return false;
@@ -670,13 +743,26 @@ bool networkSetup() {
     if (!sendAT("AT+NETOPEN",   "OK", 15000))  return false;
     delay(1000);
     sendAT("AT+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\"");
-    sendAT("AT+CTZU=1");   // sincronización automática de hora por red (NITZ)
+    sendAT("AT+CTZU=1");
     if (!sendAT("AT+CSSLCFG=\"sslversion\",0,4")) return false;
-    sendAT("AT+CSSLCFG=\"authmode\",0,0");          // sin CA bundle en el módulo
+    sendAT("AT+CSSLCFG=\"authmode\",0,0");
     if (!sendAT("AT+CSSLCFG=\"enableSNI\",0,1"))  return false;
     sendAT("AT+CSSLCFG=\"ignorelocaltime\",0,1");
     return true;
 }
+#else // SIM7000G
+bool networkSetup() {
+    if (!sendAT("ATE0"))              return false;
+    if (!sendAT("AT+CPIN?", "READY")) return false;
+    String apn = String("AT+CGDCONT=1,\"IP\",\"") + APN + "\"";
+    if (!sendAT(apn.c_str()))                  return false;
+    if (!sendAT("AT+CGACT=1,1", "OK", 30000))  return false;
+    delay(1000);
+    sendAT("AT+CTZU=1");   // NITZ
+    // AT+SH gestiona SSL internamente; no se necesita CSSLCFG
+    return true;
+}
+#endif
 
 // ── Arranque ──────────────────────────────────────────────────────────────────
 void setup() {
@@ -686,7 +772,9 @@ void setup() {
     timeMux = xSemaphoreCreateMutex();
     canMux  = xSemaphoreCreateMutex();
 
+#ifdef BOARD_POWERON_PIN
     pinMode(BOARD_POWERON_PIN, OUTPUT); digitalWrite(BOARD_POWERON_PIN, HIGH);
+#endif
     pinMode(BOARD_PWRKEY_PIN,  OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);  delay(100);
     digitalWrite(BOARD_PWRKEY_PIN, HIGH); delay(MODEM_POWERON_PULSE_WIDTH_MS);
@@ -724,7 +812,11 @@ void loop() {
 
     case HTTP_SETUP:
         Serial.println("[STATE] HTTP_SETUP...");
-        sendAT("AT+CGPS=1", "OK", 3000);
+#if defined(MODEM_A7670G)
+        sendAT("AT+CGPS=1",    "OK", 3000);
+#else
+        sendAT("AT+CGNSPWR=1", "OK", 3000);
+#endif
         if (!snapshotTime().valid) readNetworkTime();
         fetchCANConfig();   // descarga/actualiza señales desde Supabase
         if (setupHTTP()) {
@@ -787,8 +879,12 @@ void loop() {
             httpFails++;
             Serial.printf("[ERROR] Fallo POST %d/%d\n", httpFails, HTTP_FAIL_MAX);
             if (httpFails >= HTTP_FAIL_MAX) {
-                sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE"); state = NET_SETUP;
-                break;
+#if defined(MODEM_A7670G)
+                sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");
+#else
+                sendAT("AT+SHDISC");
+#endif
+                state = NET_SETUP; break;
             } else { state = HTTP_SETUP; break; }
         }
 
@@ -801,7 +897,12 @@ void loop() {
     case ERROR_WAIT:
         while (SerialAT.available()) Serial.write(SerialAT.read());
         if (millis() - stateAt > RETRY_WAIT_MS) {
-            sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE"); state = NET_SETUP;
+#if defined(MODEM_A7670G)
+            sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");
+#else
+            sendAT("AT+SHDISC");
+#endif
+            state = NET_SETUP;
         }
         break;
     }
