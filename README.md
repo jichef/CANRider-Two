@@ -39,7 +39,7 @@ El ESP32 actúa como ECU secundaria: escucha tramas del bus CAN y puede emitir l
 | Componente | Descripción |
 |---|---|
 | **LilyGo T-A7670G** | Placa ESP32 con módem LTE integrado |
-| **Transceptor CAN** | MCP2551, TJA1050 o similar (conectado a los pines CAN del ESP32) |
+| **Transceptor CAN** | SN65HVD230 o similar (conectado a los pines CAN del ESP32, asi como energia 3.3) |
 | **SIM con datos** | Tarjeta SIM con APN activo (cualquier operador) |
 | **Acceso al bus CAN** | Conector OBD2 o cable directo a CAN-H / CAN-L del vehículo |
 
