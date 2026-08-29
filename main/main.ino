@@ -157,22 +157,38 @@ static bool jsonBool(const String& j, const char* field) {
     int s = idx + key.length();
     return j.substring(s, s + 4) == "true";
 }
+// Busca el valor de campo string respetando comillas escapadas (\"),
+// para que un signal_name con " no desplace la lectura de otros campos.
 static String jsonStr(const String& j, const char* field) {
     String key = String('"') + field + "\":\"";
     int idx = j.indexOf(key);
     if (idx < 0) return "";
     int s = idx + key.length();
-    int e = j.indexOf('"', s);
-    return (e < 0) ? "" : j.substring(s, e);
+    int e = s;
+    while (e < (int)j.length() && j[e] != '"') {
+        if (j[e] == '\\' && e + 1 < (int)j.length()) e++;  // saltar carácter escapado
+        e++;
+    }
+    return (e >= (int)j.length()) ? "" : j.substring(s, e);
 }
 // Devuelve el siguiente objeto JSON {} a partir de `from`; actualiza `next`.
+// Ignora llaves dentro de strings para que un signal_name con { o }
+// (introducido desde el portal web) no desalinee el resto del array.
 static String nextJsonObj(const String& j, int from, int& next) {
     int start = j.indexOf('{', from);
     if (start < 0) { next = -1; return ""; }
     int depth = 0;
+    bool inStr = false;
     for (int i = start; i < (int)j.length(); i++) {
-        if (j[i] == '{') depth++;
-        else if (j[i] == '}' && --depth == 0) {
+        char c = j[i];
+        if (inStr) {
+            if (c == '\\') { i++; continue; }  // saltar carácter escapado
+            if (c == '"') inStr = false;
+            continue;
+        }
+        if (c == '"') { inStr = true; continue; }
+        if (c == '{') depth++;
+        else if (c == '}' && --depth == 0) {
             next = i + 1;
             return j.substring(start, i + 1);
         }
@@ -354,7 +370,7 @@ void parseCANFrame(const twai_message_t& msg) {
         }
         if (s.isSigned && s.byteLen < 4) {
             int bits = s.byteLen * 8;
-            if (raw & (1 << (bits - 1))) raw |= (~0 << bits);
+            if (raw & (1 << (bits - 1))) raw |= (int32_t)(~0u << bits);
         }
         s.value   = raw * s.scale + s.offsetVal;
         s.updated = true;
@@ -699,10 +715,10 @@ bool updateTrip(float speed, float soc, float lat, float lon,
             uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
 
             char startISO[21], endISO[21], durStr[12];
-            snprintf(startISO, sizeof(startISO), "20%02d-%02d-%02dT%02d:%02d:%02dZ",
+            snprintf(startISO, sizeof(startISO), "%04d-%02d-%02dT%02d:%02d:%02dZ",
                      tripState.sy, tripState.sm, tripState.sd,
                      tripState.sh, tripState.smin, tripState.ss);
-            snprintf(endISO,   sizeof(endISO),   "20%02d-%02d-%02dT%02d:%02d:%02dZ",
+            snprintf(endISO,   sizeof(endISO),   "%04d-%02d-%02dT%02d:%02d:%02dZ",
                      t.year, t.month, t.day, t.hour, t.min, t.sec);
             snprintf(durStr,   sizeof(durStr),   "%uh %02umin",
                      (unsigned)(durMin / 60), (unsigned)(durMin % 60));
@@ -774,6 +790,20 @@ void setup() {
 
 #ifdef BOARD_POWERON_PIN
     pinMode(BOARD_POWERON_PIN, OUTPUT); digitalWrite(BOARD_POWERON_PIN, HIGH);
+#endif
+    // Reset de hardware del módem antes de encenderlo: sin esto, un módem que
+    // quedó en estado raro (reflasheos repetidos, sesión previa colgada) no
+    // responde a PWRKEY por sí solo. Secuencia verificada contra el ATdebug
+    // oficial de LilyGo, que sí consigue "AT" -> "OK" donde PWRKEY solo, no.
+#ifdef MODEM_RESET_PIN
+    pinMode(MODEM_RESET_PIN, OUTPUT);
+    digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL); delay(100);
+    digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL);  delay(2600);
+    digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+#endif
+#ifdef MODEM_DTR_PIN
+    pinMode(MODEM_DTR_PIN, OUTPUT);
+    digitalWrite(MODEM_DTR_PIN, LOW);  // asegura que el módem no está en sleep
 #endif
     pinMode(BOARD_PWRKEY_PIN,  OUTPUT);
     digitalWrite(BOARD_PWRKEY_PIN, LOW);  delay(100);

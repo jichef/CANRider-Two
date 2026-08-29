@@ -12,7 +12,9 @@
 // #define MODEM_SIM7000G
 
 // — Define de placa para AT/utilities.h — no tocar —
-#if defined(MODEM_A7670G)
+#if defined(MODEM_A7670G) && defined(MODEM_SIM7000G)
+  #error "Solo puede estar descomentado UNO de MODEM_A7670G / MODEM_SIM7000G, no los dos"
+#elif defined(MODEM_A7670G)
   #define LILYGO_T_A7670
 #elif defined(MODEM_SIM7000G)
   #define LILYGO_SIM7000G

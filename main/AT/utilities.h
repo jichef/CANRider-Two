@@ -19,7 +19,12 @@
 // 型号名称后面带S3的为ESP32-S3版本，否则是ESP32版本
 
 // Products Link:https://www.lilygo.cc/products/t-sim-a7670e
- #define LILYGO_T_A7670
+// #define LILYGO_T_A7670
+// NOTA CanRider: NO descomentar esta línea. La placa activa la define
+// main/config.h (LILYGO_T_A7670 o LILYGO_SIM7000G) antes de incluir este
+// archivo. Si se fija aquí, se ignora la selección de config.h y el
+// firmware compila SIEMPRE con los pines del A7670G, incluso eligiendo
+// SIM7000G — el módem no arrancaría en esa placa.
 
 // There are two versions of T-Call A7670X. Please be careful to distinguish them. Please check the silkscreen on the front of the board to distinguish them.
 // T-Call A7670X 有两个版本,请注意区分，如何区分请查看板子正面丝印.
@@ -358,6 +363,9 @@
 
 #elif defined(LILYGO_SIM7000G) || defined(LILYGO_SIM7070G)
 
+    // CanRider: faltaba en el archivo original del fabricante — sin esto
+    // main.ino no compila para esta placa (SerialAT.begin() lo requiere).
+    #define MODEM_BAUDRATE                      (115200)
     #define MODEM_DTR_PIN                       (25)
     #define MODEM_RX_PIN                        (26)
     #define MODEM_TX_PIN                        (27)

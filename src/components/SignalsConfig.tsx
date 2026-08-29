@@ -137,14 +137,19 @@ export default function SignalsConfig({ vehicleId, initialSignals }: Props) {
 
   const handleSubmit = () => {
     if (!vehicleId) return;
-    if (!form.signal_name.trim()) { setFormError('signal_name es obligatorio'); return; }
+    const signalName = form.signal_name.trim();
+    if (!signalName) { setFormError('signal_name es obligatorio'); return; }
+    if (!/^[a-zA-Z0-9_]+$/.test(signalName)) {
+      setFormError('signal_name solo puede usar letras, números y guion bajo (el firmware no procesa comillas ni llaves de forma segura)');
+      return;
+    }
     const frameId = parseHex(form.frame_id);
     if (!frameId) { setFormError('Frame ID inválido (ejemplo: 0x504)'); return; }
 
     const signal: Omit<CANSignalRow, 'id'> = {
       vehicle_id: vehicleId,
       direction: form.direction,
-      signal_name: form.signal_name.trim(),
+      signal_name: signalName,
       frame_id: frameId,
       tx_interval_ms: parseInt(form.tx_interval_ms) || 200,
       dual_mode: form.direction === 'tx' ? false : form.dual_mode,
