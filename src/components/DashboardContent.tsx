@@ -104,8 +104,11 @@ export default function DashboardContent() {
     return () => { supabase.removeChannel(channel); };
   }, [supabase]);
 
-  // SoC: CAN tiene prioridad sobre AT+CBC
-  const socValue = telemetry?.soc ?? telemetry?.battery_level;
+  // SoC por pack: la moto tiene dos IDs de batería (modo A / modo B, uno
+  // activo cada vez según qué pack esté conectado) — se muestran por
+  // separado para saber cuál está puesto sin ambigüedad.
+  const socA = telemetry?.moto_battery;
+  const socB = telemetry?.moto_battery_b;
   // Carga: BMS CAN tiene prioridad sobre AT+CBC
   const isCharging = !!(telemetry?.bms_charging || telemetry?.is_charging);
   // Temperatura media de celdas disponibles
@@ -121,13 +124,22 @@ export default function DashboardContent() {
 
   const stats = [
     {
-      label: 'SOC',
-      value: socValue != null ? `${Math.round(socValue)}` : '---',
-      unit: socValue != null ? '%' : '',
+      label: 'BATERÍA A',
+      value: socA != null ? `${Math.round(socA)}` : '---',
+      unit: socA != null ? '%' : '',
       icon: Battery,
       color: 'text-emerald-400',
       glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
       border: 'border-emerald-500/20'
+    },
+    {
+      label: 'BATERÍA B',
+      value: socB != null ? `${Math.round(socB)}` : '---',
+      unit: socB != null ? '%' : '',
+      icon: Battery,
+      color: 'text-teal-400',
+      glow: 'shadow-[0_0_15px_rgba(45,212,191,0.3)]',
+      border: 'border-teal-500/20'
     },
     {
       label: 'VELOCIDAD',
@@ -303,7 +315,7 @@ export default function DashboardContent() {
         </header>
 
         {/* Stats principales */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-6 mb-6">
           {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
         </div>
 
