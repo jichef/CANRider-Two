@@ -3,6 +3,17 @@
 #include "driver/twai.h"
 #include "structs.h"
 
+#if defined(MODEM_SIM7000G)
+// El motor AT+SH de esta revisión de firmware SIM7000G es poco fiable
+// (HEADERLEN limitado a 350 y AT+SHCONN falla igualmente). Se usa
+// TinyGsmClientSecure (AT+CAOPEN/CASEND/CARECV) en su lugar, como hace
+// el ejemplo oficial de LilyGo HttpsBuiltlnPostSupabase.ino.
+#include <TinyGsmClient.h>
+#include "StreamDebugger.h"  // PRUEBA TEMPORAL: ver los AT reales de TinyGsm
+StreamDebugger debugger(SerialAT, Serial);
+TinyGsm modem(debugger);
+#endif
+
 // ── Timing ────────────────────────────────────────────────────────────────────
 #define POST_INTERVAL_MS  15000UL
 #define RETRY_WAIT_MS     10000UL
@@ -221,31 +232,77 @@ String httpGet(const String& path) {
     sendAT("AT+HTTPTERM");
     return body;
 }
-#else // SIM7000G — sesión HTTPS por petición
-String httpGet(const String& path) {
-    String confCmd = "AT+SHCONF=\"URL\",\"" + String(SUPABASE_URL) + "\"";
-    if (!sendAT(confCmd.c_str()))               return "";
-    if (!sendAT("AT+SHCONF=\"BODYLEN\",4096"))  return "";
-    if (!sendAT("AT+SHCONF=\"HEADERLEN\",512")) return "";
-    if (!sendAT("AT+SHCONN", "OK", 15000))      return "";
-    sendAT("AT+SHCHEAD");
-    String auth = "AT+SHAHEAD=\"Authorization\",\"Bearer " + String(SUPABASE_KEY) + "\"";
-    sendAT(auth.c_str());
-    String reqPath = path + "&apikey=" + SUPABASE_KEY;
-    String req = "AT+SHREQ=\"" + reqPath + "\",1";  // 1=GET
-    String actionLine = queryAT(req.c_str(), "+SHREQ:", 15000);
-    // +SHREQ: 1,200,SIZE
-    int c1 = actionLine.indexOf(','), c2 = actionLine.indexOf(',', c1 + 1);
-    if (c1 < 0 || c2 < 0) { sendAT("AT+SHDISC"); return ""; }
-    int status = actionLine.substring(c1 + 1, c2).toInt();
-    int size   = actionLine.substring(c2 + 1).toInt();
-    if (status != 200 || size <= 0) {
-        Serial.printf("[GET] HTTP %d size=%d\n", status, size);
-        sendAT("AT+SHDISC"); return "";
+#else // SIM7000G — AT+SH poco fiable en esta revisión de firmware (ver arriba);
+      // TinyGsmClientSecure (AT+CAOPEN) en su lugar.
+
+// Host sin esquema, para pasar a connect(). SUPABASE_URL nunca lleva barra final.
+static String sim7000Host() {
+    String host = String(SUPABASE_URL);
+    if (host.startsWith("https://")) host.remove(0, 8);
+    if (host.startsWith("http://"))  host.remove(0, 7);
+    return host;
+}
+
+// Petición HTTPS genérica (GET sin body, o POST con body). Devuelve el código
+// HTTP en httpStatus y el cuerpo de la respuesta en respBody.
+static bool sim7000Request(const String& method, const String& path, const String& body,
+                            int& httpStatus, String& respBody) {
+    httpStatus = 0; respBody = "";
+    String host = sim7000Host();
+
+    TinyGsmClientSecure sslClient(modem);
+    if (!sslClient.connect(host.c_str(), 443)) {
+        Serial.println("[HTTPS] connect() falló");
+        return false;
     }
-    String body = sim7000ReadBody(size);
-    sendAT("AT+SHDISC");
-    return body;
+
+    sslClient.print(method); sslClient.print(" "); sslClient.print(path); sslClient.print(" HTTP/1.1\r\n");
+    sslClient.print("Host: "); sslClient.print(host); sslClient.print("\r\n");
+    sslClient.print("apikey: "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
+    sslClient.print("Authorization: Bearer "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
+    if (body.length() > 0) {
+        sslClient.print("Content-Type: application/json\r\n");
+        // Sin "Prefer: return=minimal" a propósito: con cuerpo vacío en la
+        // respuesta, la conexión se cierra antes de que dé tiempo a leer
+        // nada y el POST se cuenta como fallo aunque se procesara bien.
+        // Que devuelva el registro creado da contenido real que detectar.
+        sslClient.print("Content-Length: "); sslClient.print(body.length()); sslClient.print("\r\n");
+    }
+    sslClient.print("Connection: close\r\n\r\n");
+    if (body.length() > 0) sslClient.print(body);
+
+    String raw; raw.reserve(2048);
+    uint32_t rStart = millis(), lastByte = millis();
+    while (millis() - rStart < 15000) {
+        while (sslClient.available()) {
+            raw += (char)sslClient.read();
+            lastByte = millis();
+            if (raw.length() >= MAX_HTTP_BODY) break;
+        }
+        if (!sslClient.connected() && !sslClient.available()) break;
+        if (raw.length() > 0 && millis() - lastByte > 3000) break;
+        delay(10);
+    }
+    sslClient.stop();
+
+    int httpPos = raw.indexOf("HTTP/");
+    if (httpPos >= 0) {
+        int sp = raw.indexOf(' ', httpPos + 5);
+        if (sp >= 0) httpStatus = raw.substring(sp + 1, sp + 4).toInt();
+    }
+    int sepIdx = raw.indexOf("\r\n\r\n");
+    if (sepIdx >= 0) respBody = raw.substring(sepIdx + 4);
+    return httpStatus > 0;
+}
+
+String httpGet(const String& path) {
+    int status; String respBody;
+    if (!sim7000Request("GET", path, "", status, respBody)) return "";
+    if (status != 200 && status != 206) {
+        Serial.printf("[GET] HTTP %d\n", status);
+        return "";
+    }
+    return respBody;
 }
 #endif
 
@@ -609,50 +666,20 @@ bool httpPostTo(const String& tablePath, const String& body) {
     return ok;
 }
 
-#else // SIM7000G — cada POST es una sesión HTTPS completa (AT+SH)
+#else // SIM7000G — TinyGsmClientSecure (AT+CAOPEN), ver sim7000Request() arriba
 
-// Helper interno: abre conexión HTTPS SIM7000G y pone headers comunes
-static bool sim7000OpenHTTPS() {
-    String confCmd = "AT+SHCONF=\"URL\",\"" + String(SUPABASE_URL) + "\"";
-    if (!sendAT(confCmd.c_str()))               return false;
-    if (!sendAT("AT+SHCONF=\"BODYLEN\",4096"))  return false;
-    if (!sendAT("AT+SHCONF=\"HEADERLEN\",512")) return false;
-    if (!sendAT("AT+SHCONN", "OK", 15000))      return false;
-    sendAT("AT+SHCHEAD");
-    String auth = "AT+SHAHEAD=\"Authorization\",\"Bearer " + String(SUPABASE_KEY) + "\"";
-    sendAT(auth.c_str());
-    sendAT("AT+SHAHEAD=\"Content-Type\",\"application/json\"");
-    return true;
-}
-
-// setupHTTP: sin sesión persistente en SIM7000G, solo verifica conectividad
+// setupHTTP: sin sesión persistente en SIM7000G, cada POST abre su propia conexión
 bool setupHTTP() { return true; }
 
 bool httpPost(const String& body) {
-    if (!sim7000OpenHTTPS()) return false;
-    String dcmd = "AT+SHBOD=" + String(body.length()) + ",5000";
-    if (!sendAT(dcmd.c_str(), ">", 6000)) { sendAT("AT+SHDISC"); return false; }
-    SerialAT.print(body); delay(200);
-    String req = "AT+SHREQ=\"/rest/v1/telemetry?apikey=" + String(SUPABASE_KEY) + "\",3";
-    String result = queryAT(req.c_str(), "+SHREQ:", 15000);
-    sendAT("AT+SHDISC");
-    int c1 = result.indexOf(','), c2 = result.indexOf(',', c1 + 1);
-    if (c1 < 0) return false;
-    int status = result.substring(c1 + 1, c2 < 0 ? (int)result.length() : c2).toInt();
+    int status; String respBody;
+    if (!sim7000Request("POST", "/rest/v1/telemetry", body, status, respBody)) return false;
     return (status == 200 || status == 201);
 }
 
 bool httpPostTo(const String& tablePath, const String& body) {
-    if (!sim7000OpenHTTPS()) return false;
-    String dcmd = "AT+SHBOD=" + String(body.length()) + ",5000";
-    if (!sendAT(dcmd.c_str(), ">", 6000)) { sendAT("AT+SHDISC"); return false; }
-    SerialAT.print(body); delay(200);
-    String req = "AT+SHREQ=\"" + tablePath + "?apikey=" + String(SUPABASE_KEY) + "\",3";
-    String result = queryAT(req.c_str(), "+SHREQ:", 15000);
-    sendAT("AT+SHDISC");
-    int c1 = result.indexOf(','), c2 = result.indexOf(',', c1 + 1);
-    if (c1 < 0) return false;
-    int status = result.substring(c1 + 1, c2 < 0 ? (int)result.length() : c2).toInt();
+    int status; String respBody;
+    if (!sim7000Request("POST", tablePath, body, status, respBody)) return false;
     return (status == 200 || status == 201);
 }
 
@@ -769,12 +796,35 @@ bool networkSetup() {
 #else // SIM7000G
 bool networkSetup() {
     if (!sendAT("ATE0"))              return false;
+
+    // Ciclo de radio (CFUN=0/1) antes de pedir el contexto de datos: en
+    // itinerancia (Digi Mobil funciona así en esta zona) el contexto de
+    // "aplicación" (CNACT) se quedaba en +APP PDP: DEACTIVE de forma
+    // consistente sin esto, sin importar señal ni reintentos de CNACT solo.
+    // Verificado en banco: forzar un re-registro completo de radio antes de
+    // CNACT lo soluciona de forma reproducible (probado 2/2 veces), incluso
+    // con señal peor que en los intentos que fallaban antes.
+    sendAT("AT+CFUN=0", "OK", 5000);
+    delay(500);
+    sendAT("AT+CFUN=1", "OK", 5000);
+    delay(15000);  // tiempo para reregistrarse en la red tras CFUN=1
+
     if (!sendAT("AT+CPIN?", "READY")) return false;
     String apn = String("AT+CGDCONT=1,\"IP\",\"") + APN + "\"";
     if (!sendAT(apn.c_str()))                  return false;
     if (!sendAT("AT+CGACT=1,1", "OK", 30000))  return false;
     delay(1000);
     sendAT("AT+CTZU=1");   // NITZ
+
+    // Contexto de "aplicación" (CNACT) para AT+CAOPEN — necesario aparte de
+    // CGACT. Se reintenta por si acaso, pero con el ciclo CFUN de arriba
+    // debería cuajar ya en el primer intento.
+    bool appNetUp = false;
+    for (int i = 0; i < 5 && !appNetUp; i++) {
+        if (i > 0) { Serial.println("[NET] Reintentando activar datos..."); delay(3000); }
+        appNetUp = modem.gprsConnect(APN, "", "");
+    }
+    if (!appNetUp) Serial.println("[NET] No se pudo activar el contexto de datos tras 5 intentos");
     // AT+SH gestiona SSL internamente; no se necesita CSSLCFG
     return true;
 }
@@ -915,7 +965,12 @@ void loop() {
                 sendAT("AT+SHDISC");
 #endif
                 state = NET_SETUP; break;
-            } else { state = HTTP_SETUP; break; }
+            } else {
+                // Espera antes de reintentar: sin esto, un fallo persistente
+                // reintenta CAOPEN/SH decenas de veces por segundo contra la
+                // red del operador — puede agravar el propio problema.
+                state = ERROR_WAIT; stateAt = millis(); break;
+            }
         }
 
         // Actualizar viaje; si termina, re-inicializar sesión HTTP
