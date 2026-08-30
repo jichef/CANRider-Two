@@ -8,10 +8,11 @@ struct TimeRef {
     bool     valid;
     bool     hasPos;
     float    lat, lon, speed_kmh;
-    uint8_t  hour, min, sec;
+    uint8_t  hour, min, sec;   // siempre en UTC (hour/min/sec + utcOffsetMin = hora local)
     uint8_t  day, month;
     uint16_t year;
     uint32_t capturedAt;
+    int      utcOffsetMin;     // offset local tomado de la red (AT+CCLK), incluye DST
 };
 
 struct CANSignal {

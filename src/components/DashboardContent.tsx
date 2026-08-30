@@ -38,6 +38,7 @@ export default function DashboardContent() {
   const [isStale, setIsStale] = useState(false);
 
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
+  const [hasLiveFix, setHasLiveFix] = useState(false);
 
   useEffect(() => {
     const checkStale = () => {
@@ -71,6 +72,7 @@ export default function DashboardContent() {
         setTelemetry(telData);
         if (telData.latitude && telData.longitude) {
           setCurrentPosition([telData.latitude, telData.longitude]);
+          setHasLiveFix(true);
         }
       }
 
@@ -96,6 +98,7 @@ export default function DashboardContent() {
           setTelemetry(newData);
           if (newData.latitude && newData.longitude) {
             setCurrentPosition([newData.latitude, newData.longitude]);
+            setHasLiveFix(true);
           }
         }
       )
@@ -358,7 +361,11 @@ export default function DashboardContent() {
                     {selectedTrip ? 'ROUTE_ANALYSIS' : 'LIVE_LOCATION'}
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono uppercase">
-                    {selectedTrip ? `Trip ID: ${selectedTrip.slice(0, 8)}` : 'Madrid, Spain • 40.4168° N, 3.7038° W'}
+                    {selectedTrip
+                      ? `Trip ID: ${selectedTrip.slice(0, 8)}`
+                      : hasLiveFix
+                        ? `${Math.abs(currentPosition[0]).toFixed(4)}° ${currentPosition[0] >= 0 ? 'N' : 'S'}, ${Math.abs(currentPosition[1]).toFixed(4)}° ${currentPosition[1] >= 0 ? 'E' : 'W'}`
+                        : 'Esperando posición GPS...'}
                   </span>
                 </div>
               </div>

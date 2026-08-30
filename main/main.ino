@@ -44,17 +44,8 @@ static void storeTime(const TimeRef& t) {
     }
 }
 
-// ── Señales CAN (config descargada de Supabase) ───────────────────────────────
-// Tabla esperada en Supabase: can_signals
-//   frame_id    integer  -- ID del mensaje CAN (ej. 512 = 0x200)
-//   signal_name text     -- nombre del campo en telemetría (ej. "rpm")
-//   byte_start  integer  -- primer byte del payload (0-7)
-//   byte_length integer  -- 1, 2 o 4
-//   big_endian  boolean
-//   is_signed   boolean
-//   scale       float    -- valor_real = raw * scale + offset_val
-//   offset_val  float
-
+// ── Señales CAN ────────────────────────────────────────────────────────────────
+// Definidas en setupCANSignals() más abajo (hardcodeadas, ver el porqué ahí).
 static CANSignal         canSignals[MAX_SIGNALS];
 static int               canSignalCount = 0;
 static SemaphoreHandle_t canMux         = NULL;
@@ -105,141 +96,12 @@ String queryAT(const char* cmd, const char* prefix, uint32_t timeout = 5000) {
     return "";
 }
 
-// ── Lectura de respuesta HTTP ─────────────────────────────────────────────────
-#if defined(MODEM_A7670G)
-// A7670G: "+HTTPREAD: N\r\n<N bytes>\r\nOK\r\n"
-static String httpReadBody(int size) {
-    if (size <= 0 || size > MAX_HTTP_BODY) return "";
-    String cmd = "AT+HTTPREAD=0," + String(size);
-    Serial.print(">> "); Serial.println(cmd);
-    SerialAT.println(cmd);
-    String buf; bool bodyMode = false; int bodyBytes = 0;
-    uint32_t t = millis();
-    while (millis() - t < 10000) {
-        while (SerialAT.available()) {
-            char c = SerialAT.read();
-            if (!bodyMode) {
-                buf += c;
-                if (c == '\n' && buf.indexOf("+HTTPREAD:") >= 0) { buf = ""; bodyMode = true; }
-            } else {
-                buf += c;
-                if (++bodyBytes >= size) return buf.substring(0, size);
-            }
-        }
-    }
-    return buf;
-}
-#else // SIM7000G
-// SIM7000G: "+SHREAD: N\r\n<N bytes>"
-static String sim7000ReadBody(int size) {
-    if (size <= 0 || size > MAX_HTTP_BODY) return "";
-    String cmd = "AT+SHREAD=0," + String(size);
-    Serial.print(">> "); Serial.println(cmd);
-    SerialAT.println(cmd);
-    String buf; bool bodyMode = false; int bodyBytes = 0;
-    uint32_t t = millis();
-    while (millis() - t < 10000) {
-        while (SerialAT.available()) {
-            char c = SerialAT.read();
-            if (!bodyMode) {
-                buf += c;
-                if (c == '\n' && buf.indexOf("+SHREAD:") >= 0) { buf = ""; bodyMode = true; }
-            } else {
-                buf += c;
-                if (++bodyBytes >= size) return buf.substring(0, size);
-            }
-        }
-    }
-    return buf;
-}
-#endif
-
-// ── JSON helpers (sin dependencias externas) ──────────────────────────────────
-static int32_t jsonInt(const String& j, const char* field) {
-    String key = String('"') + field + "\":";
-    int idx = j.indexOf(key);
-    if (idx < 0) return 0;
-    return j.substring(idx + key.length()).toInt();
-}
-static float jsonFloat(const String& j, const char* field) {
-    String key = String('"') + field + "\":";
-    int idx = j.indexOf(key);
-    if (idx < 0) return 0.0f;
-    return j.substring(idx + key.length()).toFloat();
-}
-static bool jsonBool(const String& j, const char* field) {
-    String key = String('"') + field + "\":";
-    int idx = j.indexOf(key);
-    if (idx < 0) return false;
-    int s = idx + key.length();
-    return j.substring(s, s + 4) == "true";
-}
-// Busca el valor de campo string respetando comillas escapadas (\"),
-// para que un signal_name con " no desplace la lectura de otros campos.
-static String jsonStr(const String& j, const char* field) {
-    String key = String('"') + field + "\":\"";
-    int idx = j.indexOf(key);
-    if (idx < 0) return "";
-    int s = idx + key.length();
-    int e = s;
-    while (e < (int)j.length() && j[e] != '"') {
-        if (j[e] == '\\' && e + 1 < (int)j.length()) e++;  // saltar carácter escapado
-        e++;
-    }
-    return (e >= (int)j.length()) ? "" : j.substring(s, e);
-}
-// Devuelve el siguiente objeto JSON {} a partir de `from`; actualiza `next`.
-// Ignora llaves dentro de strings para que un signal_name con { o }
-// (introducido desde el portal web) no desalinee el resto del array.
-static String nextJsonObj(const String& j, int from, int& next) {
-    int start = j.indexOf('{', from);
-    if (start < 0) { next = -1; return ""; }
-    int depth = 0;
-    bool inStr = false;
-    for (int i = start; i < (int)j.length(); i++) {
-        char c = j[i];
-        if (inStr) {
-            if (c == '\\') { i++; continue; }  // saltar carácter escapado
-            if (c == '"') inStr = false;
-            continue;
-        }
-        if (c == '"') { inStr = true; continue; }
-        if (c == '{') depth++;
-        else if (c == '}' && --depth == 0) {
-            next = i + 1;
-            return j.substring(start, i + 1);
-        }
-    }
-    next = -1; return "";
-}
-
-// ── HTTP GET genérico ─────────────────────────────────────────────────────────
-// `path` ejemplo: "/rest/v1/can_signals?vehicle_id=eq.UUID&select=*"
-#if defined(MODEM_A7670G)
-String httpGet(const String& path) {
-    sendAT("AT+HTTPTERM");
-    if (!sendAT("AT+HTTPINIT"))               return "";
-    if (!sendAT("AT+HTTPPARA=\"SSLCFG\",0")) return "";
-    String url = String(SUPABASE_URL) + path + "&apikey=" + SUPABASE_KEY;
-    String urlCmd = "AT+HTTPPARA=\"URL\",\"" + url + "\"";
-    if (!sendAT(urlCmd.c_str())) { sendAT("AT+HTTPTERM"); return ""; }
-    String auth = String("AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer ") + SUPABASE_KEY + "\"";
-    if (!sendAT(auth.c_str()))   { sendAT("AT+HTTPTERM"); return ""; }
-    String actionLine = queryAT("AT+HTTPACTION=0", "+HTTPACTION:", 15000);
-    int c1 = actionLine.indexOf(','), c2 = actionLine.indexOf(',', c1 + 1);
-    if (c1 < 0 || c2 < 0) { sendAT("AT+HTTPTERM"); return ""; }
-    int status = actionLine.substring(c1 + 1, c2).toInt();
-    int size   = actionLine.substring(c2 + 1).toInt();
-    if (status != 200 || size <= 0) {
-        Serial.printf("[GET] HTTP %d size=%d\n", status, size);
-        sendAT("AT+HTTPTERM"); return "";
-    }
-    String body = httpReadBody(size);
-    sendAT("AT+HTTPTERM");
-    return body;
-}
-#else // SIM7000G — AT+SH poco fiable en esta revisión de firmware (ver arriba);
-      // TinyGsmClientSecure (AT+CAOPEN) en su lugar.
+// ── HTTP genérico (usado por el envío de telemetría/viajes) ───────────────────
+#if defined(MODEM_SIM7000G)
+// AT+SH poco fiable en esta revisión de firmware (HEADERLEN limitado a 350,
+// AT+SHCONN falla igualmente). Se usa TinyGsmClientSecure (AT+CAOPEN/CASEND/
+// CARECV) en su lugar, como hace el ejemplo oficial de LilyGo
+// HttpsBuiltlnPostSupabase.ino.
 
 // Host sin esquema, para pasar a connect(). SUPABASE_URL nunca lleva barra final.
 static String sim7000Host() {
@@ -278,8 +140,14 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     httpStatus = 0; respBody = "";
     String host = sim7000Host();
 
+    // connect(host,port) sin más usa el timeout por defecto de TinyGsm: 75s
+    // (macro TINY_GSM_CLIENT_CONNECT_OVERRIDES). Cuando AT+CAOPEN no da una
+    // respuesta clara en roaming, eso deja el intento colgado 75s enteros
+    // antes de poder ni siquiera reintentar — medido con timestamps: saltos
+    // de ~75.5s entre páginas fallidas. 15s de margen es de sobra para el
+    // caso bueno (CAOPEN normalmente responde en 1-2s cuando funciona).
     TinyGsmClientSecure sslClient(modem);
-    if (!sslClient.connect(host.c_str(), 443)) {
+    if (!sslClient.connect(host.c_str(), 443, 15)) {
         Serial.println("[HTTPS] connect() falló");
         return false;
     }
@@ -302,15 +170,11 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     sslClient.print("Connection: close\r\n\r\n");
     if (body.length() > 0) sslClient.print(body);
 
-    // En roaming, una conexión que se va a cortar sin datos (ver
-    // g_cfCookie/CAN_CONFIG_PAGE_SIZE más abajo) puede quedarse "abierta"
-    // muchos segundos sin dar señales de vida antes de que el módem la dé
-    // por muerta. Con fetchCANConfig() reintentando varias veces por
-    // página, un timeout largo aquí multiplica: 6 reintentos a 25s cada
-    // uno pueden dejar el arranque más de 2 minutos sin llegar a RUNNING.
-    // Las respuestas que sí llegan lo hacen en pocos segundos, así que un
-    // techo corto no penaliza el caso bueno y evita que uno malo bloquee
-    // el resto.
+    // En roaming, una conexión que se va a cortar sin datos puede quedarse
+    // "abierta" muchos segundos sin dar señales de vida antes de que el
+    // módem la dé por muerta. Las respuestas que sí llegan lo hacen en
+    // pocos segundos, así que un techo corto no penaliza el caso bueno y
+    // evita que uno malo bloquee el resto (p.ej. el envío de telemetría).
     String raw; raw.reserve(2048);
     uint32_t rStart = millis(), lastByte = millis();
     while (millis() - rStart < 10000) {
@@ -337,7 +201,17 @@ static bool sim7000Request(const String& method, const String& path, const Strin
         if (millis() - lastByte > 4000) break;
         delay(10);
     }
-    sslClient.stop();
+    // sslClient.stop() sin argumento (TinyGsmClientSIM7000SSL.h) equivale a
+    // stop(15000): antes de cerrar, vacía el "sock_available" del módem
+    // llamando a AT+CARECV en un while sin ningún delay. Si la conexión ya
+    // murió con datos fantasma pendientes (nuestro caso: el módem se queda
+    // creyendo que hay bytes por leer que en realidad nunca llegarán),
+    // sock_available nunca baja a 0 y ese bucle interno de la librería
+    // machaca AT+CARECV durante los 15 segundos completos en CADA cierre de
+    // conexión — encima de nuestro propio timeout. Con un maxWaitMs bajo
+    // seguimos dándole ocasión de vaciar un búfer real (caso bueno), pero
+    // sin pagar 15s enteros por cada conexión muerta.
+    sslClient.stop(500);
     captureCfCookie(raw);  // las cabeceras llegan enteras aunque el cuerpo se corte
 
     int httpPos = raw.indexOf("HTTP/");
@@ -375,8 +249,7 @@ static String dechunkBody(const String& raw) {
         int dataEnd   = dataStart + chunkSize;
         if (dataEnd > (int)raw.length()) {
             // Conexión cortada a mitad de un chunk (frecuente en roaming):
-            // devolvemos lo recibido; fetchCANConfig lo detectará como
-            // página incompleta y reintentará.
+            // devolvemos lo recibido hasta ahí, incompleto.
             out += raw.substring(dataStart);
             break;
         }
@@ -386,133 +259,43 @@ static String dechunkBody(const String& raw) {
     return out;
 }
 
-String httpGet(const String& path) {
-    int status; String respBody;
-    if (!sim7000Request("GET", path, "", status, respBody)) return "";
-    if (status != 200 && status != 206) {
-        Serial.printf("[GET] HTTP %d\n", status);
-        return "";
-    }
-    return respBody;
-}
 #endif
 
-// ── Config CAN desde Supabase ─────────────────────────────────────────────────
-// Nº de señales por página. Diagnosticado en campo con AT+CARECV: en
-// roaming, el SIM7000G corta la conexión TLS a los ~1369 bytes totales
-// (cabeceras + cuerpo) sin avisar de ningún error — de ahí que se perdieran
-// siempre las últimas señales de la lista, incluida clock_minutes (causa del
-// reloj mal y el "error 102" en el panel de la moto). Con la cookie de
-// Cloudflare reenviada (ver g_cfCookie) una página de 2 señales deja margen
-// bajo ese límite; de 3 en adelante ya lo supera.
-#define CAN_CONFIG_PAGE_SIZE 2
+// ── Señales CAN ────────────────────────────────────────────────────────────────
+// Antes se descargaban de la tabla can_signals en Supabase, para no publicar
+// en el repo abierto la trama de Vmoto que cada usuario reverse-engineered
+// para su moto. Se pasa a hardcodeada por decisión consciente: en roaming
+// inestable la descarga fallaba a menudo (páginas incompletas, arranques con
+// la hora sin cargar) y además su tráfico HTTPS interfería con las consultas
+// de GPS al competir por el mismo canal AT — se prioriza que reloj y
+// baterías funcionen siempre sobre esa privacidad del protocolo. El TX
+// sigue limitado a la hora, como siempre.
+static void addCANSignal(uint32_t frameId, char direction, uint8_t byteStart, const char* name) {
+    CANSignal& s = canSignals[canSignalCount++];
+    s.frameId      = frameId;
+    s.direction    = direction;
+    s.txIntervalMs = 200;
+    s.dualMode     = false;
+    strncpy(s.name, name, sizeof(s.name) - 1);
+    s.name[sizeof(s.name) - 1] = '\0';
+    s.byteStart = byteStart;
+    s.byteLen   = 1;
+    s.bitMask   = 0;
+    s.bigEndian = true;
+    s.isSigned  = false;
+    s.scale     = 1;
+    s.offsetVal = 0;
+    s.value     = 0.0f;
+    s.updated   = false;
+}
 
-bool fetchCANConfig() {
-    Serial.println("[CAN] Descargando config desde Supabase...");
-
+static void setupCANSignals() {
     if (xSemaphoreTake(canMux, portMAX_DELAY) == pdTRUE) {
         canSignalCount = 0;
-        int offset = 0;
-        bool anyPageOk = false;
-        // Cuántas veces seguidas una petición no ha aportado ni una señal
-        // más (red muerta o corte antes de completar el primer objeto). Un
-        // corte a mitad de página SÍ cuenta como progreso (offset avanza
-        // por lo realmente parseado) y no reinicia este contador: solo nos
-        // rendimos si de verdad dejamos de avanzar.
-        int staleAttempts = 0;
-        while (canSignalCount < MAX_SIGNALS && staleAttempts < 6) {
-            // Solo lo imprescindible ahora mismo: la hora TX y el % de las
-            // dos baterías (la posición viene de AT+CGNSINF, no de esta
-            // tabla). El resto de señales (voltajes, temperaturas, etc.)
-            // se queda configurado en Supabase por si se reactiva más
-            // adelante, pero no se descarga — así la petición es mínima y
-            // le cuesta mucho menos sobrevivir a la conexión en roaming.
-            String path = String("/rest/v1/can_signals?vehicle_id=eq.") + VEHICLE_ID
-                        + "&signal_name=in.(clock_hours,clock_minutes,moto_battery,moto_battery_b)"
-                        + "&select=frame_id,direction,tx_interval_ms,dual_mode,signal_name,"
-                          "byte_start,byte_length,bit_mask,big_endian,is_signed,scale,offset_val"
-                          "&order=id"
-                        + "&limit=" + String(CAN_CONFIG_PAGE_SIZE)
-                        + "&offset=" + String(offset);
-            // En roaming, la conexión TLS del SIM7000G a veces se corta a
-            // mitad de la respuesta (confirmado con AT+CARECV: la conexión
-            // se cierra tras recibir bastante menos de lo anunciado). En
-            // vez de descartar toda la página cuando eso pasa, nos quedamos
-            // con los objetos que sí llegaron completos (nextJsonObj no
-            // devuelve nada para uno cortado a medias) y solo repetimos la
-            // petición por lo que falte — así un corte nunca tira datos ya
-            // buenos, solo cuesta una vuelta extra.
-            String json = httpGet(path);
-            if (json.length() == 0) {
-                staleAttempts++;
-                Serial.println("[CAN] Página vacía, reintentando...");
-                delay(500);
-                continue;
-            }
-
-            int pos = 0;
-            int inPage = 0;
-            while (canSignalCount < MAX_SIGNALS) {
-                int next;
-                String obj = nextJsonObj(json, pos, next);
-                if (next < 0 || obj.length() == 0) break;
-                pos = next;
-
-                CANSignal& s    = canSignals[canSignalCount];
-                s.frameId       = (uint32_t)jsonInt(obj, "frame_id");
-                String dir      = jsonStr(obj, "direction");
-                s.direction     = (dir == "tx") ? 't' : 'r';
-                s.txIntervalMs  = (uint16_t)jsonInt(obj, "tx_interval_ms");
-                if (s.txIntervalMs == 0) s.txIntervalMs = 200;
-                s.dualMode      = jsonBool(obj, "dual_mode");
-                String nm       = jsonStr(obj, "signal_name");
-                nm.toCharArray(s.name, sizeof(s.name));
-                s.byteStart     = (uint8_t)jsonInt(obj, "byte_start");
-                s.byteLen       = (uint8_t)jsonInt(obj, "byte_length");
-                s.bitMask       = (uint8_t)jsonInt(obj, "bit_mask");
-                s.bigEndian     = jsonBool(obj, "big_endian");
-                s.isSigned      = jsonBool(obj, "is_signed");
-                s.scale         = jsonFloat(obj, "scale");
-                s.offsetVal     = jsonFloat(obj, "offset_val");
-                // Evitar división por cero en decodificación RX (TX no usa scale)
-                if (s.direction == 'r' && s.scale == 0.0f) s.scale = 1.0f;
-                s.value   = 0.0f;
-                s.updated = false;
-                canSignalCount++;
-                inPage++;
-                Serial.printf("[CAN] %s '%s' frame=0x%X%s byte=%d len=%d\n",
-                              s.direction == 't' ? "TX" : "RX",
-                              s.name, s.frameId,
-                              s.dualMode ? "+1" : "",
-                              s.byteStart, s.byteLen);
-            }
-
-            if (inPage == 0) {
-                // "[]" es fin real de tabla; cualquier otra cosa sin ni un
-                // objeto completo es un corte antes del primero — reintentar
-                // el mismo offset.
-                String trimmed = json; trimmed.trim();
-                if (trimmed == "[]") break;
-                staleAttempts++;
-                Serial.println("[CAN] Página cortada antes del primer objeto, reintentando...");
-                delay(500);
-                continue;
-            }
-
-            anyPageOk = true;
-            staleAttempts = 0;
-            offset += inPage;
-            // Pedir siempre el siguiente offset y dejar que un "[]" real
-            // marque el final — así una página cortada a mitad (inPage <
-            // CAN_CONFIG_PAGE_SIZE por corte de red, no por fin de tabla)
-            // nunca se confunde con haber terminado.
-        }
-
-        if (!anyPageOk) {
-            xSemaphoreGive(canMux);
-            Serial.println("[CAN] Config no disponible");
-            return false;
-        }
+        addCANSignal(0x510, 't', 5, "clock_hours");
+        addCANSignal(0x510, 't', 6, "clock_minutes");
+        addCANSignal(0x540, 'r', 0, "moto_battery");
+        addCANSignal(0x541, 'r', 0, "moto_battery_b");
 
         // Reconstruir lista de tramas TX únicas (agrupadas por frame_id)
         txFrameCount = 0;
@@ -529,30 +312,9 @@ bool fetchCANConfig() {
                 txFrameCount++;
             }
         }
-
         xSemaphoreGive(canMux);
     }
     Serial.printf("[CAN] %d señales (%d frames TX)\n", canSignalCount, txFrameCount);
-    return true;
-}
-
-// En roaming con señal débil, fetchCANConfig() puede terminar con menos
-// señales de las configuradas en Supabase (cortes de conexión repetidos).
-// Comprueba que las señales críticas para el reloj de la moto y las dos
-// baterías están cargadas; si no, RUNNING reintentará la descarga
-// periódicamente sin bloquear el envío de telemetría mientras tanto.
-static bool canConfigLooksComplete() {
-    bool hasClockH = false, hasClockM = false, hasBatA = false, hasBatB = false;
-    if (xSemaphoreTake(canMux, pdMS_TO_TICKS(50)) == pdTRUE) {
-        for (int i = 0; i < canSignalCount; i++) {
-            if (strcmp(canSignals[i].name, "clock_hours")    == 0) hasClockH = true;
-            if (strcmp(canSignals[i].name, "clock_minutes")  == 0) hasClockM = true;
-            if (strcmp(canSignals[i].name, "moto_battery")   == 0) hasBatA   = true;
-            if (strcmp(canSignals[i].name, "moto_battery_b") == 0) hasBatB   = true;
-        }
-        xSemaphoreGive(canMux);
-    }
-    return hasClockH && hasClockM && hasBatA && hasBatB;
 }
 
 // ── Valor para un byte de una trama TX ───────────────────────────────────────
@@ -564,9 +326,15 @@ static uint8_t txSignalByte(const char* name, float offsetVal, const TimeRef& t,
     uint32_t elapsed  = now - t.capturedAt;
     uint32_t totalSec = (uint32_t)t.hour * 3600u + (uint32_t)t.min * 60u
                       + t.sec + elapsed / 1000u;
-    if (strcmp(name, "clock_hours")   == 0) return (uint8_t)((totalSec / 3600u) % 24u);
-    if (strcmp(name, "clock_minutes") == 0) return (uint8_t)((totalSec / 60u)   % 60u);
-    if (strcmp(name, "clock_seconds") == 0) return (uint8_t)( totalSec          % 60u);
+    // t.hour/min/sec están en UTC (ver readNetworkTime); el panel de la
+    // moto espera hora local — se aplica aquí el offset de la red (incluye
+    // DST) solo para el byte que sale por CAN, sin tocar el UTC interno
+    // que sí usan trips/telemetría hacia Supabase.
+    int32_t localSec = (int32_t)(totalSec % 86400u) + t.utcOffsetMin * 60;
+    localSec = ((localSec % 86400) + 86400) % 86400;
+    if (strcmp(name, "clock_hours")   == 0) return (uint8_t)(localSec / 3600);
+    if (strcmp(name, "clock_minutes") == 0) return (uint8_t)((localSec / 60) % 60);
+    if (strcmp(name, "clock_seconds") == 0) return (uint8_t)(localSec % 60);
     if (strcmp(name, "clock_day")     == 0) return t.day;
     if (strcmp(name, "clock_month")   == 0) return t.month;
     if (strcmp(name, "clock_year_hi") == 0) return (uint8_t)(t.year >> 8);
@@ -627,7 +395,11 @@ bool readNetworkTime() {
     t.min   =        dt.substring(12, 14).toInt();
     t.sec   =        dt.substring(15, 17).toInt();
 
-    // Convertir a UTC: offset en cuartos de hora ("+08" = +2h)
+    // Convertir a UTC para uso interno (trips/telemetría en Supabase usan
+    // UTC), pero guardando el offset ("+08" = +2h) para poder volver a
+    // hora local al construir la trama del reloj — el panel de la moto
+    // espera hora local (con DST incluido, que la red ya resuelve sola),
+    // no UTC.
     int signIdx = dt.indexOf('+', 16), sign = 1;
     if (signIdx < 0) { signIdx = dt.indexOf('-', 16); sign = -1; }
     if (signIdx >= 0) {
@@ -635,6 +407,7 @@ bool readNetworkTime() {
         int totalMin  = (int)t.hour * 60 + t.min - offsetMin;
         t.hour = ((totalMin / 60) % 24 + 24) % 24;
         t.min  = ((totalMin % 60)      + 60) % 60;
+        t.utcOffsetMin = offsetMin;
     }
     t.capturedAt = millis();
     t.valid      = true;
@@ -697,6 +470,19 @@ void readGPS() {
         if (i == (int)d.length() || d[i] == ',') { f[fi++] = d.substring(prev, i); prev = i + 1; }
     }
     // f[0]=run_status f[1]=fix_status f[2]=datetime f[3]=lat f[4]=lon f[6]=speed
+    // Visto en campo: el motor GNSS puede aparecer como apagado
+    // (run_status=0) sin que nosotros lo hayamos apagado ni haya habido una
+    // reconexión de por medio — probablemente algo del propio módulo. Sin
+    // rearmarlo aquí, se queda apagado hasta el siguiente HTTP_SETUP
+    // (puede tardar minutos con la red inestable), y el GPS nunca llega a
+    // tener el tiempo continuo que necesita para adquirir posición.
+    if (fi >= 1 && f[0] != "1") {
+        static uint32_t lastRearm = 0;
+        if (millis() - lastRearm > 30000) {
+            lastRearm = millis();
+            modem.enableGPS(MODEM_GPS_ENABLE_GPIO, MODEM_GPS_ENABLE_LEVEL);
+        }
+    }
     if (fi < 7 || f[1] != "1" || f[2].length() < 14) return;
 
     TimeRef t   = snapshotTime();
@@ -762,14 +548,32 @@ void canTask(void*) {
         uint32_t now = millis();
         TimeRef  t   = snapshotTime();
 
-        // — Emisión de tramas TX definidas en Supabase —
-        // Solo emite frames que el usuario haya configurado explícitamente
-        // con direction='tx' para evitar enviar tramas no autorizadas al bus.
+        // — Emisión de tramas TX configuradas —
+        // Solo emite frames explícitamente marcados direction='t' para
+        // evitar enviar tramas no autorizadas al bus.
         if (xSemaphoreTake(canMux, pdMS_TO_TICKS(5)) == pdTRUE) {
             for (int f = 0; f < txFrameCount; f++) {
                 TxFrame& tf = txFrames[f];
                 if (now - tf.lastSentMs < tf.intervalMs) continue;
                 tf.lastSentMs = now;
+
+                // Si esta trama lleva algún campo de reloj y aún no hay hora
+                // de red válida (recién arrancado/reconectado, roaming
+                // lento), no se emite en absoluto — antes se enviaba con
+                // 00:00 (el valor por defecto de txSignalByte sin hora
+                // válida), y esa hora implausible parece ser justo lo que
+                // dispara el "error 102" en el panel. No es una trama
+                // nueva ni un contenido añadido: es dejar de mandar la
+                // MISMA trama del reloj cuando su contenido sería basura.
+                bool hasClock = false;
+                for (int i = 0; i < canSignalCount; i++) {
+                    if (canSignals[i].direction == 't' && canSignals[i].frameId == tf.frameId &&
+                        strncmp(canSignals[i].name, "clock_", 6) == 0) {
+                        hasClock = true;
+                        break;
+                    }
+                }
+                if (hasClock && !t.valid) continue;
 
                 twai_message_t msg = {};
                 msg.identifier       = tf.frameId;
@@ -782,18 +586,44 @@ void canTask(void*) {
                     if (s.byteStart < 8)
                         msg.data[s.byteStart] = txSignalByte(s.name, s.offsetVal, t, now);
                 }
-                twai_transmit(&msg, pdMS_TO_TICKS(5));
+                // DIAGNÓSTICO TEMPORAL — comprobando si la trama de la hora
+                // llega realmente al bus tras conectar a la moto; quitar en
+                // cuanto se confirme.
+                esp_err_t txErr = twai_transmit(&msg, pdMS_TO_TICKS(5));
+                static uint32_t lastTxLog = 0;
+                if (millis() - lastTxLog > 5000) {
+                    lastTxLog = millis();
+                    twai_status_info_t st;
+                    twai_get_status_info(&st);
+                    Serial.printf("[CANDBG] TX frame=0x%X err=%d bus_state=%d tx_err_cnt=%d rx_err_cnt=%d\n",
+                                  (unsigned)tf.frameId, (int)txErr, (int)st.state,
+                                  st.tx_error_counter, st.rx_error_counter);
+                }
             }
             xSemaphoreGive(canMux);
         }
 
         // — Recepción (no bloqueante: lee todo lo que haya en la cola) —
         twai_message_t rx;
+        static uint32_t rxCount = 0, lastRxLog = 0;
+        static uint32_t count540 = 0, count541 = 0;
         while (twai_receive(&rx, 0) == ESP_OK) {
+            rxCount++;
+            // DIAGNÓSTICO TEMPORAL — confirmar si 0x540/0x541 (baterías)
+            // aparecen realmente en el bus real; quitar en cuanto se sepa.
+            if (rx.identifier == 0x540) count540++;
+            if (rx.identifier == 0x541) count541++;
             if (xSemaphoreTake(canMux, pdMS_TO_TICKS(5)) == pdTRUE) {
                 parseCANFrame(rx);
                 xSemaphoreGive(canMux);
             }
+        }
+        // DIAGNÓSTICO TEMPORAL — cuántas tramas ha visto el bus en total;
+        // quitar en cuanto se confirme si el bus recibe algo.
+        if (millis() - lastRxLog > 5000) {
+            lastRxLog = millis();
+            Serial.printf("[CANDBG] tramas RX totales=%u (0x540=%u 0x541=%u)\n",
+                          (unsigned)rxCount, (unsigned)count540, (unsigned)count541);
         }
 
         vTaskDelay(pdMS_TO_TICKS(200));
@@ -1040,6 +870,7 @@ void setup() {
 
     SerialAT.begin(MODEM_BAUDRATE, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
     setupCAN();
+    setupCANSignals();
     xTaskCreatePinnedToCore(canTask, "CAN", 3072, NULL, 1, NULL, 0);
     stateAt = millis();
 }
@@ -1073,10 +904,16 @@ void loop() {
 #if defined(MODEM_A7670G)
         sendAT("AT+CGPS=1",    "OK", 3000);
 #else
-        sendAT("AT+CGNSPWR=1", "OK", 3000);
+        // AT+CGNSPWR=1 a secas solo enciende el receptor del chip; en esta
+        // placa la antena GPS tiene su alimentación detrás de un GPIO del
+        // propio módem (MODEM_GPS_ENABLE_GPIO=48, ver utilities.h) que hay
+        // que activar con AT+CGPIO — si no, el receptor queda "encendido
+        // pero sordo": run_status=1 en AT+CGNSINF pero cero satélites
+        // detectados nunca, aunque se espere al aire libre. modem.enableGPS()
+        // (TinyGsmGPS.tpp) manda ambas cosas en el orden correcto.
+        modem.enableGPS(MODEM_GPS_ENABLE_GPIO, MODEM_GPS_ENABLE_LEVEL);
 #endif
         if (!snapshotTime().valid) readNetworkTime();
-        fetchCANConfig();   // descarga/actualiza señales desde Supabase
         if (setupHTTP()) {
             Serial.println("[STATE] RUNNING");
             httpFails = 0; state = RUNNING; nextPost = millis();
@@ -1088,13 +925,6 @@ void loop() {
     case RUNNING: {
         while (SerialAT.available()) Serial.write(SerialAT.read());
         while (Serial.available())   SerialAT.write(Serial.read());
-
-        static uint32_t nextCanRetry = 0;
-        if (!canConfigLooksComplete() && millis() >= nextCanRetry) {
-            nextCanRetry = millis() + 90000;
-            Serial.println("[CAN] Config incompleta (señal débil en roaming), reintentando descarga...");
-            fetchCANConfig();
-        }
 
         if (millis() < nextPost) break;
         nextPost = millis() + POST_INTERVAL_MS;
@@ -1147,9 +977,12 @@ void loop() {
             if (httpFails >= HTTP_FAIL_MAX) {
 #if defined(MODEM_A7670G)
                 sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");
-#else
-                sendAT("AT+SHDISC");
 #endif
+                // SIM7000G: nada que cerrar aquí — TinyGsmClientSecure ya
+                // cierra su socket (sslClient.stop()) dentro de
+                // sim7000Request(). AT+SHDISC es de la implementación AT+SH
+                // anterior; ya no hay sesión SH que cerrar y siempre daba
+                // timeout, costando 5s extra en cada reconexión.
                 state = NET_SETUP; break;
             } else {
                 // Espera antes de reintentar: sin esto, un fallo persistente
@@ -1170,9 +1003,10 @@ void loop() {
         if (millis() - stateAt > RETRY_WAIT_MS) {
 #if defined(MODEM_A7670G)
             sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");
-#else
-            sendAT("AT+SHDISC");
 #endif
+            // SIM7000G: nada que cerrar (ver comentario equivalente más
+            // arriba) — AT+SHDISC siempre daba timeout aquí (5s perdidos en
+            // cada reconexión, justo cuando la red ya va mal).
             state = NET_SETUP;
         }
         break;
