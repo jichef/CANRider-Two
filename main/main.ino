@@ -548,6 +548,33 @@ void canTask(void*) {
         uint32_t now = millis();
         TimeRef  t   = snapshotTime();
 
+        // — Recuperación de bus-off —
+        // Visto en campo con la moto real: tras transmitir bien un rato, el
+        // contador de errores de TX llega a 128 (p.ej. si deja de haber
+        // ACK un momento) y el periférico se autodesconecta del bus
+        // (bus-off), tal y como exige el propio estándar CAN. Sin
+        // recuperarlo, el reloj dejaría de emitirse para siempre hasta un
+        // reinicio manual del ESP32. Esto es manejo de errores del driver
+        // TWAI, no tráfico nuevo: sigue sin emitirse nada salvo la misma
+        // trama del reloj ya configurada.
+        static bool recovering = false;
+        twai_status_info_t twaiSt;
+        twai_get_status_info(&twaiSt);
+        if (twaiSt.state == TWAI_STATE_BUS_OFF && !recovering) {
+            Serial.println("[CAN] Bus-off detectado, iniciando recuperación...");
+            twai_initiate_recovery();
+            recovering = true;
+        }
+        if (recovering) {
+            if (twaiSt.state == TWAI_STATE_STOPPED) {
+                twai_start();
+                Serial.println("[CAN] Bus recuperado, reanudando");
+                recovering = false;
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
         // — Emisión de tramas TX configuradas —
         // Solo emite frames explícitamente marcados direction='t' para
         // evitar enviar tramas no autorizadas al bus.
@@ -593,11 +620,9 @@ void canTask(void*) {
                 static uint32_t lastTxLog = 0;
                 if (millis() - lastTxLog > 5000) {
                     lastTxLog = millis();
-                    twai_status_info_t st;
-                    twai_get_status_info(&st);
                     Serial.printf("[CANDBG] TX frame=0x%X err=%d bus_state=%d tx_err_cnt=%d rx_err_cnt=%d\n",
-                                  (unsigned)tf.frameId, (int)txErr, (int)st.state,
-                                  st.tx_error_counter, st.rx_error_counter);
+                                  (unsigned)tf.frameId, (int)txErr, (int)twaiSt.state,
+                                  twaiSt.tx_error_counter, twaiSt.rx_error_counter);
                 }
             }
             xSemaphoreGive(canMux);
