@@ -3,7 +3,14 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_SUPABASE_KEY, CONF_SUPABASE_URL, CONF_VEHICLE_ID, DOMAIN
+from .const import (
+    CONF_BOARD_MODEL,
+    CONF_SUPABASE_KEY,
+    CONF_SUPABASE_URL,
+    CONF_VEHICLE_ID,
+    DEFAULT_BOARD_MODEL,
+    DOMAIN,
+)
 
 
 class CanRiderConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -30,6 +37,9 @@ class CanRiderConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SUPABASE_URL): str,
                 vol.Required(CONF_SUPABASE_KEY): str,
                 vol.Required(CONF_VEHICLE_ID, default="test01"): str,
+                vol.Optional(CONF_BOARD_MODEL, default=DEFAULT_BOARD_MODEL): vol.In(
+                    ["A7670G", "SIM7000G"]
+                ),
             }),
             errors=errors,
         )

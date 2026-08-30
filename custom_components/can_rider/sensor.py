@@ -13,7 +13,7 @@ from homeassistant.const import (
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import BOARD_MODEL_NAMES, DEFAULT_BOARD_MODEL, DOMAIN
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -36,10 +36,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class CanRiderSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator):
         super().__init__(coordinator)
+        board_model = getattr(coordinator, "board_model", DEFAULT_BOARD_MODEL)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.vehicle_id)},
             "name": f"CanRider {coordinator.vehicle_id}",
-            "model": "T-A7670G ESP32",
+            "model": BOARD_MODEL_NAMES.get(board_model, board_model),
             "manufacturer": "LilyGo",
         }
 

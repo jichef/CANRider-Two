@@ -7,7 +7,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_SUPABASE_KEY, CONF_SUPABASE_URL, CONF_VEHICLE_ID, DOMAIN
+from .const import (
+    CONF_BOARD_MODEL,
+    CONF_SUPABASE_KEY,
+    CONF_SUPABASE_URL,
+    CONF_VEHICLE_ID,
+    DEFAULT_BOARD_MODEL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     # Adjuntamos el vehicle_id al coordinator para que las entidades
     # puedan construir unique_ids estables sin depender del id del registro.
     coordinator.vehicle_id = vehicle_id
+    coordinator.board_model = entry.data.get(CONF_BOARD_MODEL, DEFAULT_BOARD_MODEL)
 
     await coordinator.async_config_entry_first_refresh()
 
