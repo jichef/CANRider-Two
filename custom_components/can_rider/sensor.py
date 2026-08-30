@@ -6,10 +6,8 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
-    UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfSpeed,
-    UnitOfTemperature,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -19,12 +17,10 @@ from .const import BOARD_MODEL_NAMES, DEFAULT_BOARD_MODEL, DOMAIN
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([
-        BatteryLevelSensor(coordinator),
-        PackVoltageSensor(coordinator),
-        BatteryCurrentSensor(coordinator),
-        ChargeCurrentSensor(coordinator),
-        CellVoltageSensor(coordinator),
-        *[TemperatureSensor(coordinator, i) for i in range(1, 5)],
+        BatteryASensor(coordinator),
+        BatteryBSensor(coordinator),
+        EspBatterySensor(coordinator),
+        EspBatteryVoltageSensor(coordinator),
         SpeedSensor(coordinator),
         SignalStrengthSensor(coordinator),
         LastTripDistanceSensor(coordinator),
@@ -53,10 +49,42 @@ class CanRiderSensor(CoordinatorEntity, SensorEntity):
         return self.coordinator.data.get("last_trip")
 
 
-# ── Batería ────────────────────────────────────────────────────────────────────
+# ── Batería de la moto (CAN) ─────────────────────────────────────────────────────
 
-class BatteryLevelSensor(CanRiderSensor):
-    _attr_name = "Estado de Carga"
+class BatteryASensor(CanRiderSensor):
+    _attr_name = "Batería A"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def unique_id(self):
+        return f"{self.coordinator.vehicle_id}_moto_battery"
+
+    @property
+    def native_value(self):
+        return self._tel.get("moto_battery") if self._tel else None
+
+
+class BatteryBSensor(CanRiderSensor):
+    _attr_name = "Batería B"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def unique_id(self):
+        return f"{self.coordinator.vehicle_id}_moto_battery_b"
+
+    @property
+    def native_value(self):
+        return self._tel.get("moto_battery_b") if self._tel else None
+
+
+# ── Batería del propio ESP32 (AT+CBC del módem) ──────────────────────────────────
+
+class EspBatterySensor(CanRiderSensor):
+    _attr_name = "Batería ESP32"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -67,90 +95,22 @@ class BatteryLevelSensor(CanRiderSensor):
 
     @property
     def native_value(self):
-        if not self._tel:
-            return None
-        # soc (CAN) es más preciso que battery_level (AT+CBC del módulo ESP32)
-        soc = self._tel.get("soc")
-        return soc if soc is not None else self._tel.get("battery_level")
+        return self._tel.get("battery_level") if self._tel else None
 
 
-class PackVoltageSensor(CanRiderSensor):
-    _attr_name = "Tensión del Pack"
+class EspBatteryVoltageSensor(CanRiderSensor):
+    _attr_name = "Tensión Batería ESP32"
     _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
     _attr_device_class = SensorDeviceClass.VOLTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def unique_id(self):
-        return f"{self.coordinator.vehicle_id}_pack_voltage"
+        return f"{self.coordinator.vehicle_id}_battery_voltage"
 
     @property
     def native_value(self):
-        return self._tel.get("pack_voltage") if self._tel else None
-
-
-class BatteryCurrentSensor(CanRiderSensor):
-    _attr_name = "Corriente de Batería"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    @property
-    def unique_id(self):
-        return f"{self.coordinator.vehicle_id}_battery_current"
-
-    @property
-    def native_value(self):
-        return self._tel.get("battery_current") if self._tel else None
-
-
-class ChargeCurrentSensor(CanRiderSensor):
-    _attr_name = "Corriente de Carga"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    @property
-    def unique_id(self):
-        return f"{self.coordinator.vehicle_id}_charge_current"
-
-    @property
-    def native_value(self):
-        return self._tel.get("charge_current") if self._tel else None
-
-
-class CellVoltageSensor(CanRiderSensor):
-    _attr_name = "Tensión por Celda"
-    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
-    _attr_device_class = SensorDeviceClass.VOLTAGE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    @property
-    def unique_id(self):
-        return f"{self.coordinator.vehicle_id}_cell_voltage"
-
-    @property
-    def native_value(self):
-        return self._tel.get("cell_voltage") if self._tel else None
-
-
-class TemperatureSensor(CanRiderSensor):
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-
-    def __init__(self, coordinator, index: int):
-        super().__init__(coordinator)
-        self._index = index
-        self._attr_name = f"Temperatura Celda {index}"
-
-    @property
-    def unique_id(self):
-        return f"{self.coordinator.vehicle_id}_temp{self._index}"
-
-    @property
-    def native_value(self):
-        return self._tel.get(f"temp{self._index}") if self._tel else None
+        return self._tel.get("battery_voltage") if self._tel else None
 
 
 # ── Otros ──────────────────────────────────────────────────────────────────────
