@@ -260,9 +260,17 @@ export default function DashboardContent() {
         )}
 
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
-          <div className="flex items-center gap-2 text-cyan-500">
-            <Activity size={18} className="animate-pulse" />
-            <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-cyan-500">
+              <Activity size={18} className="animate-pulse" />
+              <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
+            </div>
+            {telemetry?.timestamp && (
+              <div className="flex items-center gap-2 text-zinc-500 font-mono text-[10px]">
+                <Clock size={12} />
+                <span>ÚLTIMA ACTUALIZACIÓN: {new Date(telemetry.timestamp).toLocaleTimeString('es-ES')}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
