@@ -18,7 +18,13 @@ TinyGsm modem(debugger);
 #define POST_INTERVAL_MS  15000UL
 #define RETRY_WAIT_MS     10000UL
 #define HTTP_FAIL_MAX     3
-#define MAX_HTTP_BODY     4096    // bytes máximos de respuesta GET
+// bytes máximos de respuesta GET (cabeceras HTTP + cuerpo JSON juntos en el
+// buffer de sim7000Request). Con 16 señales configuradas ya se llega a
+// ~4700 bytes (3585 de JSON + ~1100 de cabeceras de Supabase) — por encima
+// de los 4096 que había antes, lo que truncaba el JSON y perdía las últimas
+// señales de la lista en silencio (incluida clock_minutes → hora mal en la
+// pantalla de la moto). Con margen para crecer más señales sin repetir esto.
+#define MAX_HTTP_BODY     12288
 
 static TimeRef          lastTime = {};
 static SemaphoreHandle_t timeMux = NULL;
@@ -243,6 +249,28 @@ static String sim7000Host() {
     return host;
 }
 
+// Cloudflare (delante de Supabase) añade una cookie __cf_bm de ~250 bytes
+// con Set-Cookie en cada respuesta SIN cookie previa. Con las cabeceras que
+// ya de por sí manda Cloudflare, eso deja la respuesta total pegada al
+// límite (~1369 bytes) donde el SIM7000G corta la conexión en roaming — con
+// una petición de una sola señal se comprobó que sin esa cookie el total
+// baja de ~1400 a ~1080 bytes. Reenviándola en peticiones sucesivas,
+// Cloudflare no la vuelve a mandar y libera ese margen.
+static String g_cfCookie;
+
+static void captureCfCookie(const String& raw) {
+    // Cabecera insensible a mayúsculas (Cloudflare la manda en minúsculas,
+    // "set-cookie:") — comparar en una copia en minúsculas conserva los
+    // índices porque toLowerCase() no cambia la longitud de la cadena.
+    String lower = raw; lower.toLowerCase();
+    int idx = lower.indexOf("set-cookie: __cf_bm=");
+    if (idx < 0) return;
+    int start = idx + 12;  // longitud de "set-cookie: "
+    int end   = raw.indexOf(';', start);
+    if (end < 0) return;
+    g_cfCookie = raw.substring(start, end);
+}
+
 // Petición HTTPS genérica (GET sin body, o POST con body). Devuelve el código
 // HTTP en httpStatus y el cuerpo de la respuesta en respBody.
 static bool sim7000Request(const String& method, const String& path, const String& body,
@@ -260,6 +288,9 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     sslClient.print("Host: "); sslClient.print(host); sslClient.print("\r\n");
     sslClient.print("apikey: "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
     sslClient.print("Authorization: Bearer "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
+    if (g_cfCookie.length() > 0) {
+        sslClient.print("Cookie: "); sslClient.print(g_cfCookie); sslClient.print("\r\n");
+    }
     if (body.length() > 0) {
         sslClient.print("Content-Type: application/json\r\n");
         // Sin "Prefer: return=minimal" a propósito: con cuerpo vacío en la
@@ -271,19 +302,43 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     sslClient.print("Connection: close\r\n\r\n");
     if (body.length() > 0) sslClient.print(body);
 
+    // En roaming, una conexión que se va a cortar sin datos (ver
+    // g_cfCookie/CAN_CONFIG_PAGE_SIZE más abajo) puede quedarse "abierta"
+    // muchos segundos sin dar señales de vida antes de que el módem la dé
+    // por muerta. Con fetchCANConfig() reintentando varias veces por
+    // página, un timeout largo aquí multiplica: 6 reintentos a 25s cada
+    // uno pueden dejar el arranque más de 2 minutos sin llegar a RUNNING.
+    // Las respuestas que sí llegan lo hacen en pocos segundos, así que un
+    // techo corto no penaliza el caso bueno y evita que uno malo bloquee
+    // el resto.
     String raw; raw.reserve(2048);
     uint32_t rStart = millis(), lastByte = millis();
-    while (millis() - rStart < 15000) {
+    while (millis() - rStart < 10000) {
         while (sslClient.available()) {
-            raw += (char)sslClient.read();
+            // Con la conexión cortada a medias, available() puede seguir
+            // devolviendo un conteo obsoleto (>0) mientras read() ya
+            // devuelve -1 (AT+CARECV falla porque el socket ya se cerró).
+            // Casteábamos ese -1 a char y lo añadíamos como si fuera un
+            // byte real, lo que refrescaba lastByte en cada vuelta y dejaba
+            // el bucle girando en vacío el timeout entero sin avanzar ni
+            // salir por el corte de inactividad.
+            int c = sslClient.read();
+            if (c < 0) break;
+            raw += (char)c;
             lastByte = millis();
             if (raw.length() >= MAX_HTTP_BODY) break;
         }
         if (!sslClient.connected() && !sslClient.available()) break;
-        if (raw.length() > 0 && millis() - lastByte > 3000) break;
+        // Sin el "raw.length() > 0" de antes: si la conexión nunca entrega
+        // ni un solo byte (available() sigue en true de forma obsoleta,
+        // read() siempre falla), lastByte se queda clavado en rStart y este
+        // corte actúa igual como un tope de ~4s en vez de agotar los 10s
+        // enteros machacando AT+CARECV contra un socket ya muerto.
+        if (millis() - lastByte > 4000) break;
         delay(10);
     }
     sslClient.stop();
+    captureCfCookie(raw);  // las cabeceras llegan enteras aunque el cuerpo se corte
 
     int httpPos = raw.indexOf("HTTP/");
     if (httpPos >= 0) {
@@ -291,8 +346,44 @@ static bool sim7000Request(const String& method, const String& path, const Strin
         if (sp >= 0) httpStatus = raw.substring(sp + 1, sp + 4).toInt();
     }
     int sepIdx = raw.indexOf("\r\n\r\n");
-    if (sepIdx >= 0) respBody = raw.substring(sepIdx + 4);
+    if (sepIdx >= 0) {
+        String headers = raw.substring(0, sepIdx);
+        String bodyRaw = raw.substring(sepIdx + 4);
+        respBody = (headers.indexOf("chunked") >= 0) ? dechunkBody(bodyRaw) : bodyRaw;
+    }
     return httpStatus > 0;
+}
+
+// Supabase (vía Cloudflare) siempre responde con Transfer-Encoding: chunked,
+// incluso en HTTP/1.1 con Connection: close. Sin decodificar esto, cada
+// fragmento deja un prefijo hexadecimal (tamaño+\r\n) incrustado en mitad
+// del JSON — normalmente cae en un hueco entre objetos y pasa desapercibido,
+// pero si cae dentro de un string o número corrompe el parseo silenciosamente.
+static String dechunkBody(const String& raw) {
+    String out; out.reserve(raw.length());
+    int pos = 0;
+    while (pos < (int)raw.length()) {
+        int lineEnd = raw.indexOf("\r\n", pos);
+        if (lineEnd < 0) break;
+        String sizeHex = raw.substring(pos, lineEnd);
+        int semi = sizeHex.indexOf(';');
+        if (semi >= 0) sizeHex = sizeHex.substring(0, semi);
+        sizeHex.trim();
+        long chunkSize = strtol(sizeHex.c_str(), nullptr, 16);
+        if (chunkSize <= 0) break;  // chunk final (0\r\n\r\n)
+        int dataStart = lineEnd + 2;
+        int dataEnd   = dataStart + chunkSize;
+        if (dataEnd > (int)raw.length()) {
+            // Conexión cortada a mitad de un chunk (frecuente en roaming):
+            // devolvemos lo recibido; fetchCANConfig lo detectará como
+            // página incompleta y reintentará.
+            out += raw.substring(dataStart);
+            break;
+        }
+        out += raw.substring(dataStart, dataEnd);
+        pos = dataEnd + 2;  // saltar el \r\n que cierra el chunk
+    }
+    return out;
 }
 
 String httpGet(const String& path) {
@@ -307,52 +398,120 @@ String httpGet(const String& path) {
 #endif
 
 // ── Config CAN desde Supabase ─────────────────────────────────────────────────
+// Nº de señales por página. Diagnosticado en campo con AT+CARECV: en
+// roaming, el SIM7000G corta la conexión TLS a los ~1369 bytes totales
+// (cabeceras + cuerpo) sin avisar de ningún error — de ahí que se perdieran
+// siempre las últimas señales de la lista, incluida clock_minutes (causa del
+// reloj mal y el "error 102" en el panel de la moto). Con la cookie de
+// Cloudflare reenviada (ver g_cfCookie) una página de 2 señales deja margen
+// bajo ese límite; de 3 en adelante ya lo supera.
+#define CAN_CONFIG_PAGE_SIZE 2
+
 bool fetchCANConfig() {
     Serial.println("[CAN] Descargando config desde Supabase...");
-    String path = String("/rest/v1/can_signals?vehicle_id=eq.") + VEHICLE_ID
-                + "&select=frame_id,direction,tx_interval_ms,dual_mode,signal_name,"
-                  "byte_start,byte_length,bit_mask,big_endian,is_signed,scale,offset_val";
-    String json = httpGet(path);
-    if (json.length() == 0) {
-        Serial.println("[CAN] Config no disponible");
-        return false;
-    }
 
     if (xSemaphoreTake(canMux, portMAX_DELAY) == pdTRUE) {
         canSignalCount = 0;
-        int pos = 0;
-        while (canSignalCount < MAX_SIGNALS) {
-            int next;
-            String obj = nextJsonObj(json, pos, next);
-            if (next < 0 || obj.length() == 0) break;
-            pos = next;
+        int offset = 0;
+        bool anyPageOk = false;
+        // Cuántas veces seguidas una petición no ha aportado ni una señal
+        // más (red muerta o corte antes de completar el primer objeto). Un
+        // corte a mitad de página SÍ cuenta como progreso (offset avanza
+        // por lo realmente parseado) y no reinicia este contador: solo nos
+        // rendimos si de verdad dejamos de avanzar.
+        int staleAttempts = 0;
+        while (canSignalCount < MAX_SIGNALS && staleAttempts < 6) {
+            // Solo lo imprescindible ahora mismo: la hora TX y el % de las
+            // dos baterías (la posición viene de AT+CGNSINF, no de esta
+            // tabla). El resto de señales (voltajes, temperaturas, etc.)
+            // se queda configurado en Supabase por si se reactiva más
+            // adelante, pero no se descarga — así la petición es mínima y
+            // le cuesta mucho menos sobrevivir a la conexión en roaming.
+            String path = String("/rest/v1/can_signals?vehicle_id=eq.") + VEHICLE_ID
+                        + "&signal_name=in.(clock_hours,clock_minutes,moto_battery,moto_battery_b)"
+                        + "&select=frame_id,direction,tx_interval_ms,dual_mode,signal_name,"
+                          "byte_start,byte_length,bit_mask,big_endian,is_signed,scale,offset_val"
+                          "&order=id"
+                        + "&limit=" + String(CAN_CONFIG_PAGE_SIZE)
+                        + "&offset=" + String(offset);
+            // En roaming, la conexión TLS del SIM7000G a veces se corta a
+            // mitad de la respuesta (confirmado con AT+CARECV: la conexión
+            // se cierra tras recibir bastante menos de lo anunciado). En
+            // vez de descartar toda la página cuando eso pasa, nos quedamos
+            // con los objetos que sí llegaron completos (nextJsonObj no
+            // devuelve nada para uno cortado a medias) y solo repetimos la
+            // petición por lo que falte — así un corte nunca tira datos ya
+            // buenos, solo cuesta una vuelta extra.
+            String json = httpGet(path);
+            if (json.length() == 0) {
+                staleAttempts++;
+                Serial.println("[CAN] Página vacía, reintentando...");
+                delay(500);
+                continue;
+            }
 
-            CANSignal& s    = canSignals[canSignalCount];
-            s.frameId       = (uint32_t)jsonInt(obj, "frame_id");
-            String dir      = jsonStr(obj, "direction");
-            s.direction     = (dir == "tx") ? 't' : 'r';
-            s.txIntervalMs  = (uint16_t)jsonInt(obj, "tx_interval_ms");
-            if (s.txIntervalMs == 0) s.txIntervalMs = 200;
-            s.dualMode      = jsonBool(obj, "dual_mode");
-            String nm       = jsonStr(obj, "signal_name");
-            nm.toCharArray(s.name, sizeof(s.name));
-            s.byteStart     = (uint8_t)jsonInt(obj, "byte_start");
-            s.byteLen       = (uint8_t)jsonInt(obj, "byte_length");
-            s.bitMask       = (uint8_t)jsonInt(obj, "bit_mask");
-            s.bigEndian     = jsonBool(obj, "big_endian");
-            s.isSigned      = jsonBool(obj, "is_signed");
-            s.scale         = jsonFloat(obj, "scale");
-            s.offsetVal     = jsonFloat(obj, "offset_val");
-            // Evitar división por cero en decodificación RX (TX no usa scale)
-            if (s.direction == 'r' && s.scale == 0.0f) s.scale = 1.0f;
-            s.value   = 0.0f;
-            s.updated = false;
-            canSignalCount++;
-            Serial.printf("[CAN] %s '%s' frame=0x%X%s byte=%d len=%d\n",
-                          s.direction == 't' ? "TX" : "RX",
-                          s.name, s.frameId,
-                          s.dualMode ? "+1" : "",
-                          s.byteStart, s.byteLen);
+            int pos = 0;
+            int inPage = 0;
+            while (canSignalCount < MAX_SIGNALS) {
+                int next;
+                String obj = nextJsonObj(json, pos, next);
+                if (next < 0 || obj.length() == 0) break;
+                pos = next;
+
+                CANSignal& s    = canSignals[canSignalCount];
+                s.frameId       = (uint32_t)jsonInt(obj, "frame_id");
+                String dir      = jsonStr(obj, "direction");
+                s.direction     = (dir == "tx") ? 't' : 'r';
+                s.txIntervalMs  = (uint16_t)jsonInt(obj, "tx_interval_ms");
+                if (s.txIntervalMs == 0) s.txIntervalMs = 200;
+                s.dualMode      = jsonBool(obj, "dual_mode");
+                String nm       = jsonStr(obj, "signal_name");
+                nm.toCharArray(s.name, sizeof(s.name));
+                s.byteStart     = (uint8_t)jsonInt(obj, "byte_start");
+                s.byteLen       = (uint8_t)jsonInt(obj, "byte_length");
+                s.bitMask       = (uint8_t)jsonInt(obj, "bit_mask");
+                s.bigEndian     = jsonBool(obj, "big_endian");
+                s.isSigned      = jsonBool(obj, "is_signed");
+                s.scale         = jsonFloat(obj, "scale");
+                s.offsetVal     = jsonFloat(obj, "offset_val");
+                // Evitar división por cero en decodificación RX (TX no usa scale)
+                if (s.direction == 'r' && s.scale == 0.0f) s.scale = 1.0f;
+                s.value   = 0.0f;
+                s.updated = false;
+                canSignalCount++;
+                inPage++;
+                Serial.printf("[CAN] %s '%s' frame=0x%X%s byte=%d len=%d\n",
+                              s.direction == 't' ? "TX" : "RX",
+                              s.name, s.frameId,
+                              s.dualMode ? "+1" : "",
+                              s.byteStart, s.byteLen);
+            }
+
+            if (inPage == 0) {
+                // "[]" es fin real de tabla; cualquier otra cosa sin ni un
+                // objeto completo es un corte antes del primero — reintentar
+                // el mismo offset.
+                String trimmed = json; trimmed.trim();
+                if (trimmed == "[]") break;
+                staleAttempts++;
+                Serial.println("[CAN] Página cortada antes del primer objeto, reintentando...");
+                delay(500);
+                continue;
+            }
+
+            anyPageOk = true;
+            staleAttempts = 0;
+            offset += inPage;
+            // Pedir siempre el siguiente offset y dejar que un "[]" real
+            // marque el final — así una página cortada a mitad (inPage <
+            // CAN_CONFIG_PAGE_SIZE por corte de red, no por fin de tabla)
+            // nunca se confunde con haber terminado.
+        }
+
+        if (!anyPageOk) {
+            xSemaphoreGive(canMux);
+            Serial.println("[CAN] Config no disponible");
+            return false;
         }
 
         // Reconstruir lista de tramas TX únicas (agrupadas por frame_id)
@@ -375,6 +534,25 @@ bool fetchCANConfig() {
     }
     Serial.printf("[CAN] %d señales (%d frames TX)\n", canSignalCount, txFrameCount);
     return true;
+}
+
+// En roaming con señal débil, fetchCANConfig() puede terminar con menos
+// señales de las configuradas en Supabase (cortes de conexión repetidos).
+// Comprueba que las señales críticas para el reloj de la moto y las dos
+// baterías están cargadas; si no, RUNNING reintentará la descarga
+// periódicamente sin bloquear el envío de telemetría mientras tanto.
+static bool canConfigLooksComplete() {
+    bool hasClockH = false, hasClockM = false, hasBatA = false, hasBatB = false;
+    if (xSemaphoreTake(canMux, pdMS_TO_TICKS(50)) == pdTRUE) {
+        for (int i = 0; i < canSignalCount; i++) {
+            if (strcmp(canSignals[i].name, "clock_hours")    == 0) hasClockH = true;
+            if (strcmp(canSignals[i].name, "clock_minutes")  == 0) hasClockM = true;
+            if (strcmp(canSignals[i].name, "moto_battery")   == 0) hasBatA   = true;
+            if (strcmp(canSignals[i].name, "moto_battery_b") == 0) hasBatB   = true;
+        }
+        xSemaphoreGive(canMux);
+    }
+    return hasClockH && hasClockM && hasBatA && hasBatB;
 }
 
 // ── Valor para un byte de una trama TX ───────────────────────────────────────
@@ -910,6 +1088,14 @@ void loop() {
     case RUNNING: {
         while (SerialAT.available()) Serial.write(SerialAT.read());
         while (Serial.available())   SerialAT.write(Serial.read());
+
+        static uint32_t nextCanRetry = 0;
+        if (!canConfigLooksComplete() && millis() >= nextCanRetry) {
+            nextCanRetry = millis() + 90000;
+            Serial.println("[CAN] Config incompleta (señal débil en roaming), reintentando descarga...");
+            fetchCANConfig();
+        }
+
         if (millis() < nextPost) break;
         nextPost = millis() + POST_INTERVAL_MS;
 
