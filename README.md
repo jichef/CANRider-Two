@@ -56,7 +56,8 @@ El ESP32 actúa como ECU secundaria: escucha tramas del bus CAN y emite la trama
 | **SIM con datos** | Con APN activo (M2M/IoT de cualquier operador) |
 | **Antena LTE + antena GPS** | Las que incluye el kit del T-SIM7000G |
 | **Batería 18650** | Como respaldo de alimentación (opcional pero recomendado) |
-| **Acceso al bus CAN del vehículo** | Cable directo a CAN-H / CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω) |
+| **Conversor DC-DC de alta tensión a USB** | Debe aguantar la tensión de la batería principal del vehículo (48-72V en muchas eléctricas) — alimenta el ESP32 directamente desde la moto |
+| **Acceso al bus CAN del vehículo** | Cable directo a CAN-H / CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω). En muchos vehículos, alimentación + CAN-H/CAN-L están disponibles juntos en el conector de la ECU original |
 
 También es compatible con el **LilyGo T-A7670G** (más velocidad de datos LTE Cat-1), pero su variante estándar no lleva GPS integrado — necesita un módulo GPS externo (p.ej. Quectel L76K) aparte, con su propio cableado. Si no tienes ese módulo, usa el T-SIM7000G.
 

@@ -533,6 +533,7 @@
         <li><b>Tarjeta SIM con datos</b> activados, con el PIN desactivado</li>
         <li><b>Cable USB</b> de datos (no solo de carga) para la placa</li>
         <li><b>Batería 18650</b> como respaldo de alimentación (recomendado, no imprescindible)</li>
+        <li><b>Conversor DC-DC de alta tensión a USB</b> (que aguante la tensión de la batería de tu moto — en eléctricas suele ir de 48V a 72V) para alimentar el ESP32 directamente desde la moto en vez de depender solo de la batería 18650</li>
         <li><b>Acceso al bus CAN</b> de la moto — CAN-H y CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω, no hace falta añadir ninguna aparte)</li>
         <li>Una cuenta de <b>GitHub</b>, <b>Supabase</b> y <b>Vercel</b> — las tres son gratuitas</li>
       </ul>
@@ -822,6 +823,17 @@
       </div>
 
       <p>Si tu transceptor tiene un pin <code>3V3-STDBY</code> o similar, conéctalo también a 3.3V para que arranque en modo activo normal. Inserta la SIM en el módem con la placa apagada, y conecta la antena LTE y la antena GPS a sus conectores (son distintos, no los confundas).</p>
+
+      <div class="callout tip">
+        <span class="k">¿De dónde saco alimentación y las líneas CAN-H/CAN-L?</span>
+        <p>El ESP32 no se alimenta con las 3.3V del transceptor (esa es solo la alimentación lógica del propio transceptor) — necesita 5V por USB, para lo que hace falta el conversor DC-DC de la lista de arriba conectado a la batería principal de la moto.</p>
+        <p>Un punto habitual para conseguir alimentación y las dos líneas CAN a la vez es el propio conector de la ECU original del vehículo: muchas ECU tienen ahí tensión de batería, GND y el bus CAN-H/CAN-L ya presentes. Localiza el conector de tu ECU, identifica esos pines con un multímetro o el diagrama de tu vehículo, y engancha el conversor DC-DC y el transceptor ahí en vez de empalmar cables sueltos por el chasis.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Antes de tocar la ECU</span>
+        <p>Desconecta la batería de la moto antes de manipular el conector de la ECU. Si vas a desmontar o inutilizar la ECU original para acceder a su conector, ten en cuenta que eso puede dejar sin función lo que antes controlaba esa ECU — asegúrate de que es lo que quieres hacer antes de cortar nada. Recuerda el aviso legal del principio de esta guía: esto lo haces bajo tu propia responsabilidad.</p>
+      </div>
     </section>
 
     <!-- PASO 8 -->
