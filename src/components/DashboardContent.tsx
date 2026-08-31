@@ -407,13 +407,30 @@ export default function DashboardContent() {
                       )
                     )}
                   </div>
-                  <span className="text-[10px] text-zinc-500 font-mono uppercase">
-                    {selectedTrip
-                      ? `Trip ID: ${selectedTrip.slice(0, 8)}`
-                      : hasLiveFix
-                        ? (address ?? `${Math.abs(currentPosition[0]).toFixed(4)}° ${currentPosition[0] >= 0 ? 'N' : 'S'}, ${Math.abs(currentPosition[1]).toFixed(4)}° ${currentPosition[1] >= 0 ? 'E' : 'W'}`)
-                        : 'Esperando posición GPS...'}
-                  </span>
+                  {selectedTrip ? (
+                    <span className="text-[10px] text-zinc-500 font-mono uppercase">
+                      {`Trip ID: ${selectedTrip.slice(0, 8)}`}
+                    </span>
+                  ) : hasLiveFix ? (
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      {address && (
+                        <span className="text-[10px] text-zinc-500 font-mono uppercase">{address} (aprox.)</span>
+                      )}
+                      <span className="text-[10px] text-zinc-600 font-mono">
+                        {Math.abs(currentPosition[0]).toFixed(4)}° {currentPosition[0] >= 0 ? 'N' : 'S'}, {Math.abs(currentPosition[1]).toFixed(4)}° {currentPosition[1] >= 0 ? 'E' : 'W'}
+                      </span>
+                      <a
+                        href={`https://www.google.com/maps?q=${currentPosition[0]},${currentPosition[1]}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] font-mono text-cyan-500 hover:text-cyan-400 underline underline-offset-2"
+                      >
+                        Google Maps ↗
+                      </a>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-zinc-500 font-mono uppercase">Esperando posición GPS...</span>
+                  )}
                 </div>
               </div>
               {selectedTrip && (
