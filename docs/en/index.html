@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --paper:      #EEF1EE;
+    --paper-raised: #FFFFFF;
+    --ink:        #182220;
+    --ink-soft:   #4C5A56;
+    --ink-faint:  #7C8985;
+    --line:       #D3DAD5;
+    --amber:      #C96A1E;
+    --amber-soft: #F3E1CC;
+    --teal:       #167A70;
+    --teal-soft:  #D4EBE7;
+    --rust:       #A83F28;
+    --rust-soft:  #F3DDD5;
+    --console-bg: #171F1D;
+    --console-ink: #E7EFEA;
+    --console-dim: #7FA79E;
+    --console-line: #2B3532;
+    --shadow: 0 1px 2px rgba(20, 30, 27, 0.06), 0 8px 24px rgba(20, 30, 27, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #141B19;
+      --paper-raised: #1B2321;
+      --ink:        #E8EEEA;
+      --ink-soft:   #AEBAB5;
+      --ink-faint:  #7C8985;
+      --line:       #2B3532;
+      --amber:      #E68A3C;
+      --amber-soft: #3A2A18;
+      --teal:       #4FC2B5;
+      --teal-soft:  #16302C;
+      --rust:       #E07257;
+      --rust-soft:  #3A2119;
+      --console-bg: #0D1211;
+      --console-ink: #DCEAE4;
+      --console-dim: #6E9891;
+      --console-line: #223028;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #141B19;
+    --paper-raised: #1B2321;
+    --ink:        #E8EEEA;
+    --ink-soft:   #AEBAB5;
+    --ink-faint:  #7C8985;
+    --line:       #2B3532;
+    --amber:      #E68A3C;
+    --amber-soft: #3A2A18;
+    --teal:       #4FC2B5;
+    --teal-soft:  #16302C;
+    --rust:       #E07257;
+    --rust-soft:  #3A2119;
+    --console-bg: #0D1211;
+    --console-ink: #DCEAE4;
+    --console-dim: #6E9891;
+    --console-line: #223028;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; overflow-x: hidden; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+  h1, h2, h3, h4 {
+    font-family: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    color: var(--ink);
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  a { color: var(--teal); }
+  code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.88em;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+  }
+
+  /* ── Layout shell ─────────────────────────────────────────────── */
+  .shell {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 760px);
+    justify-content: center;
+    gap: 56px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 48px 24px 120px;
+  }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: minmax(0, 1fr); padding: 24px 16px 80px; }
+    .rail { display: none; }
+  }
+
+  /* ── Mobile jump nav (replaces the side rail when it's hidden) ── */
+  .mobile-nav { display: none; }
+  @media (max-width: 900px) {
+    .mobile-nav {
+      display: block;
+      position: sticky;
+      top: 10px;
+      z-index: 10;
+      margin-bottom: 24px;
+    }
+    .mobile-nav select {
+      width: 100%;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--paper-raised);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 14px;
+      box-shadow: var(--shadow);
+    }
+  }
+
+  /* ── Left rail ────────────────────────────────────────────────── */
+  .rail {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    height: calc(100vh - 64px);
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .rail-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    margin: 0 0 14px;
+  }
+  .rail ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-left: 1px solid var(--line);
+  }
+  .rail li { position: relative; }
+  .rail a {
+    display: block;
+    padding: 7px 0 7px 18px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    margin-left: -1px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .rail a:hover { color: var(--ink); }
+  .rail li.active a {
+    color: var(--amber);
+    border-left-color: var(--amber);
+    font-weight: 600;
+  }
+
+  /* ── Header ───────────────────────────────────────────────────── */
+  header.top {
+    grid-column: 1 / -1;
+    max-width: 760px;
+    margin: 0 auto 8px;
+  }
+  @media (min-width: 901px) {
+    header.top { grid-column: 2; margin: 0 0 8px; }
+    .rail { grid-column: 1; }
+    main { grid-column: 2; }
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+  }
+  h1.title {
+    font-size: clamp(30px, 4.2vw, 42px);
+    font-weight: 700;
+    line-height: 1.08;
+    margin: 0 0 16px;
+  }
+  .dek {
+    font-size: 16.5px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 32px;
+  }
+
+  /* ── Architecture diagram ─────────────────────────────────────── */
+  .diagram-wrap {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 20px 18px;
+    box-shadow: var(--shadow);
+    margin-bottom: 40px;
+    overflow-x: auto;
+  }
+  .diagram-wrap svg { display: block; margin: 0 auto; min-width: 640px; }
+  .diagram-caption {
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-align: center;
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Main column ──────────────────────────────────────────────── */
+  main { min-width: 0; }
+
+  .lead-box {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 44px;
+    box-shadow: var(--shadow);
+  }
+  .lead-box h3 {
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 12px;
+  }
+  .checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .checklist li {
+    position: relative;
+    padding-left: 26px;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .checklist li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid var(--teal);
+    background: var(--teal-soft);
+  }
+  .checklist b { color: var(--ink); font-weight: 600; }
+
+  section.step {
+    padding-top: 8px;
+    margin-bottom: 60px;
+    scroll-margin-top: 24px;
+  }
+  .step-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 6px;
+  }
+  .step-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--amber);
+    letter-spacing: 0.06em;
+  }
+  .step-head h2 {
+    font-size: 22px;
+    margin: 0;
+    font-weight: 600;
+  }
+  .step-sub {
+    color: var(--ink-faint);
+    font-size: 14px;
+    margin: 0 0 22px;
+  }
+  section.step h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 26px 0 10px;
+  }
+  section.step p { margin: 0 0 14px; color: var(--ink-soft); font-size: 15px; }
+  section.step p b, section.step li b { color: var(--ink); font-weight: 600; }
+  section.step ul, section.step ol.sub-list {
+    margin: 0 0 16px;
+    padding-left: 22px;
+    color: var(--ink-soft);
+    font-size: 15px;
+  }
+  section.step li { margin-bottom: 6px; }
+
+  .ui-path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85em;
+    background: var(--teal-soft);
+    color: var(--teal);
+    border-radius: 4px;
+    padding: 0.08em 0.45em;
+    white-space: nowrap;
+  }
+
+  /* ── Code / console blocks ────────────────────────────────────── */
+  .code-block {
+    position: relative;
+    background: var(--console-bg);
+    border-radius: 10px;
+    margin: 6px 0 20px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .code-block .label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--console-line);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--console-dim);
+  }
+  .code-block pre {
+    margin: 0;
+    padding: 14px 16px 16px;
+    overflow-x: auto;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--console-ink);
+  }
+  .code-block .cm { color: var(--console-dim); }
+  .copy-btn {
+    background: transparent;
+    border: 1px solid var(--console-line);
+    color: var(--console-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .copy-btn:hover { color: var(--console-ink); border-color: var(--console-dim); }
+  .copy-btn:focus-visible, a:focus-visible, .rail a:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+  }
+
+  /* ── Callouts ─────────────────────────────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 4px 0 20px;
+    font-size: 14px;
+    border-left: 3px solid transparent;
+  }
+  .callout .k {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .callout.tip { background: var(--teal-soft); border-color: var(--teal); }
+  .callout.tip .k { color: var(--teal); }
+  .callout.note { background: var(--amber-soft); border-color: var(--amber); }
+  .callout.note .k { color: var(--amber); }
+  .callout.warn { background: var(--rust-soft); border-color: var(--rust); }
+  .callout.warn .k { color: var(--rust); }
+  .callout p { margin: 0; color: var(--ink-soft); }
+  .callout p + p { margin-top: 8px; }
+
+  /* ── Pin table ────────────────────────────────────────────────── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 4px 0 20px;
+    border-radius: 10px;
+  }
+  table.pins {
+    width: 100%;
+    min-width: 420px;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 0;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  table.pins th, table.pins td {
+    text-align: left;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    overflow-wrap: anywhere;
+  }
+  table.pins td code { overflow-wrap: anywhere; white-space: normal; }
+  @media (max-width: 480px) {
+    table.pins { font-size: 12.5px; }
+    table.pins th, table.pins td { padding: 8px 9px; }
+  }
+  table.pins th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--paper);
+  }
+  table.pins tr:last-child td { border-bottom: none; }
+  table.pins td.pin { font-family: 'IBM Plex Mono', monospace; color: var(--teal); font-weight: 600; }
+
+  /* ── Wiring diagram ───────────────────────────────────────────── */
+  .wiring-wrap {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 4px 0 20px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  .wiring-wrap svg { display: block; margin: 0 auto; min-width: 560px; }
+
+  /* ── Done marker ──────────────────────────────────────────────── */
+  .done-check {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: var(--teal);
+    background: var(--teal-soft);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-top: 4px;
+  }
+
+  footer {
+    grid-column: 1 / -1;
+    max-width: 760px;
+    margin: 40px auto 0;
+    padding-top: 28px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-faint);
+    font-size: 13px;
+  }
+  @media (min-width: 901px) { footer { grid-column: 2; margin-left: 0; margin-right: 0; } }
+
+  /* ── Language switch ─────────────────────────────────────────── */
+  .lang-switch {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-bottom: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+  .lang-switch a, .lang-switch span {
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+  .lang-switch span {
+    background: var(--teal-soft);
+    color: var(--teal);
+  }
+  .lang-switch a {
+    color: var(--ink-faint);
+    border: 1px solid var(--line);
+    text-decoration: none;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .lang-switch a:hover { color: var(--ink); border-color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <div class="lang-switch">
+    <a href="../">ES</a>
+    <span>EN</span>
+  </div>
+
+  <nav class="rail" aria-label="Guide progress">
+    <p class="rail-title">Steps</p>
+    <ol id="railList">
+      <li><a href="#capabilities">What the firmware does</a></li>
+      <li><a href="#needed">What you'll need</a></li>
+      <li><a href="#supabase-proyecto">1 · Supabase project</a></li>
+      <li><a href="#supabase-tablas">2 · Create the tables</a></li>
+      <li><a href="#supabase-claves">3 · Copy the keys</a></li>
+      <li><a href="#vercel">4 · Deploy the portal</a></li>
+      <li><a href="#arduino">5 · Set up Arduino IDE</a></li>
+      <li><a href="#confighs">6 · Edit config.h</a></li>
+      <li><a href="#cableado">7 · Wire up the CAN bus</a></li>
+      <li><a href="#flashear">8 · Flash the board</a></li>
+      <li><a href="#comprobar">9 · Check it's working</a></li>
+      <li><a href="#ha">Extra · Home Assistant</a></li>
+      <li><a href="#problemas">If something goes wrong</a></li>
+    </ol>
+  </nav>
+
+  <div class="mobile-nav">
+    <select onchange="if (this.value) { location.hash = this.value; this.selectedIndex = 0; }">
+      <option value="">Jump to…</option>
+      <option value="#capabilities">What the firmware does</option>
+      <option value="#needed">What you'll need</option>
+      <option value="#supabase-proyecto">1 · Supabase project</option>
+      <option value="#supabase-tablas">2 · Create the tables</option>
+      <option value="#supabase-claves">3 · Copy the keys</option>
+      <option value="#vercel">4 · Deploy the portal</option>
+      <option value="#arduino">5 · Set up Arduino IDE</option>
+      <option value="#confighs">6 · Edit config.h</option>
+      <option value="#cableado">7 · Wire up the CAN bus</option>
+      <option value="#flashear">8 · Flash the board</option>
+      <option value="#comprobar">9 · Check it's working</option>
+      <option value="#ha">Extra · Home Assistant</option>
+      <option value="#problemas">If something goes wrong</option>
+    </select>
+  </div>
+
+  <header class="top">
+    <span class="eyebrow">CanRider · installation guide</span>
+    <h1 class="title">From ESP32 box to live map</h1>
+    <p class="dek">Everything you need to get your electric motorcycle sending real CAN telemetry to your own web dashboard: database, portal, firmware and wiring — explained step by step, assuming no prior knowledge.</p>
+
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 900 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagram: the motorcycle sends data over CAN to the ESP32, which sends it over LTE to Supabase, which powers the web portal and Home Assistant">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"></path>
+          </marker>
+        </defs>
+        <g font-family="'IBM Plex Mono', monospace" font-size="12" fill="var(--ink)">
+          <!-- Bike -->
+          <rect x="10" y="60" width="118" height="60" rx="9" fill="var(--paper)" stroke="var(--line)"></rect>
+          <text x="69" y="86" text-anchor="middle" font-weight="600">BIKE</text>
+          <text x="69" y="103" text-anchor="middle" font-size="10" fill="var(--ink-faint)">CAN bus</text>
+
+          <line x1="128" y1="90" x2="182" y2="90" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#arrow)"></line>
+
+          <!-- ESP32 -->
+          <rect x="184" y="52" width="140" height="76" rx="9" fill="var(--teal-soft)" stroke="var(--teal)"></rect>
+          <text x="254" y="82" text-anchor="middle" font-weight="600" fill="var(--teal)">ESP32</text>
+          <text x="254" y="98" text-anchor="middle" font-size="10" fill="var(--teal)">T-SIM7000G</text>
+          <text x="254" y="113" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">main.ino</text>
+
+          <line x1="324" y1="90" x2="378" y2="90" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#arrow)"></line>
+          <text x="351" y="78" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">LTE</text>
+
+          <!-- Supabase -->
+          <rect x="380" y="52" width="140" height="76" rx="9" fill="var(--paper)" stroke="var(--line)"></rect>
+          <text x="450" y="82" text-anchor="middle" font-weight="600">SUPABASE</text>
+          <text x="450" y="98" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">database</text>
+          <text x="450" y="112" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">+ realtime</text>
+
+          <line x1="520" y1="90" x2="574" y2="90" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#arrow)"></line>
+
+          <!-- Vercel -->
+          <rect x="576" y="18" width="140" height="60" rx="9" fill="var(--amber-soft)" stroke="var(--amber)"></rect>
+          <text x="646" y="44" text-anchor="middle" font-weight="600" fill="var(--amber)">WEB PORTAL</text>
+          <text x="646" y="60" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">Vercel · Next.js</text>
+
+          <line x1="646" y1="78" x2="646" y2="102" stroke="var(--ink-faint)" stroke-width="1.2"></line>
+
+          <!-- HA -->
+          <rect x="576" y="102" width="140" height="60" rx="9" fill="var(--paper)" stroke="var(--line)" stroke-dasharray="3 3"></rect>
+          <text x="646" y="128" text-anchor="middle" font-weight="600">HOME ASSISTANT</text>
+          <text x="646" y="144" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">optional</text>
+        </g>
+      </svg>
+      <p class="diagram-caption">CAN → ESP32 → LTE → Supabase → web portal (+ Home Assistant if you want)</p>
+    </div>
+  </header>
+
+  <main>
+
+    <div class="callout warn" style="margin-bottom: 40px;">
+      <span class="k">Before you start — legal notice</span>
+      <p>This project is published <b>as-is, with no warranty of any kind</b>. You'll be working on your vehicle's real CAN bus, its electrical wiring and its battery — a bad wiring job or a wrong configuration (for example, a wrong CAN frame or byte in <code>config.h</code>) can damage the vehicle, its batteries or its electronics.</p>
+      <p><b>You do this at your own risk.</b> Neither the author nor contributors to this project are responsible for any damage, failure or issue arising from incorrect installation, configuration or use.</p>
+    </div>
+
+    <section id="capabilities" class="lead-box">
+      <h3>What the firmware does</h3>
+      <ul class="checklist">
+        <li><b>Reads and decodes the CAN bus</b> of the bike — up to 32 configurable signals (frame + byte + scale + sign), with individual bit extraction (flags) and "dual mode" to listen to two frame IDs with a single signal</li>
+        <li><b>Only ever transmits the clock</b> to the bike's dashboard, never anything else — adding any new transmitted frame requires editing the firmware itself, editing <code>config.h</code> alone is not enough, by design</li>
+        <li><b>Recovers on its own from a bus-off</b> (the CAN controller disconnecting from the bus due to errors) without needing to manually reset the ESP32</li>
+        <li><b>GPS positioning</b>, with <b>cell-tower triangulation (LBS)</b> as a fallback when there's no satellite coverage — every reading indicates which source it came from</li>
+        <li><b>Network time with the correct time zone</b> (taken from the carrier, corrects for daylight saving) — and doesn't transmit the time over CAN until it's valid, so it never sends a clock full of garbage data</li>
+        <li><b>Sends telemetry every 15 seconds</b> to Supabase: position, speed, the ESP32's own battery, signal strength, and every CAN signal it read</li>
+        <li><b>Detects the start and end of each trip from the CAN bus itself</b> — bike on = frames on the bus, bike off = silence — instead of from GPS speed; it stores distance, top speed, duration and battery used</li>
+        <li><b>Flags movement without CAN</b>: if the GPS measures real movement while the CAN bus has been silent for several seconds (bike off), it's flagged as possible theft — the bike doesn't move on its own while switched off</li>
+        <li><b>Handles unstable roaming</b> — retries with backoff between failures and a full network reconnect after consecutive failures, instead of hammering the carrier's network</li>
+        <li><b>Two boards supported</b> — LilyGo T-SIM7000G and T-A7670G — with the pins for each already sorted out: just pick which one you have in <code>config.h</code></li>
+      </ul>
+    </section>
+
+    <section id="needed" class="lead-box">
+      <h3>What you'll need before you start</h3>
+      <ul class="checklist">
+        <li><b>LilyGo T-SIM7000G board</b> (<a href="https://lilygo.cc/products/t-sim7000g" target="_blank" rel="noopener">official store</a>, recommended, the most tested one in this project) <b>or T-A7670G</b> (<a href="https://lilygo.cc/products/t-sim-a7670e" target="_blank" rel="noopener">official store</a> — pick the "A7670G" variant in the dropdown, not the E or SA) — both have LTE + GPS built in and the firmware supports both, see step 6. Both are also available on AliExpress, usually cheaper</li>
+        <li><b>CAN transceiver</b> (SN65HVD230, TJA1050 or similar) at 3.3V — <a href="https://www.amazon.es/dp/B0F9FDK6RJ" target="_blank" rel="noopener">example SN65HVD230 module</a></li>
+        <li><b>SIM card with a data plan</b> active, with the PIN disabled</li>
+        <li><b>USB cable</b> that carries data (not charge-only) for the board</li>
+        <li><b>18650 battery</b> as a power backup (recommended, not required)</li>
+        <li><b>High-voltage-to-USB DC-DC converter</b> (rated for your bike's battery voltage — electric bikes typically run 48V to 72V) to power the ESP32 straight from the bike instead of relying only on the 18650 — <a href="https://www.amazon.es/dp/B09GFBB47L" target="_blank" rel="noopener">example: 8-85V DC to 5V/3A USB converter</a></li>
+        <li><b>Access to the bike's CAN bus</b> — CAN-H and CAN-L (the transceiver already includes the 120 Ω termination resistor, no need to add one separately)</li>
+        <li>A <b>GitHub</b>, <b>Supabase</b> and <b>Vercel</b> account — all three are free</li>
+      </ul>
+    </section>
+
+    <!-- STEP 1 -->
+    <section id="supabase-proyecto" class="step">
+      <div class="step-head"><span class="step-num">STEP 01</span><h2>Create the Supabase project</h2></div>
+      <p class="step-sub">Supabase is the cloud database where all of your bike's telemetry will live.</p>
+
+      <ol class="sub-list">
+        <li>Go to <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a> and click <b>Start your project</b>. Sign up with GitHub, it's the quickest way.</li>
+        <li>Click <b>New project</b>. Pick a name (for example <code>canrider</code>), a database password (save it somewhere safe) and a region close to you.</li>
+        <li>Wait 1-2 minutes while Supabase provisions the project.</li>
+      </ol>
+
+      <div class="callout tip">
+        <span class="k">Tip</span>
+        <p>The database password it asks for here is <b>not</b> the key the ESP32 will use — we'll get that later. You can save it and forget about it.</p>
+      </div>
+    </section>
+
+    <!-- STEP 2 -->
+    <section id="supabase-tablas" class="step">
+      <div class="step-head"><span class="step-num">STEP 02</span><h2>Create the tables (the database "dump")</h2></div>
+      <p class="step-sub">We're going to give Supabase the database structure: what tables exist and what each one stores. You don't need to understand the code — just copy some text and paste it in the right place, exactly as it is, without changing anything.</p>
+
+      <p>First, clone or download the project repository to your computer (if you already did, skip to the next point):</p>
+      <div class="code-block">
+        <div class="label"><span>terminal</span><button class="copy-btn" data-copy="git clone https://github.com/jichef/CANRider-Two.git">Copy</button></div>
+        <pre>git clone https://github.com/jichef/CANRider-Two.git</pre>
+      </div>
+      <div class="callout note">
+        <span class="k">Not using the terminal?</span>
+        <p>On the repository's GitHub page, click the green <b>Code → Download ZIP</b> button, unzip the file on your computer, and use that folder instead of cloning via commands.</p>
+      </div>
+
+      <p>Now it's time to copy over the database "template". Follow these steps <b>in exactly this order</b>:</p>
+
+      <ol class="sub-list">
+        <li>On your computer, inside the project folder, open the file <code>supabase/schema.sql</code> with any text editor (Windows Notepad, Mac TextEdit, or VS Code itself all work).</li>
+        <li>Select the entire contents of the file: click inside the text and press <code>Ctrl+A</code> (Windows) or <code>Cmd+A</code> (Mac). Then copy it with <code>Ctrl+C</code> / <code>Cmd+C</code>.</li>
+        <li>Go to the browser tab where you have your project open at <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
+        <li>In the left menu, find the icon with the <code>&lt;/&gt;</code> symbol — it's called <b>SQL Editor</b> — and click it.</li>
+        <li>At the top left of that screen, click the <b>+ New query</b> button.</li>
+        <li>Click inside the big dark box that takes up the center of the screen, and paste the text you copied: <code>Ctrl+V</code> / <code>Cmd+V</code>.</li>
+        <li>Click the green <b>Run</b> button (bottom right of the box).</li>
+      </ol>
+
+      <div class="callout tip">
+        <span class="k">How do I know it worked?</span>
+        <p>At the very bottom a green message will appear, something like <code>Success. No rows returned</code>. That's good: it means the three tables were created without errors.</p>
+        <p>To check it with your own eyes: in the left menu click the <b>Table Editor</b> icon (looks like a table/spreadsheet). You should see three new tables in the list: <code>can_signals</code>, <code>telemetry</code> and <code>trips</code>.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">If a red message shows up</span>
+        <p>It usually means the text got pasted incomplete (for example, if the file wasn't fully selected). Clear everything in the SQL Editor box, copy the whole file again from step 1, and paste it once more.</p>
+      </div>
+
+      <p>Finally, generate a unique identifier for your bike. In the same SQL Editor, click <b>+ New query</b> again, paste this and click <b>Run</b>:</p>
+      <div class="code-block">
+        <div class="label"><span>sql</span><button class="copy-btn" data-copy="select gen_random_uuid();">Copy</button></div>
+        <pre>select gen_random_uuid();</pre>
+      </div>
+
+      <p>This time, instead of a green message, a table will show up with a single result: a long code with dashes, something like <code>3fa85f64-5717-4562-b3fc-2c963f66afa6</code>. Copy it and save it somewhere (a note, a document) — it's your <code>VEHICLE_ID</code>.</p>
+
+      <div class="done-check">✓ That code is your <code>VEHICLE_ID</code> — you'll need it in step 6 and step 4.</div>
+    </section>
+
+    <!-- STEP 3 -->
+    <section id="supabase-claves" class="step">
+      <div class="step-head"><span class="step-num">STEP 03</span><h2>Copy the URL and the key</h2></div>
+      <p class="step-sub">Two pieces of data you'll paste in a few more places later — worth having them handy now.</p>
+
+      <p>In Supabase, go to <span class="ui-path">Project Settings → API</span> and copy:</p>
+      <ul>
+        <li><b>Project URL</b> — something like <code>https://xxxxxxxx.supabase.co</code></li>
+        <li><b>anon public key</b> — a long string starting with <code>eyJ...</code></li>
+      </ul>
+
+      <div class="callout warn">
+        <span class="k">Warning</span>
+        <p>On that same screen you'll see another key called <b>service_role key</b>. That one is full admin access and must <b>never</b> go into the firmware, the web portal, or anywhere public. Always use the <b>anon key</b>.</p>
+      </div>
+    </section>
+
+    <!-- STEP 4 -->
+    <section id="vercel" class="step">
+      <div class="step-head"><span class="step-num">STEP 04</span><h2>Deploy the web portal</h2></div>
+      <p class="step-sub">Vercel builds and hosts the website automatically every time you update the GitHub repository.</p>
+
+      <ol class="sub-list">
+        <li>Push the project to your own GitHub repository (or fork this one).</li>
+        <li>Go to <a href="https://vercel.com" target="_blank" rel="noopener">vercel.com</a>, sign in with GitHub and click <span class="ui-path">Add New → Project</span>.</li>
+        <li>Pick your repository and click <b>Import</b>.</li>
+        <li>Before hitting <i>Deploy</i>, expand <span class="ui-path">Environment Variables</span> and add these three:</li>
+      </ol>
+
+      <div class="table-wrap">
+      <table class="pins">
+        <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>your Project URL from step 3</td></tr>
+          <tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>your anon key from step 3</td></tr>
+          <tr><td><code>NEXT_PUBLIC_VEHICLE_ID</code></td><td>the UUID you generated in step 2</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p>Click <b>Deploy</b> and wait a couple of minutes. When it's done you'll have a public URL like <code>your-project.vercel.app</code> with the dashboard — still with no data, though, since the bike hasn't sent anything yet.</p>
+
+      <div class="callout note">
+        <span class="k">Note</span>
+        <p>If you change an environment variable in Vercel later, it doesn't apply on its own — go to <span class="ui-path">Deployments</span> and click <b>Redeploy</b> on the latest deployment.</p>
+      </div>
+    </section>
+
+    <!-- STEP 5 -->
+    <section id="arduino" class="step">
+      <div class="step-head"><span class="step-num">STEP 05</span><h2>Set up Arduino IDE</h2></div>
+      <p class="step-sub">Install ESP32 support and the modem library, just once.</p>
+
+      <ol class="sub-list">
+        <li>Download and install <a href="https://www.arduino.cc/en/software" target="_blank" rel="noopener">Arduino IDE 2.x</a>.</li>
+        <li>Go to <span class="ui-path">Arduino IDE → Preferences</span> and paste this into <i>Additional boards manager URLs</i>:</li>
+      </ol>
+      <div class="code-block">
+        <div class="label"><span>url</span><button class="copy-btn" data-copy="https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json">Copy</button></div>
+        <pre>https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json</pre>
+      </div>
+      <ol class="sub-list" start="3">
+        <li>Go to <span class="ui-path">Tools → Board → Boards Manager</span>, search for <code>esp32</code> and install the Espressif package.</li>
+        <li>Select the board: <span class="ui-path">Tools → Board → ESP32 Arduino → ESP32 Dev Module</span>.</li>
+        <li>Go to <span class="ui-path">Tools → Manage Libraries</span>, search for <code>TinyGSM</code> and install it.</li>
+      </ol>
+    </section>
+
+    <!-- STEP 6 -->
+    <section id="confighs" class="step">
+      <div class="step-head"><span class="step-num">STEP 06</span><h2>Create and edit config.h</h2></div>
+      <p class="step-sub">The only firmware file that needs your data — everything else is already set up.</p>
+
+      <p>Inside the project's <code>main/</code> folder there's a file called <code>config.h.example</code>. <b>Rename that example file to <code>config.h</code></b> (dropping the <code>.example</code> at the end) — that's the file you'll fill in with your data, and the one the firmware reads when compiling.</p>
+
+      <div class="code-block">
+        <div class="label"><span>terminal</span><button class="copy-btn" data-copy="cp main/config.h.example main/config.h">Copy</button></div>
+        <pre>cp main/config.h.example main/config.h</pre>
+      </div>
+
+      <div class="callout note">
+        <span class="k">Not using the terminal? Do it by hand</span>
+        <p>Open the <code>main/</code> folder with your system's file browser (Finder on Mac, File Explorer on Windows). Find the file <code>config.h.example</code>, copy it and paste it in the same folder (so you'll have two copies), and rename the new copy to <code>config.h</code> — dropping the <code>.example</code> at the end. Leave the original <code>config.h.example</code> as it is, don't delete it.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Important</span>
+        <p>Always edit <code>config.h</code> (the one you just created), never <code>config.h.example</code>. That original file isn't even pushed to git — it's just the reference template everyone starts from.</p>
+      </div>
+
+      <p>Open <code>main/config.h</code> with any text editor. Inside it's split into five blocks literally marked with <code>&gt;&gt;&gt; CHANGE THIS &lt;&lt;&lt;</code> (in Spanish in the file: <code>CAMBIA ESTO</code>). Fill these in for your case and don't touch the rest of the file:</p>
+
+      <div class="code-block">
+        <div class="label"><span>main/config.h</span></div>
+        <pre><span class="cm">// 1/5 — which board you have: uncomment ONLY the line for your board
+// (remove the "//" in front of it) and leave the other one commented
+// out. Both start commented out on purpose — you have to choose,
+// there's no board active by default.</span>
+// #define MODEM_A7670G
+// #define MODEM_SIM7000G
+
+<span class="cm">// 2/5 — your Supabase and bike details (step 3 and step 2 of this guide)</span>
+#define SUPABASE_URL "https://xxxxxxxx.supabase.co"
+#define SUPABASE_KEY "eyJ..."
+#define VEHICLE_ID   "the-code-you-saved-in-step-2"
+
+<span class="cm">// 3/5 — your carrier's APN (ask them, or look it up as
+// "M2M/IoT APN &lt;your carrier&gt;")</span>
+#define APN "internet.yourcarrier.com"
+
+<span class="cm">// 4/5 — only if your bike's bus doesn't run at 250 kbps</span>
+#define CAN_SPEED TWAI_TIMING_CONFIG_250KBITS()
+
+<span class="cm">// 5/5 — which CAN frame (frame ID) and byte each piece of data lives
+// in. There are only 5 signals: the clock sent to the dashboard
+// (nothing else is ever sent over CAN), the two batteries' %, and
+// whether it's charging.
+//
+// These lines start commented out on purpose. Do NOT uncomment them
+// with made-up values or values copied from another bike: find your
+// own with a CAN analyzer or the manufacturer's documentation first.
+//
+// Format: frame ID in hex (0x...), byte 0 to 7 within the frame.
+// CAN_CHARGING_BITMASK is different: it's not a whole byte, it's one
+// bit within that byte (0x10 = bit 4) — the firmware checks
+// data[byte] & bitmask and stores 1 if that bit is set.
+//
+// Here's what an EXAMPLE would look like (don't copy it, it's not real):
+//   #define CAN_CLOCK_FRAME     0x200
+//   #define CAN_CLOCK_HOUR_BYTE 0</span>
+// #define CAN_CLOCK_FRAME
+// #define CAN_CLOCK_HOUR_BYTE
+// #define CAN_CLOCK_MIN_BYTE
+
+// #define CAN_BATTERY_A_FRAME
+// #define CAN_BATTERY_A_BYTE
+
+// #define CAN_BATTERY_B_FRAME
+// #define CAN_BATTERY_B_BYTE
+
+// #define CAN_CHARGING_FRAME
+// #define CAN_CHARGING_BYTE
+// #define CAN_CHARGING_BITMASK</pre>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">What if I don't know my bike's values yet?</span>
+        <p>You can still flash it leaving block 5/5 as-is (commented out). Each signal is independent: if you leave the clock unconfigured, the firmware won't transmit any frame over CAN; if you leave a battery or the charging status unconfigured, it simply won't show that data in the portal — you don't need to fill in all five at once. Everything else (GPS, LTE, web portal) works the same. In the Serial Monitor from step 9 you'll see <code>[CAN] 0 signals</code> while it's all commented out — that's normal.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Once you do know the values</span>
+        <p>For each signal you want to enable, uncomment and fill in <b>all of its lines together</b> — if a signal is missing one piece of data (say, the byte but not the frame), that whole signal gets ignored. Never copy the example values or another bike's values: mistakenly sending a frame with the wrong frame ID or content to a real CAN bus can cause unexpected behavior in the vehicle.</p>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">What if my bike has more signals than these five?</span>
+        <p>Block 5/5 of <code>config.h</code> is all you need to adapt the clock, both batteries and the charging status to your bike — no other file needs touching for that.</p>
+        <p>Only if you need to read some <b>additional</b> CAN signal, or send some new frame on the bus, do you need to edit the <code>setupCANSignals()</code> function inside <code>main/main.ino</code> directly. That's by design: it means what the ESP32 transmits over CAN can never be expanded just by touching a config file — any new outgoing frame requires touching the code itself.</p>
+      </div>
+    </section>
+
+    <!-- STEP 7 -->
+    <section id="cableado" class="step">
+      <div class="step-head"><span class="step-num">STEP 07</span><h2>Wire up the CAN bus</h2></div>
+      <p class="step-sub">Four wires between the ESP32 and the transceiver, plus the two from the bus itself.</p>
+
+      <div class="table-wrap">
+      <table class="pins">
+        <thead><tr><th>Signal</th><th>T-SIM7000G</th><th>T-A7670G</th><th>CAN transceiver</th></tr></thead>
+        <tbody>
+          <tr><td>CAN TX</td><td class="pin">GPIO 32</td><td class="pin">GPIO 22</td><td>CTX / TXD</td></tr>
+          <tr><td>CAN RX</td><td class="pin">GPIO 33</td><td class="pin">GPIO 21</td><td>CRX / RXD</td></tr>
+          <tr><td>Power</td><td class="pin">3.3V</td><td class="pin">3.3V</td><td>VCC</td></tr>
+          <tr><td>Ground</td><td class="pin">GND</td><td class="pin">GND</td><td>GND</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="callout note">
+        <span class="k">Different boards, different pins</span>
+        <p>Use the column for your board. On the T-A7670G, GPIO 33 is avoided on purpose because the modem uses it internally (RING pin) — that's why that board uses GPIO 22/21 instead of 32/33. These are the same pins already set in block 4/5 of <code>config.h</code> (<code>CAN_TX_PIN</code> / <code>CAN_RX_PIN</code>) based on the board you picked in block 1/5 — no need to change them by hand.</p>
+      </div>
+
+      <div class="wiring-wrap">
+        <svg viewBox="0 0 620 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ESP32 CAN TX to CTX, CAN RX to CRX, 3.3V to VCC, GND to GND on the transceiver, and CAN-H/CAN-L from the transceiver to the motorcycle's bus. Exact pins depend on your board: GPIO32/33 on T-SIM7000G, GPIO22/21 on T-A7670G">
+          <g font-family="'IBM Plex Mono', monospace" font-size="12.5" fill="var(--ink)">
+            <rect x="20" y="30" width="160" height="160" rx="10" fill="var(--teal-soft)" stroke="var(--teal)"></rect>
+            <text x="100" y="58" text-anchor="middle" font-weight="600" fill="var(--teal)">ESP32</text>
+            <text x="100" y="74" text-anchor="middle" font-size="9" fill="var(--ink-faint)">T-SIM7000G / T-A7670G</text>
+
+            <text x="34" y="100" font-size="10.5">GPIO32</text>
+            <text x="34" y="112" font-size="9.5" fill="var(--ink-faint)">(A7670G: 22)</text>
+            <text x="34" y="126" font-size="10.5">GPIO33</text>
+            <text x="34" y="138" font-size="9.5" fill="var(--ink-faint)">(A7670G: 21)</text>
+            <text x="34" y="154" font-size="11">3.3V</text>
+            <text x="34" y="180" font-size="11">GND</text>
+
+            <line x1="180" y1="98" x2="260" y2="98" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+            <line x1="180" y1="124" x2="260" y2="124" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+            <line x1="180" y1="150" x2="260" y2="150" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+            <line x1="180" y1="176" x2="260" y2="176" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+
+            <rect x="262" y="30" width="150" height="160" rx="10" fill="var(--paper)" stroke="var(--line)"></rect>
+            <text x="337" y="58" text-anchor="middle" font-weight="600">TRANSCEIVER</text>
+            <text x="337" y="74" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">SN65HVD230</text>
+            <text x="290" y="102" font-size="11">CTX</text>
+            <text x="290" y="128" font-size="11">CRX</text>
+            <text x="290" y="154" font-size="11">VCC</text>
+            <text x="290" y="180" font-size="11">GND</text>
+
+            <line x1="412" y1="80" x2="470" y2="80" stroke="var(--amber)" stroke-width="1.6"></line>
+            <line x1="412" y1="106" x2="470" y2="106" stroke="var(--amber)" stroke-width="1.6"></line>
+
+            <text x="478" y="84" font-size="11" fill="var(--amber)">CAN-H</text>
+            <text x="478" y="110" font-size="11" fill="var(--amber)">CAN-L</text>
+
+            <text x="337" y="210" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">→ to motorcycle bus</text>
+          </g>
+        </svg>
+      </div>
+
+      <p>If your transceiver has a <code>3V3-STDBY</code> pin or similar, connect it to 3.3V too so it starts up in normal active mode. Insert the SIM into the modem with the board powered off, and connect the LTE antenna and the GPS antenna to their connectors (they're different, don't mix them up).</p>
+
+      <div class="callout tip">
+        <span class="k">Where do I get power and the CAN-H/CAN-L lines from?</span>
+        <p>The ESP32 isn't powered from the transceiver's 3.3V (that's only the transceiver's own logic supply) — it needs 5V over USB, which is what the DC-DC converter from the list above, connected to the bike's main battery, is for.</p>
+        <p>A common spot to grab power and both CAN lines at once is the vehicle's original ECU connector: many ECUs have battery voltage, GND and the CAN-H/CAN-L bus already present there. Locate your ECU's connector, identify those pins with a multimeter or your vehicle's diagram, and tap the DC-DC converter and transceiver in there instead of splicing loose wires into the chassis.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Before touching the ECU</span>
+        <p>Disconnect the bike's battery before working on the ECU connector. If you're going to remove or disable the original ECU to access its connector, keep in mind that this can disable whatever that ECU used to control — make sure that's what you want before cutting anything. Remember the legal notice at the top of this guide: you do this at your own responsibility.</p>
+      </div>
+    </section>
+
+    <!-- STEP 8 -->
+    <section id="flashear" class="step">
+      <div class="step-head"><span class="step-num">STEP 08</span><h2>Flash the firmware to the board</h2></div>
+      <p class="step-sub">With everything wired up and the SIM in place, it's ready to flash.</p>
+
+      <ol class="sub-list">
+        <li>Open <code>main/main.ino</code> in Arduino IDE (it will also open <code>config.h</code>, <code>structs.h</code>, <code>StreamDebugger.h</code> and the rest of the project's tabs).</li>
+        <li>Connect the board to your computer over USB.</li>
+        <li>Select the port under <span class="ui-path">Tools → Port</span>.</li>
+        <li>Click <b>Upload</b> (or <code>Ctrl+U</code> / <code>Cmd+U</code>).</li>
+      </ol>
+
+      <div class="callout note">
+        <span class="k">About the StreamDebugger.h tab</span>
+        <p>You'll see an extra tab called <code>StreamDebugger.h</code> — it's already included inside the repository's <code>main/</code> folder, no need to install it or copy it anywhere. The <b>TinyGSM</b> library from step 5 does need installing from the Library Manager as explained there; this tab is just a small separate helper that's already ready to go.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">If it doesn't connect</span>
+        <p>Some boards with unreliable auto-reset need manual entry into bootloader mode: hold down <b>BOOT</b>, tap <b>RESET</b> once without releasing BOOT, and release BOOT right before clicking Upload.</p>
+      </div>
+    </section>
+
+    <!-- STEP 9 -->
+    <section id="comprobar" class="step">
+      <div class="step-head"><span class="step-num">STEP 09</span><h2>Check it's working</h2></div>
+      <p class="step-sub">Open the Serial Monitor (115200 baud) and watch it boot live.</p>
+
+      <p>A healthy boot looks like this, roughly in this order:</p>
+      <div class="code-block">
+        <div class="label"><span>serial monitor · 115200</span></div>
+        <pre>[CAN] TWAI listo
+[CAN] 5 señales (1 frames TX)
+[STATE] NET_SETUP...
+[STATE] HTTP_SETUP...
+[TIME] UTC: 2026-08-31 12:03:41
+[STATE] RUNNING
+[POST] {"motorcycle_id":"...","moto_battery_b":54,...}
+[OK] Telemetría enviada</pre>
+      </div>
+
+      <p>Those log lines print in Spanish regardless of which language you're reading this guide in — that's just how the firmware's own debug output is written, it doesn't affect anything functional. <code>[CAN] TWAI listo</code> means "TWAI ready", <code>[CAN] 5 señales</code> means "5 signals", and <code>[OK] Telemetría enviada</code> means "Telemetry sent".</p>
+
+      <p>As soon as you see <code>[OK] Telemetría enviada</code> at least once, open your portal's URL on Vercel — the first data points should already be showing up.</p>
+
+      <div class="done-check">✓ If you see that, your CanRider is working end to end.</div>
+    </section>
+
+    <!-- EXTRA -->
+    <section id="ha" class="step">
+      <div class="step-head"><span class="step-num">EXTRA</span><h2>Home Assistant (optional)</h2></div>
+      <p class="step-sub">If you already run Home Assistant, you can bring in the bike's data like any other device.</p>
+
+      <ol class="sub-list">
+        <li>Copy the <code>custom_components/can_rider</code> folder from the repository to <code>config/custom_components/</code> in your Home Assistant install.</li>
+        <li>Restart Home Assistant.</li>
+        <li>Go to <span class="ui-path">Settings → Devices & Services → Add Integration</span> and search for <b>CanRider</b>.</li>
+        <li>Fill in your Supabase URL and anon key, the <code>VEHICLE_ID</code>, and the board model.</li>
+      </ol>
+
+      <p>You'll get sensors for the bike's Battery A and B, charging status, ESP32 battery, speed, signal strength, GPS tracking, last-trip data, and a "movement without CAN" binary sensor so you can build your own alert (a phone notification, a siren...) if the bike moves while switched off.</p>
+    </section>
+
+    <!-- TROUBLESHOOTING -->
+    <section id="problemas" class="step">
+      <div class="step-head"><span class="step-num">IF SOMETHING GOES WRONG</span><h2>Troubleshooting</h2></div>
+
+      <h3>The ESP32 doesn't connect to the network</h3>
+      <ul>
+        <li>Check that the <code>APN</code> in <code>config.h</code> matches your carrier's exactly</li>
+        <li>Confirm the SIM has an active data plan and doesn't ask for a PIN</li>
+        <li>Look for <code>[ERROR]</code> or <code>[TIMEOUT]</code> in the Serial Monitor</li>
+      </ul>
+
+      <h3>No data shows up in the portal</h3>
+      <ul>
+        <li>Check the three environment variables in Vercel (step 4) and hit <b>Redeploy</b> if you just changed them</li>
+        <li>Confirm the <code>VEHICLE_ID</code> is identical in <code>config.h</code> and in Vercel</li>
+      </ul>
+
+      <h3>GPS can't get a fix</h3>
+      <ul>
+        <li>Check that the GPS antenna is in its own connector (not the LTE one)</li>
+        <li>It can take several minutes outdoors the first time</li>
+        <li>In the meantime, the firmware automatically tries an approximate position via cell-tower triangulation (LBS)</li>
+      </ul>
+
+      <h3>CAN signals aren't coming through</h3>
+      <ul>
+        <li>Check <code>CAN_SPEED</code> in <code>config.h</code> against your bike's actual bus speed</li>
+        <li>Check the wiring from step 7</li>
+        <li>Check that you've uncommented and filled in block 5/5 of <code>config.h</code> — if you left it as it came, the firmware doesn't transmit or read any signal (you'll see this in the Serial Monitor as <code>[CAN] 0 señales</code>)</li>
+        <li>If you see <code>[CAN] Bus-off detectado</code>, the firmware recovers from it on its own — if it keeps happening, check the bus termination</li>
+      </ul>
+    </section>
+
+  </main>
+
+  <footer>CanRider — installation guide · see <code>README.md</code> in the repository for more technical detail.</footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
+      var done = function () {
+        var original = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = original; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        done();
+      }
+    });
+  });
+
+  (function () {
+    var sections = Array.prototype.slice.call(document.querySelectorAll('main section[id], .lead-box[id]'));
+    var links = {};
+    document.querySelectorAll('.rail li').forEach(function (li) {
+      var a = li.querySelector('a');
+      if (a) links[a.getAttribute('href').slice(1)] = li;
+    });
+    if (!sections.length || !('IntersectionObserver' in window)) return;
+    var current = null;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          if (current) current.classList.remove('active');
+          var li = links[entry.target.id];
+          if (li) { li.classList.add('active'); current = li; }
+        }
+      });
+    }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+    sections.forEach(function (s) { io.observe(s); });
+  })();
+</script>
+</body>
+</html>
