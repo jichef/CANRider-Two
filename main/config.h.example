@@ -12,7 +12,7 @@
 
 
 // ┌──────────────────────────────────────────────────────────────────────┐
-// │ >>> CAMBIA ESTO 1/4 — Qué placa tienes                                │
+// │ >>> CAMBIA ESTO 1/5 — Qué placa tienes                                │
 // └──────────────────────────────────────────────────────────────────────┘
 // Descomenta SOLO la línea de tu placa (quita el "//" de delante) y deja
 // la otra comentada. Solo puede estar activa una a la vez.
@@ -29,7 +29,7 @@
 
 
 // ┌──────────────────────────────────────────────────────────────────────┐
-// │ >>> CAMBIA ESTO 2/4 — Tus datos de Supabase y del vehículo            │
+// │ >>> CAMBIA ESTO 2/5 — Tus datos de Supabase y del vehículo            │
 // └──────────────────────────────────────────────────────────────────────┘
 // SUPABASE_URL y SUPABASE_KEY: Supabase → tu proyecto → Project Settings
 // → API. Usa la "anon public key", NUNCA la "service_role key".
@@ -44,7 +44,7 @@
 
 
 // ┌──────────────────────────────────────────────────────────────────────┐
-// │ >>> CAMBIA ESTO 3/4 — APN de tu SIM                                   │
+// │ >>> CAMBIA ESTO 3/5 — APN de tu SIM                                   │
 // └──────────────────────────────────────────────────────────────────────┘
 // El APN lo da tu operador (búscalo como "APN <tu operador> IoT/M2M" o
 // mira la web del operador de tu tarjeta SIM). Si tu SIM necesita usuario/
@@ -56,7 +56,7 @@
 
 
 // ┌──────────────────────────────────────────────────────────────────────┐
-// │ >>> CAMBIA ESTO 4/4 (solo si tu moto va a otra velocidad) — Bus CAN   │
+// │ >>> CAMBIA ESTO 4/5 (solo si tu moto va a otra velocidad) — Bus CAN   │
 // └──────────────────────────────────────────────────────────────────────┘
 // Los pines ya están puestos correctamente para cada placa (no hace falta
 // tocarlos salvo que tengas un cableado distinto). Lo único que sí varía
@@ -93,27 +93,28 @@
 #endif
 
 // ┌──────────────────────────────────────────────────────────────────────┐
-// │ Señales CAN — se editan en main.ino, no aquí                          │
+// │ >>> CAMBIA ESTO 5/5 (solo si tu moto usa otras tramas) — Señales CAN  │
 // └──────────────────────────────────────────────────────────────────────┘
-// Las señales CAN de tu moto concreta (qué trama leer/emitir, en qué byte,
-// con qué escala) NO se configuran en este archivo — se definen a mano en
-// setupCANSignals(), dentro de main/main.ino. Es a propósito: así el
-// reloj y las baterías funcionan siempre, sin depender de la red para
-// descargar nada en el arranque.
+// Frame ID (hexadecimal) y byte (0-7 dentro de la trama de 8 bytes) de
+// cada señal. Solo hay 4: la hora que se envía al panel (nunca se toca
+// nada más por CAN) y el % de las dos baterías que se leen del bus.
 //
-// Por defecto, setupCANSignals() trae estas 4 señales (frame_id en
-// hexadecimal, byte dentro de la trama de 8 bytes):
-//
-//   Nombre           Dirección  Frame  Byte   Qué es
-//   ───────────────  ─────────  ─────  ────   ──────────────────────────
-//   clock_hours      TX (envía) 0x200  0      hora   → reloj del panel
-//   clock_minutes    TX (envía) 0x200  1      minuto → reloj del panel
-//   moto_battery     RX (lee)   0x300  0      % batería A
-//   moto_battery_b   RX (lee)   0x301  0      % batería B
-//
-// Para adaptarlo a tu moto: abre main/main.ino, busca "setupCANSignals()"
-// y cambia los frame_id/byte de las llamadas a addCANSignal(...) — o
-// añade llamadas nuevas para leer más señales (nunca de tipo TX salvo que
-// sepas exactamente qué trama es y estés seguro de que tu moto la acepta).
+// Si tu moto usa otras tramas para esto, cambia aquí los valores — el
+// firmware (main/main.ino, setupCANSignals()) los lee de estas macros, no
+// hace falta tocar el .ino para adaptar esto a tu vehículo. Si necesitas
+// leer señales CAN adicionales que no sean estas 4, o cualquier trama TX
+// nueva, eso sí requiere editar setupCANSignals() directamente en
+// main.ino — es a propósito, para que nunca se pueda añadir tráfico TX
+// nuevo solo tocando un archivo de configuración.
+
+#define CAN_CLOCK_FRAME     0x200   // EJEMPLO — trama que recibe el panel con la hora
+#define CAN_CLOCK_HOUR_BYTE 0       // EJEMPLO — byte de la hora dentro de esa trama
+#define CAN_CLOCK_MIN_BYTE  1       // EJEMPLO — byte de los minutos dentro de esa trama
+
+#define CAN_BATTERY_A_FRAME 0x300   // EJEMPLO — trama con el % de la batería A
+#define CAN_BATTERY_A_BYTE  0       // byte del % dentro de esa trama
+
+#define CAN_BATTERY_B_FRAME 0x301   // EJEMPLO — trama con el % de la batería B
+#define CAN_BATTERY_B_BYTE  0       // byte del % dentro de esa trama
 
 #endif

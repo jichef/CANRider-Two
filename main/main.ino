@@ -270,6 +270,13 @@ static String dechunkBody(const String& raw) {
 // de GPS al competir por el mismo canal AT — se prioriza que reloj y
 // baterías funcionen siempre sobre esa privacidad del protocolo. El TX
 // sigue limitado a la hora, como siempre.
+//
+// El frame_id/byte de cada señal vive en config.h (CAN_CLOCK_FRAME,
+// CAN_BATTERY_A_FRAME, etc.) para que adaptar esto a otra moto sea
+// cuestión de editar ese único archivo. Añadir señales nuevas — sobre
+// todo cualquier trama TX — sigue requiriendo tocar este .ino
+// directamente: a propósito, para que nunca se pueda ampliar lo que se
+// transmite por CAN solo con un archivo de configuración.
 static void addCANSignal(uint32_t frameId, char direction, uint8_t byteStart, const char* name) {
     CANSignal& s = canSignals[canSignalCount++];
     s.frameId      = frameId;
@@ -292,10 +299,10 @@ static void addCANSignal(uint32_t frameId, char direction, uint8_t byteStart, co
 static void setupCANSignals() {
     if (xSemaphoreTake(canMux, portMAX_DELAY) == pdTRUE) {
         canSignalCount = 0;
-        addCANSignal(0x510, 't', 5, "clock_hours");
-        addCANSignal(0x510, 't', 6, "clock_minutes");
-        addCANSignal(0x540, 'r', 0, "moto_battery");
-        addCANSignal(0x541, 'r', 0, "moto_battery_b");
+        addCANSignal(CAN_CLOCK_FRAME,     't', CAN_CLOCK_HOUR_BYTE, "clock_hours");
+        addCANSignal(CAN_CLOCK_FRAME,     't', CAN_CLOCK_MIN_BYTE,  "clock_minutes");
+        addCANSignal(CAN_BATTERY_A_FRAME, 'r', CAN_BATTERY_A_BYTE,  "moto_battery");
+        addCANSignal(CAN_BATTERY_B_FRAME, 'r', CAN_BATTERY_B_BYTE,  "moto_battery_b");
 
         // Reconstruir lista de tramas TX únicas (agrupadas por frame_id)
         txFrameCount = 0;
