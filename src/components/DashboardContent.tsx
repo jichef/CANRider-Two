@@ -287,21 +287,21 @@ export default function DashboardContent() {
   ];
 
   const StatCard = ({ stat }: { stat: (typeof stats)[0] }) => (
-    <div className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-6 rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
-      <div className="flex items-center justify-between mb-6">
-        <div className={`p-3 rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
-          <stat.icon size={22} />
+    <div className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-3.5 md:p-6 rounded-2xl md:rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
+      <div className="flex items-center justify-between mb-2.5 md:mb-6">
+        <div className={`p-1.5 md:p-3 rounded-lg md:rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
+          <stat.icon className="w-4 h-4 md:w-[22px] md:h-[22px]" />
         </div>
         {stat.pct != null && (
-          <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
+          <div className="h-1 w-8 md:w-12 bg-zinc-800 rounded-full overflow-hidden">
             <div className={`h-full bg-current ${stat.color} opacity-70`} style={{ width: `${stat.pct}%` }} />
           </div>
         )}
       </div>
-      <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
+      <p className="text-[9px] md:text-[10px] font-black tracking-[0.15em] md:tracking-[0.2em] text-zinc-500 mb-0.5 md:mb-1 uppercase truncate">{stat.label}</p>
       <div className="flex items-baseline gap-1">
-        <h3 className="text-3xl font-black text-white font-mono">{stat.value}</h3>
-        {stat.unit && <span className="text-xs font-bold text-zinc-600">{stat.unit}</span>}
+        <h3 className="text-xl md:text-3xl font-black text-white font-mono">{stat.value}</h3>
+        {stat.unit && <span className="text-[10px] md:text-xs font-bold text-zinc-600">{stat.unit}</span>}
       </div>
     </div>
   );
@@ -325,7 +325,7 @@ export default function DashboardContent() {
           </div>
         )}
 
-        <header className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
+        <header className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-12 gap-3 md:gap-6">
           <div className="space-y-1">
             <div className={`flex items-center gap-2 ${isConfigured && telemetry && !isStale ? 'text-cyan-500' : 'text-red-500'}`}>
               <Activity size={18} className={isConfigured && telemetry && !isStale ? 'animate-pulse' : ''} />
@@ -342,8 +342,8 @@ export default function DashboardContent() {
           </div>
 
           <div className="flex items-center gap-3">
-          <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
+          <div className="flex items-center gap-2 md:gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
+            <div className={`flex items-center gap-1.5 md:gap-2 px-2.5 py-1.5 md:px-4 md:py-2 rounded-xl border transition-all ${
               isConfigured && telemetry && !isStale
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                 : 'bg-red-500/10 text-red-400 border-red-500/20'
@@ -351,14 +351,14 @@ export default function DashboardContent() {
               <div className={`w-2 h-2 rounded-full ${
                 isConfigured && telemetry && !isStale ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
               }`} />
-              <span className="text-xs font-bold uppercase tracking-wider">
+              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
                 {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
               </span>
             </div>
 
             {/* Batería interna ESP32 (AT+CBC) */}
             {telemetry?.battery_level != null && (
-              <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all ${
+              <div className={`flex items-center gap-1.5 px-2 py-1.5 md:px-3 md:py-2 rounded-xl border transition-all ${
                 telemetry.is_charging
                   ? 'text-amber-400 border-amber-500/20 bg-amber-500/10'
                   : (telemetry.battery_level < 20
@@ -386,21 +386,21 @@ export default function DashboardContent() {
         </header>
 
         {/* Stats principales */}
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-6 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-2.5 md:gap-6 mb-3 md:mb-6">
           {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
         </div>
 
         {/* Stats CAN — solo visibles cuando el bus ha enviado datos */}
         {hasCAN && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4 mb-6 md:mb-10">
             {canStats.map((stat) => stat.value != null && (
-              <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-5 py-4 rounded-2xl transition-all hover:bg-zinc-900/50`}>
-                <div className="flex items-center gap-2 mb-2">
+              <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-3.5 py-3 md:px-5 md:py-4 rounded-xl md:rounded-2xl transition-all hover:bg-zinc-900/50`}>
+                <div className="flex items-center gap-2 mb-1 md:mb-2">
                   <stat.icon size={14} className={stat.color} />
-                  <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase">{stat.label}</p>
+                  <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase truncate">{stat.label}</p>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className={`text-xl font-black font-mono ${stat.color}`}>{stat.value}</span>
+                  <span className={`text-lg md:text-xl font-black font-mono ${stat.color}`}>{stat.value}</span>
                   <span className="text-[10px] font-bold text-zinc-600">{stat.unit}</span>
                 </div>
               </div>
