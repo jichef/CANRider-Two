@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 
 const Map = dynamic(() => import('@/components/Map'), {
@@ -38,6 +38,7 @@ export default function DashboardContent() {
 
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
   const [hasLiveFix, setHasLiveFix] = useState(false);
+  const [address, setAddress] = useState<string | null>(null);
 
   useEffect(() => {
     const checkStale = () => {
@@ -105,6 +106,45 @@ export default function DashboardContent() {
 
     return () => { supabase.removeChannel(channel); };
   }, [supabase]);
+
+  // Municipio/calle aproximados a partir de las coordenadas (Nominatim,
+  // OpenStreetMap — gratis, sin API key). Solo se repite la consulta si la
+  // moto se ha movido más de ~80m o han pasado más de 60s desde la última
+  // vez, para no machacar el servicio con cada tick de telemetría.
+  const lastGeocodedRef = useRef<{ lat: number; lon: number; at: number } | null>(null);
+  useEffect(() => {
+    if (!hasLiveFix) return;
+    const [lat, lon] = currentPosition;
+    const prev = lastGeocodedRef.current;
+    if (prev) {
+      const dLat = (lat - prev.lat) * 111_320;
+      const dLon = (lon - prev.lon) * 111_320 * Math.cos((lat * Math.PI) / 180);
+      const movedMeters = Math.sqrt(dLat * dLat + dLon * dLon);
+      if (movedMeters < 80 && Date.now() - prev.at < 60_000) return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const a = data?.address ?? {};
+        const place = a.city || a.town || a.village || a.municipality || a.county;
+        const road = a.road;
+        const num = a.house_number;
+        const parts = [road ? `${road}${num ? ' ' + num : ''}` : null, place].filter(Boolean);
+        if (!cancelled) setAddress(parts.length ? parts.join(', ') : null);
+      } catch {
+        // Sin conexión al servicio de geocodificación: se queda con las coordenadas
+      }
+      lastGeocodedRef.current = { lat, lon, at: Date.now() };
+    }, 400);
+
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [currentPosition, hasLiveFix]);
 
   // SoC por pack: la moto tiene dos IDs de batería (modo A / modo B, uno
   // activo cada vez según qué pack esté conectado) — se muestran por
@@ -371,7 +411,7 @@ export default function DashboardContent() {
                     {selectedTrip
                       ? `Trip ID: ${selectedTrip.slice(0, 8)}`
                       : hasLiveFix
-                        ? `${Math.abs(currentPosition[0]).toFixed(4)}° ${currentPosition[0] >= 0 ? 'N' : 'S'}, ${Math.abs(currentPosition[1]).toFixed(4)}° ${currentPosition[1] >= 0 ? 'E' : 'W'}`
+                        ? (address ?? `${Math.abs(currentPosition[0]).toFixed(4)}° ${currentPosition[0] >= 0 ? 'N' : 'S'}, ${Math.abs(currentPosition[1]).toFixed(4)}° ${currentPosition[1] >= 0 ? 'E' : 'W'}`)
                         : 'Esperando posición GPS...'}
                   </span>
                 </div>
