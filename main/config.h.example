@@ -99,12 +99,14 @@
 // cada señal. Solo hay 4: la hora que se envía al panel (nunca se toca
 // nada más por CAN) y el % de las dos baterías que se leen del bus.
 //
-// Si tu moto usa otras tramas para esto, cambia aquí los valores — el
-// firmware (main/main.ino, setupCANSignals()) los lee de estas macros, no
-// hace falta tocar el .ino para adaptar esto a tu vehículo. Si necesitas
-// leer señales CAN adicionales que no sean estas 4, o cualquier trama TX
-// nueva, eso sí requiere editar setupCANSignals() directamente en
-// main.ino — es a propósito, para que nunca se pueda añadir tráfico TX
+// Los valores de abajo son un EJEMPLO — no corresponden a ningún vehículo
+// concreto. Tienes que averiguar los de tu propia moto (con un analizador
+// CAN, documentación del fabricante, o ingeniería inversa) y ponerlos
+// aquí. El firmware (main/main.ino, setupCANSignals()) los lee de estas
+// macros, no hace falta tocar el .ino para adaptar esto a tu vehículo. Si
+// necesitas leer señales CAN adicionales que no sean estas 4, o cualquier
+// trama TX nueva, eso sí requiere editar setupCANSignals() directamente
+// en main.ino — a propósito, para que nunca se pueda añadir tráfico TX
 // nuevo solo tocando un archivo de configuración.
 
 #define CAN_CLOCK_FRAME     0x200   // EJEMPLO — trama que recibe el panel con la hora
@@ -112,9 +114,9 @@
 #define CAN_CLOCK_MIN_BYTE  1       // EJEMPLO — byte de los minutos dentro de esa trama
 
 #define CAN_BATTERY_A_FRAME 0x300   // EJEMPLO — trama con el % de la batería A
-#define CAN_BATTERY_A_BYTE  0       // byte del % dentro de esa trama
+#define CAN_BATTERY_A_BYTE  0       // EJEMPLO — byte del % dentro de esa trama
 
 #define CAN_BATTERY_B_FRAME 0x301   // EJEMPLO — trama con el % de la batería B
-#define CAN_BATTERY_B_BYTE  0       // byte del % dentro de esa trama
+#define CAN_BATTERY_B_BYTE  0       // EJEMPLO — byte del % dentro de esa trama
 
 #endif
