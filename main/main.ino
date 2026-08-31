@@ -449,6 +449,7 @@ void readGPS() {
 
     TimeRef t   = snapshotTime();
     t.hasPos    = true;
+    t.posSource = 'g';
     t.lat       = nmeaToDeg(f[0].toFloat(), f[1].length() ? f[1][0] : 'N');
     t.lon       = nmeaToDeg(f[2].toFloat(), f[3].length() ? f[3][0] : 'E');
     t.speed_kmh = (fi >= 8) ? f[7].toFloat() : 0.0f;
@@ -493,6 +494,7 @@ static void readLBS() {
     // 0 con una hora ya vieja, y el reloj de la moto saltaría hacia atrás.
     TimeRef t   = snapshotTime();
     t.hasPos    = true;
+    t.posSource = 'l';
     t.lat       = f[1].toFloat();
     t.lon       = f[2].toFloat();
     t.speed_kmh = 0;  // LBS no da velocidad; no arrastrar la última del GPS
@@ -529,6 +531,7 @@ void readGPS() {
 
     TimeRef t   = snapshotTime();
     t.hasPos    = true;
+    t.posSource = 'g';
     t.lat       = f[3].toFloat();
     t.lon       = f[4].toFloat();
     t.speed_kmh = f[6].toFloat();
@@ -982,6 +985,9 @@ void loop() {
             body += ",\"latitude\":"  + String(t.lat,       6);
             body += ",\"longitude\":" + String(t.lon,       6);
             body += ",\"speed\":"     + String(t.speed_kmh, 1);
+            body += ",\"position_source\":\"";
+            body += (t.posSource == 'l') ? "lbs" : "gps";
+            body += "\"";
         } else {
             body += ",\"speed\":0";
         }

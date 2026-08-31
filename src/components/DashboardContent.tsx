@@ -12,7 +12,6 @@ import {
   Activity,
   Thermometer,
   Signal,
-  Cpu,
 } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -277,14 +276,6 @@ export default function DashboardContent() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link
-              href="/signals"
-              className="p-2 rounded-xl bg-zinc-900 border border-white/10 text-zinc-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-colors"
-              title="Configurar señales CAN"
-            >
-              <Cpu size={18} />
-            </Link>
-
           <div className="flex items-center gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
             <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
               isConfigured && telemetry && !isStale
@@ -357,9 +348,25 @@ export default function DashboardContent() {
                   <MapPin size={18} />
                 </div>
                 <div>
-                  <span className="text-sm font-bold text-white block">
-                    {selectedTrip ? 'ROUTE_ANALYSIS' : 'LIVE_LOCATION'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white block">
+                      {selectedTrip ? 'ROUTE_ANALYSIS' : 'LIVE_LOCATION'}
+                    </span>
+                    {!selectedTrip && hasLiveFix && (
+                      telemetry?.position_source === 'lbs' ? (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          title="Posición aproximada por triangulación de celda — sin fix GPS"
+                        >
+                          LBS · APROX.
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          GPS
+                        </span>
+                      )
+                    )}
+                  </div>
                   <span className="text-[10px] text-zinc-500 font-mono uppercase">
                     {selectedTrip
                       ? `Trip ID: ${selectedTrip.slice(0, 8)}`
@@ -470,7 +477,6 @@ export default function DashboardContent() {
             { icon: Activity, label: 'Live', href: '/' },
             { icon: RouteIcon, label: 'Trips', href: '/' },
             { icon: MapPin, label: 'Map', href: '/' },
-            { icon: Cpu, label: 'CAN', href: '/signals' },
           ].map((item, i) => (
             <Link
               key={item.label}

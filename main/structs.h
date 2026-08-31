@@ -7,6 +7,7 @@
 struct TimeRef {
     bool     valid;
     bool     hasPos;
+    char     posSource;  // 'g'=GPS real, 'l'=aproximada por LBS (celda)
     float    lat, lon, speed_kmh;
     uint8_t  hour, min, sec;   // siempre en UTC (hour/min/sec + utcOffsetMin = hora local)
     uint8_t  day, month;
