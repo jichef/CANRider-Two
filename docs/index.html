@@ -519,15 +519,21 @@
 
   <main>
 
+    <div class="callout warn" style="margin-bottom: 40px;">
+      <span class="k">Antes de empezar — aviso legal</span>
+      <p>Este proyecto se publica <b>tal cual, sin garantía de ningún tipo</b>. Vas a manipular el bus CAN real de tu vehículo, su instalación eléctrica y su batería — un cableado mal hecho o una configuración equivocada (por ejemplo, un frame CAN o un byte mal puesto en <code>config.h</code>) puede dañar el vehículo, sus baterías o su electrónica.</p>
+      <p><b>Lo haces bajo tu propia cuenta y riesgo.</b> Ni el autor ni quienes colaboran en este proyecto se hacen responsables de ningún daño, avería o problema derivado de una instalación, configuración o uso incorrecto.</p>
+    </div>
+
     <section id="necesitas" class="lead-box">
       <h3>Qué vas a necesitar antes de empezar</h3>
       <ul class="checklist">
-        <li><b>Placa LilyGo T-SIM7000G</b> — es la que usa y prueba este proyecto (lleva LTE + GPS integrados)</li>
+        <li><b>Placa LilyGo T-SIM7000G</b> (recomendada, es la más probada en este proyecto) <b>o T-A7670G</b> — ambas llevan LTE + GPS integrados y el firmware soporta las dos, ver paso 6</li>
         <li><b>Transceptor CAN</b> (SN65HVD230, TJA1050 o similar) a 3.3V</li>
         <li><b>Tarjeta SIM con datos</b> activados, con el PIN desactivado</li>
         <li><b>Cable USB</b> de datos (no solo de carga) para la placa</li>
         <li><b>Batería 18650</b> como respaldo de alimentación (recomendado, no imprescindible)</li>
-        <li><b>Acceso al bus CAN</b> de la moto — CAN-H y CAN-L, con su resistencia de terminación de 120 Ω en cada extremo</li>
+        <li><b>Acceso al bus CAN</b> de la moto — CAN-H y CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω, no hace falta añadir ninguna aparte)</li>
         <li>Una cuenta de <b>GitHub</b>, <b>Supabase</b> y <b>Vercel</b> — las tres son gratuitas</li>
       </ul>
     </section>
@@ -551,31 +557,51 @@
 
     <!-- PASO 2 -->
     <section id="supabase-tablas" class="step">
-      <div class="step-head"><span class="step-num">PASO 02</span><h2>Crea las tablas</h2></div>
-      <p class="step-sub">Con el SQL Editor de Supabase, en cuatro pegar-y-ejecutar tienes toda la base de datos lista.</p>
+      <div class="step-head"><span class="step-num">PASO 02</span><h2>Crea las tablas (el "volcado" de la base de datos)</h2></div>
+      <p class="step-sub">Vamos a copiarle a Supabase la estructura de la base de datos: qué tablas existen y qué guarda cada una. No hace falta entender el código — solo copiar un texto y pegarlo en el sitio correcto, tal cual, sin cambiar nada.</p>
 
-      <p>Primero, clona o descarga el repositorio del proyecto en tu ordenador:</p>
+      <p>Primero, clona o descarga el repositorio del proyecto en tu ordenador (si ya lo hiciste, pasa al siguiente punto):</p>
       <div class="code-block">
         <div class="label"><span>terminal</span><button class="copy-btn" data-copy="git clone https://github.com/jichef/CANRider-Two.git">Copiar</button></div>
         <pre>git clone https://github.com/jichef/CANRider-Two.git</pre>
       </div>
+      <div class="callout note">
+        <span class="k">¿No usas la terminal?</span>
+        <p>En la página del repositorio en GitHub pulsa el botón verde <b>Code → Download ZIP</b>, descomprime el archivo en tu ordenador, y usa esa carpeta en vez de clonarlo por comandos.</p>
+      </div>
 
-      <p>Dentro del proyecto en Supabase, abre <span class="ui-path">SQL Editor → New query</span>. Abre cada uno de estos archivos de la carpeta <code>supabase/</code> del repositorio, copia todo su contenido, pégalo en el editor y pulsa <b>Run</b> — en este orden:</p>
+      <p>Ahora toca copiar el "molde" de la base de datos. Sigue estos pasos <b>exactamente en este orden</b>:</p>
 
       <ol class="sub-list">
-        <li><code>supabase/schema.sql</code> — tabla <code>can_signals</code></li>
-        <li><code>supabase/telemetry_schema.sql</code> — tabla <code>telemetry</code></li>
-        <li><code>supabase/trips_schema.sql</code> — tabla <code>trips</code></li>
-        <li><code>supabase/fix_missing_can_columns.sql</code> — columnas adicionales de batería</li>
+        <li>En tu ordenador, dentro de la carpeta del proyecto, abre el archivo <code>supabase/schema.sql</code> con cualquier editor de texto (el Bloc de notas de Windows, TextEdit de Mac, o el propio VS Code sirven).</li>
+        <li>Selecciona todo el contenido del archivo: haz click dentro del texto y pulsa <code>Ctrl+A</code> (Windows) o <code>Cmd+A</code> (Mac). Luego cópialo con <code>Ctrl+C</code> / <code>Cmd+C</code>.</li>
+        <li>Ve a la pestaña del navegador donde tienes abierto tu proyecto en <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
+        <li>En el menú de la izquierda, busca el icono con el símbolo <code>&lt;/&gt;</code> — se llama <b>SQL Editor</b> — y haz click.</li>
+        <li>Arriba a la izquierda de esa pantalla, pulsa el botón <b>+ New query</b>.</li>
+        <li>Haz click dentro de la caja grande y oscura que ocupa el centro de la pantalla, y pega el texto que copiaste: <code>Ctrl+V</code> / <code>Cmd+V</code>.</li>
+        <li>Pulsa el botón verde <b>Run</b> (abajo a la derecha de la caja).</li>
       </ol>
 
-      <p>Genera un identificador único para tu moto ejecutando esto en el mismo editor y guardando el resultado:</p>
+      <div class="callout tip">
+        <span class="k">¿Cómo sé que ha funcionado?</span>
+        <p>Abajo del todo aparecerá un mensaje en verde parecido a <code>Success. No rows returned</code>. Eso es bueno: significa que las tres tablas se han creado sin errores.</p>
+        <p>Para comprobarlo con tus propios ojos: en el menú de la izquierda pulsa el icono de <b>Table Editor</b> (parece una tabla/hoja de cálculo). Deberías ver tres tablas nuevas en la lista: <code>can_signals</code>, <code>telemetry</code> y <code>trips</code>.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Si sale un mensaje en rojo</span>
+        <p>Suele significar que se pegó el texto incompleto (por ejemplo, si el archivo no se seleccionó entero). Borra todo lo que haya en la caja del SQL Editor, vuelve a copiar el archivo completo desde el paso 1 y pégalo de nuevo.</p>
+      </div>
+
+      <p>Por último, genera un identificador único para tu moto. En el mismo SQL Editor, pulsa otra vez <b>+ New query</b>, pega esto y pulsa <b>Run</b>:</p>
       <div class="code-block">
         <div class="label"><span>sql</span><button class="copy-btn" data-copy="select gen_random_uuid();">Copiar</button></div>
         <pre>select gen_random_uuid();</pre>
       </div>
 
-      <div class="done-check">✓ Ese UUID es tu <code>VEHICLE_ID</code> — lo necesitarás en el paso 6.</div>
+      <p>Esta vez, en lugar del mensaje verde, va a aparecer una tabla con un único resultado: un código largo con guiones, del tipo <code>3fa85f64-5717-4562-b3fc-2c963f66afa6</code>. Cópialo y guárdalo en algún sitio (una nota, un documento) — es tu <code>VEHICLE_ID</code>.</p>
+
+      <div class="done-check">✓ Ese código es tu <code>VEHICLE_ID</code> — lo necesitarás en el paso 6 y en el paso 4.</div>
     </section>
 
     <!-- PASO 3 -->
@@ -646,38 +672,94 @@
 
     <!-- PASO 6 -->
     <section id="confighs" class="step">
-      <div class="step-head"><span class="step-num">PASO 06</span><h2>Edita config.h</h2></div>
+      <div class="step-head"><span class="step-num">PASO 06</span><h2>Crea y edita config.h</h2></div>
       <p class="step-sub">El único archivo del firmware que necesita tus datos — el resto ya viene listo.</p>
 
-      <p>Dentro de la carpeta del repositorio, copia la plantilla:</p>
+      <p>Dentro de la carpeta <code>main/</code> del proyecto hay un archivo llamado <code>config.h.example</code>. <b>Cambia el nombre de ese archivo de ejemplo a <code>config.h</code></b> (quitándole el <code>.example</code> del final) — ese es el archivo que vas a rellenar con tus datos y el que lee el firmware al compilar.</p>
+
       <div class="code-block">
         <div class="label"><span>terminal</span><button class="copy-btn" data-copy="cp main/config.h.example main/config.h">Copiar</button></div>
         <pre>cp main/config.h.example main/config.h</pre>
       </div>
 
-      <p>Abre <code>main/config.h</code> con cualquier editor de texto. Dentro está dividido en bloques marcados literalmente con <code>&gt;&gt;&gt; CAMBIA ESTO &lt;&lt;&lt;</code> — rellena estos cuatro y no toques nada más:</p>
+      <div class="callout note">
+        <span class="k">¿No usas la terminal? Hazlo a mano</span>
+        <p>Abre la carpeta <code>main/</code> con el explorador de archivos de tu sistema (Finder en Mac, Explorador de archivos en Windows). Busca el archivo <code>config.h.example</code>, cópialo y pégalo en la misma carpeta (así tendrás dos copias) y renombra la copia nueva a <code>config.h</code> — quitándole el <code>.example</code> del final. El archivo original <code>config.h.example</code> déjalo tal cual, no lo borres.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Importante</span>
+        <p>Edita siempre <code>config.h</code> (el que acabas de crear), nunca <code>config.h.example</code>. Ese archivo original ni siquiera se sube a git — es solo la plantilla de referencia con la que todo el mundo empieza.</p>
+      </div>
+
+      <p>Abre <code>main/config.h</code> con cualquier editor de texto. Dentro está dividido en cinco bloques marcados literalmente con <code>&gt;&gt;&gt; CAMBIA ESTO &lt;&lt;&lt;</code>. Rellena estos según tu caso y no toques el resto del archivo:</p>
 
       <div class="code-block">
         <div class="label"><span>main/config.h</span></div>
-        <pre><span class="cm">// 1/4 — deja SIM7000G activa (ya viene así)</span>
-#define MODEM_SIM7000G
+        <pre><span class="cm">// 1/5 — qué placa tienes: descomenta SOLO la línea de tu placa (quita
+// el "//" de delante) y deja la otra comentada. Las dos empiezan
+// comentadas a propósito — tienes que elegir tú, no hay una que
+// venga activa por defecto.</span>
+// #define MODEM_A7670G
+// #define MODEM_SIM7000G
 
-<span class="cm">// 2/4 — tus datos de Supabase y de la moto</span>
+<span class="cm">// 2/5 — tus datos de Supabase y de la moto (paso 3 y paso 2 de esta guía)</span>
 #define SUPABASE_URL "https://xxxxxxxx.supabase.co"
 #define SUPABASE_KEY "eyJ..."
-#define VEHICLE_ID   "el-uuid-del-paso-2"
+#define VEHICLE_ID   "el-codigo-que-guardaste-en-el-paso-2"
 
-<span class="cm">// 3/4 — el APN de tu operador (pregúntale o búscalo como
+<span class="cm">// 3/5 — el APN de tu operador (pregúntale o búscalo como
 // "APN M2M/IoT &lt;tu operador&gt;")</span>
 #define APN "internet.tuoperadora.es"
 
-<span class="cm">// 4/4 — solo si tu moto no va a 250 kbps</span>
-#define CAN_SPEED TWAI_TIMING_CONFIG_250KBITS()</pre>
+<span class="cm">// 4/5 — solo si tu moto no va a 250 kbps</span>
+#define CAN_SPEED TWAI_TIMING_CONFIG_250KBITS()
+
+<span class="cm">// 5/5 — en qué trama CAN (frame ID) y en qué byte va cada dato.
+// Solo hay 5 señales: la hora que se envía al panel (nunca se toca
+// nada más por CAN), el % de las dos baterías, y si está cargando.
+//
+// Estas líneas empiezan comentadas a propósito. NO las descomentes
+// con valores inventados ni copiados de otra moto: busca los tuyos con
+// un analizador CAN o la documentación del fabricante antes.
+//
+// Formato: frame ID en hexadecimal (0x...), byte de 0 a 7 dentro de
+// la trama. CAN_CHARGING_BITMASK es distinto: no es un byte entero,
+// es un bit concreto dentro del byte (0x10 = bit 4) — el firmware
+// mira data[byte] & bitmask y guarda 1 si ese bit está activo.
+//
+// Así se escribiría UN EJEMPLO (no lo copies, no es real):
+//   #define CAN_CLOCK_FRAME     0x200
+//   #define CAN_CLOCK_HOUR_BYTE 0</span>
+// #define CAN_CLOCK_FRAME
+// #define CAN_CLOCK_HOUR_BYTE
+// #define CAN_CLOCK_MIN_BYTE
+
+// #define CAN_BATTERY_A_FRAME
+// #define CAN_BATTERY_A_BYTE
+
+// #define CAN_BATTERY_B_FRAME
+// #define CAN_BATTERY_B_BYTE
+
+// #define CAN_CHARGING_FRAME
+// #define CAN_CHARGING_BYTE
+// #define CAN_CHARGING_BITMASK</pre>
       </div>
 
       <div class="callout tip">
-        <span class="k">Truco</span>
-        <p>Las tramas CAN concretas de tu moto (qué leer, en qué byte) se definen dentro de <code>main/main.ino</code>, en una función llamada <code>setupCANSignals()</code> — no en <code>config.h</code>. Es a propósito: así el reloj y las baterías siempre funcionan sin depender de la red.</p>
+        <span class="k">¿Y si aún no sé los valores de mi moto?</span>
+        <p>Puedes flashear igualmente dejando el bloque 5/5 tal cual (comentado). Cada señal es independiente: si dejas la hora sin configurar, el firmware no transmite ninguna trama por CAN; si dejas una batería o la carga sin configurar, simplemente no muestra ese dato en el portal — no hace falta rellenar las cinco a la vez. Todo lo demás (GPS, LTE, portal web) funciona igual. En el Monitor Serie del paso 9 verás <code>[CAN] 0 señales</code> mientras esté todo comentado — es normal.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">Cuando sí sepas los valores</span>
+        <p>Para cada señal que quieras activar, descomenta y rellena <b>todas sus líneas juntas</b> — si a una señal le falta un dato (por ejemplo el byte pero no el frame), esa señal completa se ignora. No copies nunca los valores de ejemplo ni los de otra moto: enviar por error una trama con un frame ID o contenido equivocado a un bus CAN real puede provocar comportamientos inesperados en el vehículo.</p>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">¿Y si mi moto tiene más señales que estas cinco?</span>
+        <p>Con el bloque 5/5 de <code>config.h</code> te basta para adaptar la hora, las dos baterías y el estado de carga a tu moto — no hace falta tocar ningún otro archivo para eso.</p>
+        <p>Solo si necesitas leer alguna señal CAN <b>adicional</b>, o enviar alguna trama nueva por el bus, hay que editar la función <code>setupCANSignals()</code> dentro de <code>main/main.ino</code> directamente. Es a propósito: así nunca se puede ampliar lo que el ESP32 transmite por CAN con solo tocar un archivo de configuración — cualquier trama nueva de salida exige tocar el propio código.</p>
       </div>
     </section>
 
@@ -687,24 +769,31 @@
       <p class="step-sub">Cuatro cables entre el ESP32 y el transceptor, más los dos del propio bus.</p>
 
       <table class="pins">
-        <thead><tr><th>ESP32 (T-SIM7000G)</th><th>Transceptor CAN</th></tr></thead>
+        <thead><tr><th>Señal</th><th>T-SIM7000G</th><th>T-A7670G</th><th>Transceptor CAN</th></tr></thead>
         <tbody>
-          <tr><td class="pin">GPIO 32</td><td>CTX / TXD</td></tr>
-          <tr><td class="pin">GPIO 33</td><td>CRX / RXD</td></tr>
-          <tr><td class="pin">3.3V</td><td>VCC</td></tr>
-          <tr><td class="pin">GND</td><td>GND</td></tr>
+          <tr><td>CAN TX</td><td class="pin">GPIO 32</td><td class="pin">GPIO 22</td><td>CTX / TXD</td></tr>
+          <tr><td>CAN RX</td><td class="pin">GPIO 33</td><td class="pin">GPIO 21</td><td>CRX / RXD</td></tr>
+          <tr><td>Alimentación</td><td class="pin">3.3V</td><td class="pin">3.3V</td><td>VCC</td></tr>
+          <tr><td>Tierra</td><td class="pin">GND</td><td class="pin">GND</td><td>GND</td></tr>
         </tbody>
       </table>
 
+      <div class="callout note">
+        <span class="k">Placas distintas, pines distintos</span>
+        <p>Usa la columna de tu placa. En la T-A7670G, GPIO 33 se evita a propósito porque lo usa el módem internamente (pin RING) — por eso esa placa usa GPIO 22/21 en vez de 32/33. Estos son los mismos pines que ya vienen puestos en el bloque 4/5 de <code>config.h</code> (<code>CAN_TX_PIN</code> / <code>CAN_RX_PIN</code>) según la placa que hayas elegido en el bloque 1/5 — no hace falta cambiarlos a mano.</p>
+      </div>
+
       <div class="wiring-wrap">
-        <svg viewBox="0 0 620 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ESP32 GPIO32 a CTX, GPIO33 a CRX, 3.3V a VCC, GND a GND del transceptor, y CAN-H/CAN-L del transceptor al bus de la moto">
+        <svg viewBox="0 0 620 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ESP32 CAN TX a CTX, CAN RX a CRX, 3.3V a VCC, GND a GND del transceptor, y CAN-H/CAN-L del transceptor al bus de la moto. Los pines concretos dependen de la placa: GPIO32/33 en T-SIM7000G, GPIO22/21 en T-A7670G">
           <g font-family="'IBM Plex Mono', monospace" font-size="12.5" fill="var(--ink)">
             <rect x="20" y="30" width="160" height="160" rx="10" fill="var(--teal-soft)" stroke="var(--teal)"></rect>
             <text x="100" y="58" text-anchor="middle" font-weight="600" fill="var(--teal)">ESP32</text>
-            <text x="100" y="74" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">T-SIM7000G</text>
+            <text x="100" y="74" text-anchor="middle" font-size="9" fill="var(--ink-faint)">T-SIM7000G / T-A7670G</text>
 
-            <text x="34" y="102" font-size="11">GPIO32</text>
-            <text x="34" y="128" font-size="11">GPIO33</text>
+            <text x="34" y="100" font-size="10.5">GPIO32</text>
+            <text x="34" y="112" font-size="9.5" fill="var(--ink-faint)">(A7670G: 22)</text>
+            <text x="34" y="126" font-size="10.5">GPIO33</text>
+            <text x="34" y="138" font-size="9.5" fill="var(--ink-faint)">(A7670G: 21)</text>
             <text x="34" y="154" font-size="11">3.3V</text>
             <text x="34" y="180" font-size="11">GND</text>
 
@@ -727,7 +816,7 @@
             <text x="478" y="84" font-size="11" fill="var(--amber)">CAN-H</text>
             <text x="478" y="110" font-size="11" fill="var(--amber)">CAN-L</text>
 
-            <text x="337" y="210" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">→ bus de la moto, 120 Ω en cada extremo</text>
+            <text x="337" y="210" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">→ bus de la moto</text>
           </g>
         </svg>
       </div>
@@ -741,11 +830,16 @@
       <p class="step-sub">Con todo cableado y la SIM puesta, ya se puede flashear.</p>
 
       <ol class="sub-list">
-        <li>Abre <code>main/main.ino</code> en Arduino IDE (abrirá también <code>config.h</code>, <code>structs.h</code> y el resto de pestañas del proyecto).</li>
+        <li>Abre <code>main/main.ino</code> en Arduino IDE (abrirá también <code>config.h</code>, <code>structs.h</code>, <code>StreamDebugger.h</code> y el resto de pestañas del proyecto).</li>
         <li>Conecta la placa al ordenador por USB.</li>
         <li>Selecciona el puerto en <span class="ui-path">Tools → Port</span>.</li>
         <li>Pulsa <b>Upload</b> (o <code>Ctrl+U</code> / <code>Cmd+U</code>).</li>
       </ol>
+
+      <div class="callout note">
+        <span class="k">Sobre la pestaña StreamDebugger.h</span>
+        <p>Verás una pestaña extra llamada <code>StreamDebugger.h</code> — ya viene incluida dentro de la carpeta <code>main/</code> del repositorio, no hay que instalarla ni copiarla a ningún sitio. La librería <b>TinyGSM</b> del paso 5 sí hay que instalarla desde el Gestor de Librerías como se explica ahí; esta pestaña es solo un ayudante pequeño y aparte que ya viene listo.</p>
+      </div>
 
       <div class="callout warn">
         <span class="k">Si no conecta</span>
@@ -762,7 +856,7 @@
       <div class="code-block">
         <div class="label"><span>monitor serie · 115200</span></div>
         <pre>[CAN] TWAI listo
-[CAN] 4 señales (1 frames TX)
+[CAN] 5 señales (1 frames TX)
 [STATE] NET_SETUP...
 [STATE] HTTP_SETUP...
 [TIME] UTC: 2026-08-31 12:03:41
@@ -788,7 +882,7 @@
         <li>Rellena la URL y anon key de Supabase, el <code>VEHICLE_ID</code> y el modelo de placa.</li>
       </ol>
 
-      <p>Aparecerán sensores de batería A y B de la moto, batería del ESP32, velocidad, señal de red, seguimiento GPS y datos del último viaje.</p>
+      <p>Aparecerán sensores de batería A y B de la moto, estado de carga, batería del ESP32, velocidad, señal de red, seguimiento GPS y datos del último viaje.</p>
     </section>
 
     <!-- PROBLEMAS -->
@@ -818,8 +912,9 @@
       <h3>Las señales CAN no llegan</h3>
       <ul>
         <li>Revisa <code>CAN_SPEED</code> en <code>config.h</code> frente a la velocidad real del bus de tu moto</li>
-        <li>Comprueba el cableado del paso 7 y la terminación de 120 Ω en el bus</li>
-        <li>Si ves <code>[CAN] Bus-off detectado</code>, el propio firmware se recupera solo — si se repite mucho, revisa la terminación</li>
+        <li>Comprueba el cableado del paso 7</li>
+        <li>Comprueba que has descomentado y rellenado el bloque 5/5 de <code>config.h</code> — si lo dejaste tal cual venía, el firmware no transmite ni lee ninguna señal (lo verás en el Monitor Serie como <code>[CAN] 0 señales</code>)</li>
+        <li>Si ves <code>[CAN] Bus-off detectado</code>, el propio firmware se recupera solo — si se repite mucho, revisa la terminación del bus</li>
       </ul>
     </section>
 

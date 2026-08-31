@@ -277,17 +277,18 @@ static String dechunkBody(const String& raw) {
 // todo cualquier trama TX — sigue requiriendo tocar este .ino
 // directamente: a propósito, para que nunca se pueda ampliar lo que se
 // transmite por CAN solo con un archivo de configuración.
-static void addCANSignal(uint32_t frameId, char direction, uint8_t byteStart, const char* name) {
+static void addCANSignal(uint32_t frameId, char direction, uint8_t byteStart, const char* name,
+                          uint8_t bitMask = 0, bool dualMode = false) {
     CANSignal& s = canSignals[canSignalCount++];
     s.frameId      = frameId;
     s.direction    = direction;
     s.txIntervalMs = 200;
-    s.dualMode     = false;
+    s.dualMode     = dualMode;
     strncpy(s.name, name, sizeof(s.name) - 1);
     s.name[sizeof(s.name) - 1] = '\0';
     s.byteStart = byteStart;
     s.byteLen   = 1;
-    s.bitMask   = 0;
+    s.bitMask   = bitMask;
     s.bigEndian = true;
     s.isSigned  = false;
     s.scale     = 1;
@@ -299,10 +300,27 @@ static void addCANSignal(uint32_t frameId, char direction, uint8_t byteStart, co
 static void setupCANSignals() {
     if (xSemaphoreTake(canMux, portMAX_DELAY) == pdTRUE) {
         canSignalCount = 0;
+
+        // Cada señal solo se registra si sus #define existen en config.h.
+        // Si dejaste el bloque 5/5 de config.h sin rellenar (recomendado
+        // hasta tener los valores reales de tu moto), esa señal se omite
+        // por completo — para la hora eso significa que el ESP32 NO
+        // transmite ninguna trama por CAN, en vez de mandar un frame_id
+        // inventado con datos basura al bus real.
+#if defined(CAN_CLOCK_FRAME) && defined(CAN_CLOCK_HOUR_BYTE) && defined(CAN_CLOCK_MIN_BYTE)
         addCANSignal(CAN_CLOCK_FRAME,     't', CAN_CLOCK_HOUR_BYTE, "clock_hours");
         addCANSignal(CAN_CLOCK_FRAME,     't', CAN_CLOCK_MIN_BYTE,  "clock_minutes");
+#endif
+#if defined(CAN_BATTERY_A_FRAME) && defined(CAN_BATTERY_A_BYTE)
         addCANSignal(CAN_BATTERY_A_FRAME, 'r', CAN_BATTERY_A_BYTE,  "moto_battery");
+#endif
+#if defined(CAN_BATTERY_B_FRAME) && defined(CAN_BATTERY_B_BYTE)
         addCANSignal(CAN_BATTERY_B_FRAME, 'r', CAN_BATTERY_B_BYTE,  "moto_battery_b");
+#endif
+#if defined(CAN_CHARGING_FRAME) && defined(CAN_CHARGING_BYTE) && defined(CAN_CHARGING_BITMASK)
+        addCANSignal(CAN_CHARGING_FRAME,  'r', CAN_CHARGING_BYTE,  "bms_charging",
+                     CAN_CHARGING_BITMASK, true);
+#endif
 
         // Reconstruir lista de tramas TX únicas (agrupadas por frame_id)
         txFrameCount = 0;
@@ -322,6 +340,9 @@ static void setupCANSignals() {
         xSemaphoreGive(canMux);
     }
     Serial.printf("[CAN] %d señales (%d frames TX)\n", canSignalCount, txFrameCount);
+#if !(defined(CAN_CLOCK_FRAME) && defined(CAN_CLOCK_HOUR_BYTE) && defined(CAN_CLOCK_MIN_BYTE))
+    Serial.println("[CAN] Reloj CAN sin configurar en config.h — no se transmite ninguna trama");
+#endif
 }
 
 // ── Valor para un byte de una trama TX ───────────────────────────────────────

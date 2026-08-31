@@ -14,8 +14,10 @@
 // ┌──────────────────────────────────────────────────────────────────────┐
 // │ >>> CAMBIA ESTO 1/5 — Qué placa tienes                                │
 // └──────────────────────────────────────────────────────────────────────┘
-// Descomenta SOLO la línea de tu placa (quita el "//" de delante) y deja
-// la otra comentada. Solo puede estar activa una a la vez.
+// Las dos líneas empiezan comentadas a propósito: tienes que elegir tú,
+// no hay una placa activa por defecto. Descomenta SOLO la línea de la
+// tuya (quita el "//" de delante) y deja la otra comentada — si dejas
+// las dos, o las dos descomentadas, el firmware no compila (a propósito).
 //
 //   SIM7000G → LilyGo T-SIM7000G — RECOMENDADA, es la que se ha probado
 //              a fondo con moto real en este proyecto (LTE Cat-M1/NB-IoT,
@@ -25,7 +27,7 @@
 //              — revisa la guía si la usas).
 
 // #define MODEM_A7670G
-#define MODEM_SIM7000G
+// #define MODEM_SIM7000G
 
 
 // ┌──────────────────────────────────────────────────────────────────────┐
@@ -96,27 +98,55 @@
 // │ >>> CAMBIA ESTO 5/5 (solo si tu moto usa otras tramas) — Señales CAN  │
 // └──────────────────────────────────────────────────────────────────────┘
 // Frame ID (hexadecimal) y byte (0-7 dentro de la trama de 8 bytes) de
-// cada señal. Solo hay 4: la hora que se envía al panel (nunca se toca
-// nada más por CAN) y el % de las dos baterías que se leen del bus.
+// cada señal. Solo hay 5: la hora que se envía al panel (nunca se toca
+// nada más por CAN), el % de las dos baterías, y si está cargando.
 //
-// Los valores de abajo son un EJEMPLO — no corresponden a ningún vehículo
-// concreto. Tienes que averiguar los de tu propia moto (con un analizador
-// CAN, documentación del fabricante, o ingeniería inversa) y ponerlos
-// aquí. El firmware (main/main.ino, setupCANSignals()) los lee de estas
+// Estas 10 líneas empiezan comentadas (sin definir) a propósito — NO las
+// rellenes con valores inventados ni copies los de otra moto. Tienes que
+// averiguar los de tu propia moto (con un analizador CAN, documentación
+// del fabricante, o ingeniería inversa) antes de descomentarlas.
+//
+// Cada señal es independiente: si dejas sin descomentar CAN_CLOCK_FRAME/
+// HOUR_BYTE/MIN_BYTE, el firmware simplemente NO transmite ninguna trama
+// de reloj (en vez de mandar una inventada al bus real). Si dejas sin
+// descomentar una batería o CAN_CHARGING_*, esa lectura se omite y su
+// dato en el portal queda vacío — el resto sigue funcionando igual.
+//
+// CAN_CHARGING_BITMASK es distinto a los demás: no es un byte completo,
+// sino un bit dentro de ese byte (0x10 = bit 4). El firmware compara
+// data[byte] & bitmask y guarda 1 si el bit está activo, 0 si no.
+//
+// El firmware (main/main.ino, setupCANSignals()) las lee de estas
 // macros, no hace falta tocar el .ino para adaptar esto a tu vehículo. Si
-// necesitas leer señales CAN adicionales que no sean estas 4, o cualquier
+// necesitas leer señales CAN adicionales que no sean estas 5, o cualquier
 // trama TX nueva, eso sí requiere editar setupCANSignals() directamente
 // en main.ino — a propósito, para que nunca se pueda añadir tráfico TX
 // nuevo solo tocando un archivo de configuración.
+//
+// Así se escribiría un EJEMPLO (no lo copies, no es un vehículo real):
+//   #define CAN_CLOCK_FRAME     0x200
+//   #define CAN_CLOCK_HOUR_BYTE 0
+//   #define CAN_CLOCK_MIN_BYTE  1
+//   #define CAN_BATTERY_A_FRAME 0x300
+//   #define CAN_BATTERY_A_BYTE  0
+//   #define CAN_BATTERY_B_FRAME 0x301
+//   #define CAN_BATTERY_B_BYTE  0
+//   #define CAN_CHARGING_FRAME   0x302
+//   #define CAN_CHARGING_BYTE    1
+//   #define CAN_CHARGING_BITMASK 0x10
 
-#define CAN_CLOCK_FRAME     0x200   // EJEMPLO — trama que recibe el panel con la hora
-#define CAN_CLOCK_HOUR_BYTE 0       // EJEMPLO — byte de la hora dentro de esa trama
-#define CAN_CLOCK_MIN_BYTE  1       // EJEMPLO — byte de los minutos dentro de esa trama
+// #define CAN_CLOCK_FRAME
+// #define CAN_CLOCK_HOUR_BYTE
+// #define CAN_CLOCK_MIN_BYTE
 
-#define CAN_BATTERY_A_FRAME 0x300   // EJEMPLO — trama con el % de la batería A
-#define CAN_BATTERY_A_BYTE  0       // EJEMPLO — byte del % dentro de esa trama
+// #define CAN_BATTERY_A_FRAME
+// #define CAN_BATTERY_A_BYTE
 
-#define CAN_BATTERY_B_FRAME 0x301   // EJEMPLO — trama con el % de la batería B
-#define CAN_BATTERY_B_BYTE  0       // EJEMPLO — byte del % dentro de esa trama
+// #define CAN_BATTERY_B_FRAME
+// #define CAN_BATTERY_B_BYTE
+
+// #define CAN_CHARGING_FRAME
+// #define CAN_CHARGING_BYTE
+// #define CAN_CHARGING_BITMASK
 
 #endif

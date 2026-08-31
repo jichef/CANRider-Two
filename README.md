@@ -6,6 +6,14 @@ Sistema de telemetría en tiempo real para vehículos eléctricos con bus CAN. L
 
 ---
 
+## Aviso legal — léelo antes de instalar nada
+
+Este proyecto se publica **tal cual («as is»), sin garantía de ningún tipo**. Instalarlo implica manipular el bus CAN real de tu vehículo, su instalación eléctrica y su batería. Un error de cableado, de configuración (por ejemplo, un `frame_id` o byte de CAN equivocado en `config.h`) o de uso puede dañar el vehículo, sus baterías, su electrónica, o provocar un comportamiento inesperado.
+
+**Lo instalas y lo usas bajo tu propia cuenta y riesgo.** Ni el autor ni los colaboradores de este repositorio se hacen responsables de ningún daño, pérdida, avería o problema — material o de cualquier otro tipo — derivado de una instalación, configuración o uso incorrecto de este proyecto.
+
+---
+
 ## ¿Qué hace?
 
 - **Lee el bus CAN** del vehículo (estado de carga de baterías, etc.)
@@ -48,7 +56,7 @@ El ESP32 actúa como ECU secundaria: escucha tramas del bus CAN y emite la trama
 | **SIM con datos** | Con APN activo (M2M/IoT de cualquier operador) |
 | **Antena LTE + antena GPS** | Las que incluye el kit del T-SIM7000G |
 | **Batería 18650** | Como respaldo de alimentación (opcional pero recomendado) |
-| **Acceso al bus CAN del vehículo** | Cable directo a CAN-H / CAN-L, con resistencia de terminación de 120 Ω en cada extremo del bus |
+| **Acceso al bus CAN del vehículo** | Cable directo a CAN-H / CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω) |
 
 También es compatible con el **LilyGo T-A7670G** (más velocidad de datos LTE Cat-1), pero su variante estándar no lleva GPS integrado — necesita un módulo GPS externo (p.ej. Quectel L76K) aparte, con su propio cableado. Si no tienes ese módulo, usa el T-SIM7000G.
 
@@ -98,11 +106,7 @@ cd CANRider-Two
 
 1. Entra en [supabase.com](https://supabase.com/) y crea un proyecto nuevo.
 2. Anota la **URL del proyecto** y la **anon key** (*Project Settings → API*).
-3. En el **SQL Editor**, ejecuta en orden el contenido de:
-   - `supabase/schema.sql` (tabla `can_signals`)
-   - `supabase/telemetry_schema.sql` (tabla `telemetry`)
-   - `supabase/trips_schema.sql` (tabla `trips`)
-   - `supabase/fix_missing_can_columns.sql` (columnas adicionales de batería)
+3. En el **SQL Editor**, pega y ejecuta el contenido completo de `supabase/schema.sql` — crea las tres tablas (`can_signals`, `telemetry`, `trips`) de una vez. Es idempotente: se puede volver a ejecutar sin duplicar nada.
 
 ### 3. Configurar el firmware
 
@@ -110,9 +114,9 @@ cd CANRider-Two
 cp main/config.h.example main/config.h
 ```
 
-Edita `main/config.h` — el propio archivo tiene marcado con `>>> CAMBIA ESTO <<<` exactamente qué rellenar (placa, credenciales de Supabase, APN). El resto ya viene listo.
+Edita `main/config.h` — el propio archivo tiene marcado con `>>> CAMBIA ESTO <<<` exactamente qué rellenar (placa, credenciales de Supabase, APN, y el frame ID/byte de las 5 señales CAN por defecto: hora, batería A, batería B y estado de carga). Cada señal es independiente: puedes dejar comentadas las que no te interesen, el firmware simplemente las omite.
 
-Las señales CAN concretas de tu moto (qué trama leer, en qué byte, con qué escala) se definen directamente en `setupCANSignals()` dentro de `main/main.ino` — es una decisión deliberada del proyecto no tenerlas en un fichero de configuración remoto, para no depender de la red para algo tan crítico como el reloj de la moto.
+Si necesitas leer alguna señal CAN adicional a esas 4, o emitir alguna trama TX nueva, eso sí requiere editar `setupCANSignals()` dentro de `main/main.ino` directamente — es una decisión deliberada del proyecto: así nunca se puede ampliar lo que el ESP32 transmite por CAN solo con tocar un archivo de configuración.
 
 ### 4. Cargar el firmware
 
@@ -171,13 +175,9 @@ Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red,
 
 ### Panel de telemetría (`/`)
 
-Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE, batería del ESP32, mapa con la posición actual y el historial de viajes.
+Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE, batería del ESP32, indicador de si la posición es GPS real o aproximada por LBS, mapa con la posición actual y el historial de viajes.
 
-### Configuración de señales CAN (`/signals`)
-
-Panel de referencia sobre la tabla `can_signals` en Supabase — útil para consultar/documentar el protocolo CAN de tu vehículo, aunque el firmware ya no descarga esta tabla en tiempo de ejecución (ver más abajo).
-
-> **Seguridad CAN:** el firmware nunca transmite nada que no sea la trama de la hora, definida directamente en el código (`setupCANSignals()` en `main.ino`), nunca configurable de forma remota.
+> **Seguridad CAN:** el firmware nunca transmite nada que no sea la trama de la hora, definida directamente en el código (`setupCANSignals()` en `main.ino`), nunca configurable de forma remota. La tabla `can_signals` de Supabase no tiene efecto en tiempo de ejecución — se mantiene solo como referencia opcional (ver comentario en `supabase/schema.sql`).
 
 ---
 
@@ -226,26 +226,21 @@ CanRider/
 │
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx           # Panel de telemetría (/)
-│   │   └── signals/page.tsx   # Referencia de señales CAN (/signals)
+│   │   └── page.tsx               # Panel de telemetría (/)
 │   ├── components/
-│   │   ├── DashboardContent.tsx  # UI del panel principal
-│   │   ├── SignalsConfig.tsx      # Vista de señales CAN configuradas
-│   │   └── Map.tsx               # Mapa Leaflet
+│   │   ├── DashboardContent.tsx   # UI del panel principal
+│   │   └── Map.tsx                # Mapa Leaflet
 │   └── lib/
-│       └── known-signals.ts      # Señales conocidas con hints
+│       └── supabase.ts            # Cliente Supabase (browser, anon key)
 │
 ├── custom_components/
 │   └── can_rider/          # Integración de Home Assistant
 │
 ├── docs/
-│   └── index.html              # Guía visual paso a paso (GitHub Pages)
+│   └── index.html          # Guía visual paso a paso (GitHub Pages)
 │
 └── supabase/
-    ├── schema.sql                    # Tabla can_signals
-    ├── telemetry_schema.sql          # Tabla telemetry
-    ├── trips_schema.sql              # Tabla trips
-    └── fix_missing_can_columns.sql   # Columnas de batería adicionales
+    └── schema.sql          # Esquema completo: can_signals, telemetry, trips
 ```
 
 ---
@@ -272,8 +267,8 @@ CanRider/
 ### Las señales CAN no se reciben
 - Comprueba `CAN_SPEED` en `config.h` (250 kbps por defecto en este proyecto; ajusta si tu vehículo usa otra)
 - Verifica los pines `CAN_TX_PIN` / `CAN_RX_PIN` y el cableado del transceptor
-- El bus CAN necesita terminación de 120 Ω en cada extremo
-- Si el Serial Monitor muestra `[CAN] Bus-off detectado`, el propio firmware se recupera solo — si se repite mucho, revisa la terminación/cableado
+- Comprueba que has descomentado y rellenado el bloque 5/5 de `config.h` — si lo dejas tal cual viene (comentado), el firmware no transmite ni lee ninguna señal (`[CAN] 0 señales` en el Serial Monitor)
+- Si el Serial Monitor muestra `[CAN] Bus-off detectado`, el propio firmware se recupera solo — si se repite mucho, revisa la terminación del bus/cableado
 
 ---
 
