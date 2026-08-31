@@ -309,12 +309,12 @@ export default function DashboardContent() {
   void loading; // usado implícitamente via isConfigured + telemetry===null
 
   return (
-    <div className="min-h-screen bg-black text-zinc-300 font-sans selection:bg-cyan-500/30 pb-24 md:pb-8">
+    <div className="min-h-[100dvh] md:h-[100dvh] md:overflow-y-auto bg-black text-zinc-300 font-sans selection:bg-cyan-500/30 pb-24 md:pb-0">
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_-20%,_#1e1b4b_0%,_#000_80%)] pointer-events-none" />
 
-      <div className="relative max-w-7xl mx-auto p-4 md:p-8">
+      <div className="relative max-w-7xl mx-auto p-4 md:p-6 md:h-full md:flex md:flex-col">
         {!isConfigured && (
-          <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-4 animate-pulse">
+          <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-4 animate-pulse md:shrink-0">
             <div className="p-2 bg-amber-500/20 rounded-lg text-amber-500">
               <ShieldCheck size={20} />
             </div>
@@ -325,7 +325,7 @@ export default function DashboardContent() {
           </div>
         )}
 
-        <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mb-3 md:mb-8">
+        <header className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 mb-3 md:mb-6 md:shrink-0">
           <h1 className="text-lg md:text-2xl font-black text-white tracking-tight mr-0.5">CanRider</h1>
 
           <div className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
@@ -369,18 +369,18 @@ export default function DashboardContent() {
         </header>
 
         {/* Pestaña LIVE (móvil: solo esta sección; escritorio: siempre visible) */}
-        <div className={mobileTab === 'live' ? '' : 'hidden md:block'}>
+        <div className={`md:shrink-0 ${mobileTab === 'live' ? '' : 'hidden md:block'}`}>
           {/* Stats principales */}
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-2.5 md:gap-6 mb-3 md:mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-2.5 md:gap-4 mb-3 md:mb-4">
             {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
           </div>
 
           {/* Stats CAN — solo visibles cuando el bus ha enviado datos */}
           {hasCAN && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4 mb-6 md:mb-10">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-3 mb-6 md:mb-4">
               {canStats.map((stat) => stat.value != null && (
-                <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-3.5 py-3 md:px-5 md:py-4 rounded-xl md:rounded-2xl transition-all hover:bg-zinc-900/50`}>
-                  <div className="flex items-center gap-2 mb-1 md:mb-2">
+                <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-3.5 py-3 md:px-4 md:py-2.5 rounded-xl md:rounded-2xl transition-all hover:bg-zinc-900/50`}>
+                  <div className="flex items-center gap-2 mb-1 md:mb-1">
                     <stat.icon size={14} className={stat.color} />
                     <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase truncate">{stat.label}</p>
                   </div>
@@ -394,9 +394,9 @@ export default function DashboardContent() {
           )}
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
+        <div className="grid lg:grid-cols-3 gap-8 md:flex-1 md:min-h-0">
           {/* Mapa — pestaña MAP en móvil */}
-          <div className={`lg:col-span-2 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-auto ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
+          <div className={`lg:col-span-2 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-full ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
             <div className="p-5 border-b border-white/5 flex items-center justify-between bg-zinc-950/20">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-red-500/10 text-red-500">
@@ -457,7 +457,7 @@ export default function DashboardContent() {
                 </button>
               )}
             </div>
-            <div className="flex-1 relative md:min-h-[450px]">
+            <div className="flex-1 relative md:min-h-[300px]">
               <Map
                 center={currentPosition}
               />
@@ -466,8 +466,8 @@ export default function DashboardContent() {
           </div>
 
           {/* Historial de viajes — pestaña TRIPS en móvil */}
-          <div className={`bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl ${mobileTab === 'trips' ? 'block' : 'hidden md:block'}`}>
-            <div className="flex items-center justify-between mb-8">
+          <div className={`bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl md:h-full md:flex md:flex-col md:overflow-hidden ${mobileTab === 'trips' ? 'block' : 'hidden md:block'}`}>
+            <div className="flex items-center justify-between mb-8 md:shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
                   <RouteIcon size={18} />
@@ -476,7 +476,7 @@ export default function DashboardContent() {
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 md:flex-1 md:min-h-0 md:overflow-y-auto">
               {trips.length > 0 ? (
                 trips.map((trip) => {
                   const date = new Date(trip.start_time)
