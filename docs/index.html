@@ -448,6 +448,7 @@
   <nav class="rail" aria-label="Progreso de la guía">
     <p class="rail-title">Pasos</p>
     <ol id="railList">
+      <li><a href="#capacidades">Qué hace el firmware</a></li>
       <li><a href="#necesitas">Qué necesitas</a></li>
       <li><a href="#supabase-proyecto">1 · Proyecto Supabase</a></li>
       <li><a href="#supabase-tablas">2 · Crear las tablas</a></li>
@@ -524,6 +525,22 @@
       <p>Este proyecto se publica <b>tal cual, sin garantía de ningún tipo</b>. Vas a manipular el bus CAN real de tu vehículo, su instalación eléctrica y su batería — un cableado mal hecho o una configuración equivocada (por ejemplo, un frame CAN o un byte mal puesto en <code>config.h</code>) puede dañar el vehículo, sus baterías o su electrónica.</p>
       <p><b>Lo haces bajo tu propia cuenta y riesgo.</b> Ni el autor ni quienes colaboran en este proyecto se hacen responsables de ningún daño, avería o problema derivado de una instalación, configuración o uso incorrecto.</p>
     </div>
+
+    <section id="capacidades" class="lead-box">
+      <h3>Qué hace el firmware</h3>
+      <ul class="checklist">
+        <li><b>Lee y decodifica el bus CAN</b> de la moto — hasta 32 señales configurables (trama + byte + escala + signo), con extracción de bits individuales (flags) y "modo dual" para escuchar dos identificadores de trama con una sola señal</li>
+        <li><b>Solo transmite la hora</b> al panel de la moto, nunca nada más — añadir cualquier trama nueva de transmisión exige tocar el propio firmware, no basta con editar <code>config.h</code>, a propósito</li>
+        <li><b>Se recupera solo de un bus-off</b> (el controlador CAN se desconecta del bus por errores) sin necesitar reiniciar el ESP32 a mano</li>
+        <li><b>Posición por GPS</b>, con <b>triangulación por antena de red (LBS)</b> como reserva cuando no hay cobertura de satélites — cada lectura indica de qué fuente viene</li>
+        <li><b>Hora de red con huso horario correcto</b> (la toma del operador, corrige horario de verano/invierno) — y no transmite la hora al CAN hasta que es válida, para no mandar un reloj con datos basura</li>
+        <li><b>Envía telemetría cada 15 segundos</b> a Supabase: posición, velocidad, batería del propio ESP32, señal de red, y todas las señales CAN leídas</li>
+        <li><b>Detecta inicio y fin de cada viaje por el propio bus CAN</b> — moto encendida = tramas en el bus, apagada = silencio — en vez de por velocidad GPS; guarda distancia, velocidad máxima, duración y batería consumida</li>
+        <li><b>Avisa de movimiento sin CAN</b>: si el GPS mide que la moto se mueve mientras el bus CAN lleva varios segundos en silencio (apagada), lo marca como posible sustracción — la moto no se mueve sola apagada</li>
+        <li><b>Aguanta roaming inestable</b> — reintentos con espera entre fallos y reconexión completa de red tras fallos consecutivos, en vez de machacar la red del operador</li>
+        <li><b>Dos placas soportadas</b> — LilyGo T-SIM7000G y T-A7670G — con los pines de cada una ya resueltos: solo hay que elegir cuál tienes en <code>config.h</code></li>
+      </ul>
+    </section>
 
     <section id="necesitas" class="lead-box">
       <h3>Qué vas a necesitar antes de empezar</h3>
@@ -894,7 +911,7 @@
         <li>Rellena la URL y anon key de Supabase, el <code>VEHICLE_ID</code> y el modelo de placa.</li>
       </ol>
 
-      <p>Aparecerán sensores de batería A y B de la moto, estado de carga, batería del ESP32, velocidad, señal de red, seguimiento GPS y datos del último viaje.</p>
+      <p>Aparecerán sensores de batería A y B de la moto, estado de carga, batería del ESP32, velocidad, señal de red, seguimiento GPS, datos del último viaje, y un sensor binario de "movimiento sin CAN" para montar tu propia alerta (notificación al móvil, sirena...) si la moto se mueve estando apagada.</p>
     </section>
 
     <!-- PROBLEMAS -->

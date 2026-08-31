@@ -18,6 +18,22 @@ import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 
+// Algunos campos CAN (moto_battery, moto_battery_b, bms_charging...) llegan
+// null en una fila cuando esa lectura concreta no se completó a tiempo del
+// envío — no significa que el dato ya no exista, así que en vez de pisar el
+// estado con ese null, se conserva el último valor no-null que se vio.
+function mergeTelemetry(prev: any, next: any) {
+  if (!next) return prev;
+  if (!prev) return next;
+  const merged: any = { ...next };
+  for (const key of Object.keys(next)) {
+    if (next[key] === null || next[key] === undefined) {
+      if (prev[key] !== undefined) merged[key] = prev[key];
+    }
+  }
+  return merged;
+}
+
 const Map = dynamic(() => import('@/components/Map'), {
   ssr: false,
   loading: () => (
@@ -69,7 +85,7 @@ export default function DashboardContent() {
         .single();
 
       if (telData) {
-        setTelemetry(telData);
+        setTelemetry((prev: any) => mergeTelemetry(prev, telData));
         if (telData.latitude && telData.longitude) {
           setCurrentPosition([telData.latitude, telData.longitude]);
           setHasLiveFix(true);
@@ -95,7 +111,7 @@ export default function DashboardContent() {
         { event: 'INSERT', schema: 'public', table: 'telemetry' },
         (payload) => {
           const newData = payload.new;
-          setTelemetry(newData);
+          setTelemetry((prev: any) => mergeTelemetry(prev, newData));
           if (newData.latitude && newData.longitude) {
             setCurrentPosition([newData.latitude, newData.longitude]);
             setHasLiveFix(true);

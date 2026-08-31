@@ -49,6 +49,5 @@ struct TripState {
     float    maxSpeed    = 0;
     float    lastLat     = 0, lastLon = 0;
     bool     hasLastPos  = false;
-    uint32_t stopSince   = 0;
     int      sy, sm, sd, sh, smin, ss;
 };

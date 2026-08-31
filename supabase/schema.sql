@@ -83,6 +83,10 @@ CREATE POLICY "lectura autenticada"
 --   battery_voltage (tensión del ESP32/LiPo, NO la de la moto), is_charging,
 --   signal_strength, position_source ('gps' o 'lbs' — de dónde viene la
 --   posición cuando no hay cobertura GPS), timestamp
+--   moving_without_can → true si el GPS mide movimiento real mientras el
+--   bus CAN lleva 8s+ en silencio (moto apagada) — la moto no se mueve
+--   sola apagada, así que esto es indicio de sustracción/transporte sin
+--   llave. Ver CAN_ALIVE_TIMEOUT_MS/THEFT_SPEED_KMH en main/main.ino.
 --
 -- Columnas CAN (pack de la moto, ver supabase/seed_cpx.sql si lo tienes):
 --   soc             → State of Charge del pack EV (%)
@@ -107,6 +111,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
     longitude           float,
     speed               float,
     position_source     text,
+    moving_without_can  boolean,        -- GPS en movimiento con el bus CAN en silencio: posible sustracción
 
     -- Batería del módulo (AT+CBC — ESP32/LiPo)
     battery_level       int,
@@ -142,6 +147,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
 -- Por si la tabla ya existía de una versión anterior sin estas columnas:
 ALTER TABLE telemetry
   ADD COLUMN IF NOT EXISTS position_source     text,
+  ADD COLUMN IF NOT EXISTS moving_without_can  boolean,
   ADD COLUMN IF NOT EXISTS soc                 float,
   ADD COLUMN IF NOT EXISTS pack_voltage        float,
   ADD COLUMN IF NOT EXISTS battery_current     float,
@@ -181,7 +187,9 @@ CREATE POLICY "select anon"
 -- Tabla 3: trips
 -- ─────────────────────────────────────────────────────────────────────────
 -- El firmware inserta una fila al final de cada viaje.
--- Un viaje comienza cuando speed >= 5 km/h y termina tras 2 min parado.
+-- Un viaje comienza con la primera trama CAN recibida (moto encendida) y
+-- termina cuando el bus lleva 8s sin ninguna trama (moto apagada) — no se
+-- basa en la velocidad GPS. Distancia y velocidad máxima sí vienen del GPS.
 
 CREATE TABLE IF NOT EXISTS trips (
     id                    uuid        DEFAULT gen_random_uuid() PRIMARY KEY,

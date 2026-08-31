@@ -609,6 +609,14 @@ void setupCAN() {
         Serial.println("[CAN] TWAI listo");
 }
 
+// Marca de tiempo de la última trama CAN recibida, sea cual sea (conocida o
+// no) — se usa como señal de "moto encendida": el bus solo tiene tráfico
+// cuando el propio sistema eléctrico de la moto está arrancado. volatile
+// porque la escribe canTask() (core 0) y la lee loop() (core 1); un solo
+// uint32_t alineado se lee/escribe de forma atómica en el ESP32, no hace
+// falta mutex para esto.
+static volatile uint32_t lastCanFrameMs = 0;
+
 void canTask(void*) {
     for (;;) {
         uint32_t now = millis();
@@ -687,6 +695,7 @@ void canTask(void*) {
         // — Recepción (no bloqueante: lee todo lo que haya en la cola) —
         twai_message_t rx;
         while (twai_receive(&rx, 0) == ESP_OK) {
+            lastCanFrameMs = millis();   // cualquier trama cuenta, conocida o no
             if (xSemaphoreTake(canMux, pdMS_TO_TICKS(5)) == pdTRUE) {
                 parseCANFrame(rx);
                 xSemaphoreGive(canMux);
@@ -761,15 +770,32 @@ bool httpPostTo(const String& tablePath, const String& body) {
 #endif
 
 // ── Seguimiento de viajes ─────────────────────────────────────────────────────
-// Un viaje comienza cuando speed >= TRIP_START_KMH y termina cuando
-// permanece por debajo de TRIP_END_KMH durante TRIP_END_MS consecutivos.
-// La distancia se acumula con la fórmula de Haversine entre lecturas GPS.
+// Un viaje empieza en cuanto se recibe la primera trama CAN (la moto se ha
+// encendido de verdad) y termina cuando el bus lleva CAN_ALIVE_TIMEOUT_MS
+// sin ninguna trama (la moto se ha apagado) — no cuando el GPS mide poca
+// velocidad. Antes se usaba un umbral de velocidad GPS (arrancaba a partir
+// de 5 km/h, cerraba tras 2 min parado sin subir de 2 km/h): eso se saltaba
+// trayectos cortos que nunca llegaban a 5 km/h y tardaba 2 min de más en
+// cerrar el viaje al llegar. El bus CAN es una señal directa de "encendida/
+// apagada", así que no hace falta inferirlo por velocidad.
+// Distancia y velocidad máxima se siguen calculando por GPS (Haversine
+// entre lecturas), igual que antes.
 
-#define TRIP_START_KMH  5.0f
-#define TRIP_END_KMH    2.0f
-#define TRIP_END_MS     120000UL   // 2 min parado para cerrar el viaje
+#define CAN_ALIVE_TIMEOUT_MS 8000UL   // sin ninguna trama CAN durante esto = moto apagada
+
+// GPS moviéndose de verdad (no ruido de posición en reposo) mientras el bus
+// CAN está en silencio (moto apagada, ver canBusAlive()) no tiene una
+// explicación normal: la moto no se mueve sola apagada. Es la firma de que
+// la están transportando sin la llave — p.ej. cargada en una furgoneta.
+#define THEFT_SPEED_KMH 5.0f
 
 static TripState tripState;
+
+static bool canBusAlive() {
+    uint32_t last = lastCanFrameMs;   // volatile, lectura atómica
+    if (last == 0) return false;      // nunca se ha visto ninguna trama desde el arranque
+    return (millis() - last) < CAN_ALIVE_TIMEOUT_MS;
+}
 
 static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
     const float R = 6371.0f;
@@ -783,11 +809,9 @@ static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
 
 // Devuelve true si el viaje acaba de terminar (se usó httpPostTo → caller debe
 // hacer state = HTTP_SETUP para restaurar la sesión de telemetría).
-bool updateTrip(float speed, float soc, float lat, float lon,
+bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
                 bool hasPos, const TimeRef& t) {
-    bool moving = speed >= TRIP_START_KMH;
-
-    if (!tripState.active && moving) {
+    if (!tripState.active && busAlive) {
         tripState.active     = true;
         tripState.startMs    = millis();
         tripState.startSoc   = soc;
@@ -796,10 +820,9 @@ bool updateTrip(float speed, float soc, float lat, float lon,
         tripState.hasLastPos = hasPos;
         tripState.lastLat    = lat;
         tripState.lastLon    = lon;
-        tripState.stopSince  = 0;
         tripState.sy = t.year; tripState.sm = t.month; tripState.sd = t.day;
         tripState.sh = t.hour; tripState.smin = t.min; tripState.ss = t.sec;
-        Serial.println("[TRIP] Inicio de viaje");
+        Serial.println("[TRIP] Inicio de viaje (CAN activo)");
         return false;
     }
 
@@ -811,41 +834,35 @@ bool updateTrip(float speed, float soc, float lat, float lon,
         tripState.distanceKm += haversineKm(tripState.lastLat, tripState.lastLon, lat, lon);
     if (hasPos) { tripState.lastLat = lat; tripState.lastLon = lon; tripState.hasLastPos = true; }
 
-    if (speed < TRIP_END_KMH) {
-        if (tripState.stopSince == 0) tripState.stopSince = millis();
-        else if (millis() - tripState.stopSince >= TRIP_END_MS) {
-            uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
+    if (!busAlive) {
+        uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
 
-            char startISO[21], endISO[21], durStr[12];
-            snprintf(startISO, sizeof(startISO), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                     tripState.sy, tripState.sm, tripState.sd,
-                     tripState.sh, tripState.smin, tripState.ss);
-            snprintf(endISO,   sizeof(endISO),   "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                     t.year, t.month, t.day, t.hour, t.min, t.sec);
-            snprintf(durStr,   sizeof(durStr),   "%uh %02umin",
-                     (unsigned)(durMin / 60), (unsigned)(durMin % 60));
+        char startISO[21], endISO[21], durStr[12];
+        snprintf(startISO, sizeof(startISO), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                 tripState.sy, tripState.sm, tripState.sd,
+                 tripState.sh, tripState.smin, tripState.ss);
+        snprintf(endISO,   sizeof(endISO),   "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                 t.year, t.month, t.day, t.hour, t.min, t.sec);
+        snprintf(durStr,   sizeof(durStr),   "%uh %02umin",
+                 (unsigned)(durMin / 60), (unsigned)(durMin % 60));
 
-            String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
-            body += ",\"start_time\":\""         + String(startISO)                    + "\"";
-            body += ",\"end_time\":\""            + String(endISO)                     + "\"";
-            body += ",\"distance\":"              + String(tripState.distanceKm, 2);
-            body += ",\"duration\":\""            + String(durStr)                     + "\"";
-            body += ",\"max_speed\":"             + String(tripState.maxSpeed, 1);
-            body += ",\"start_battery_level\":"   + String(tripState.startSoc, 1);
-            body += ",\"end_battery_level\":"     + String(soc, 1);
-            body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
-            body += "}";
+        String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
+        body += ",\"start_time\":\""         + String(startISO)                    + "\"";
+        body += ",\"end_time\":\""            + String(endISO)                     + "\"";
+        body += ",\"distance\":"              + String(tripState.distanceKm, 2);
+        body += ",\"duration\":\""            + String(durStr)                     + "\"";
+        body += ",\"max_speed\":"             + String(tripState.maxSpeed, 1);
+        body += ",\"start_battery_level\":"   + String(tripState.startSoc, 1);
+        body += ",\"end_battery_level\":"     + String(soc, 1);
+        body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
+        body += "}";
 
-            Serial.print("[TRIP] Fin: "); Serial.println(body);
-            if (!httpPostTo("/rest/v1/trips", body))
-                Serial.println("[TRIP] Error al guardar viaje");
+        Serial.print("[TRIP] Fin (CAN en silencio): "); Serial.println(body);
+        if (!httpPostTo("/rest/v1/trips", body))
+            Serial.println("[TRIP] Error al guardar viaje");
 
-            tripState.active    = false;
-            tripState.stopSince = 0;
-            return true;   // sesión HTTP consumida → caller debe re-inicializar
-        }
-    } else {
-        tripState.stopSince = 0;
+        tripState.active = false;
+        return true;   // sesión HTTP consumida → caller debe re-inicializar
     }
     return false;
 }
@@ -997,9 +1014,15 @@ void loop() {
         nextPost = millis() + POST_INTERVAL_MS;
 
         readGPS();
-        BatReading bat  = readBattery();
-        int16_t    rssi = readSignalStrength();
-        TimeRef    t    = snapshotTime();
+        BatReading bat      = readBattery();
+        int16_t    rssi     = readSignalStrength();
+        TimeRef    t        = snapshotTime();
+        bool       busAlive = canBusAlive();
+
+        // GPS moviéndose sin CAN = posible sustracción, ver THEFT_SPEED_KMH.
+        bool movingWithoutCan = t.hasPos && !busAlive && t.speed_kmh >= THEFT_SPEED_KMH;
+        if (movingWithoutCan)
+            Serial.println("[ALERTA] Movimiento GPS sin tramas CAN — posible sustracción");
 
         String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
         if (t.hasPos) {
@@ -1012,6 +1035,7 @@ void loop() {
         } else {
             body += ",\"speed\":0";
         }
+        body += ",\"moving_without_can\":" + String(movingWithoutCan ? "true" : "false");
         if (bat.valid) {
             body += ",\"battery_level\":"   + String(bat.pct);
             body += ",\"battery_voltage\":" + String(bat.volts, 3);
@@ -1021,12 +1045,17 @@ void loop() {
             body += ",\"signal_strength\":" + String(rssi);
         }
 
-        // Añadir señales CAN decodificadas (solo RX); capturar soc para viajes
-        float currentSoc = 0;
+        // Añadir señales CAN decodificadas (solo RX); capturar soc para viajes.
+        // La CPX reporta el SoC por 0x540 (moto_battery) o 0x541
+        // (moto_battery_b) según el "modo de batería" activo en el BMS —
+        // en la práctica solo uno de los dos trae datos reales a la vez,
+        // así que se usa el que no esté a cero.
+        float socA = 0, socB = 0;
         if (xSemaphoreTake(canMux, pdMS_TO_TICKS(10)) == pdTRUE) {
             for (int i = 0; i < canSignalCount; i++) {
                 if (canSignals[i].direction == 't') continue;  // TX no va a telemetría
-                if (strcmp(canSignals[i].name, "soc") == 0) currentSoc = canSignals[i].value;
+                if (strcmp(canSignals[i].name, "moto_battery")   == 0) socA = canSignals[i].value;
+                if (strcmp(canSignals[i].name, "moto_battery_b") == 0) socB = canSignals[i].value;
                 if (canSignals[i].updated) {
                     body += ",\"" + String(canSignals[i].name) + "\":"
                           + String(canSignals[i].value, canSignals[i].byteLen == 1 ? 0 : 2);
@@ -1035,6 +1064,7 @@ void loop() {
             }
             xSemaphoreGive(canMux);
         }
+        float currentSoc = (socA > 0) ? socA : socB;
         body += "}";
 
         Serial.print("[POST] "); Serial.println(body);
@@ -1063,7 +1093,7 @@ void loop() {
         }
 
         // Actualizar viaje; si termina, re-inicializar sesión HTTP
-        if (updateTrip(t.speed_kmh, currentSoc, t.lat, t.lon, t.hasPos, t))
+        if (updateTrip(busAlive, t.speed_kmh, currentSoc, t.lat, t.lon, t.hasPos, t))
             state = HTTP_SETUP;
         break;
     }

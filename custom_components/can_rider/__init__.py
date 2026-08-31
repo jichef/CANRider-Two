@@ -34,7 +34,15 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         "Content-Type": "application/json",
     }
 
+    # Algunos campos CAN (moto_battery, moto_battery_b, bms_charging...)
+    # llegan null en una fila cuando esa lectura concreta no se completó a
+    # tiempo del envío. Como cada refresco sustituye "telemetry" entero,
+    # sin este merge esas entidades pasarían a "unknown" en vez de
+    # conservar el último valor conocido.
+    last_telemetry: dict = {}
+
     async def async_update_data():
+        nonlocal last_telemetry
         try:
             async with asyncio.timeout(15):
                 results = {"telemetry": None, "last_trip": None}
@@ -47,7 +55,14 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
                     if resp.status == 200:
                         data = await resp.json()
                         if data:
-                            results["telemetry"] = data[0]
+                            row = data[0]
+                            merged = dict(last_telemetry)
+                            merged.update({k: v for k, v in row.items() if v is not None})
+                            for k, v in row.items():
+                                if v is None and k not in merged:
+                                    merged[k] = None
+                            last_telemetry = merged
+                            results["telemetry"] = merged
 
                 trip_url = (
                     f"{url}/rest/v1/trips"
