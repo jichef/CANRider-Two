@@ -104,8 +104,31 @@
     padding: 48px 24px 120px;
   }
   @media (max-width: 900px) {
-    .shell { grid-template-columns: minmax(0, 1fr); padding-top: 24px; }
+    .shell { grid-template-columns: minmax(0, 1fr); padding: 24px 16px 80px; }
     .rail { display: none; }
+  }
+
+  /* ── Mobile jump nav (reemplaza el rail lateral cuando se oculta) ── */
+  .mobile-nav { display: none; }
+  @media (max-width: 900px) {
+    .mobile-nav {
+      display: block;
+      position: sticky;
+      top: 10px;
+      z-index: 10;
+      margin-bottom: 24px;
+    }
+    .mobile-nav select {
+      width: 100%;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--paper-raised);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 14px;
+      box-shadow: var(--shadow);
+    }
   }
 
   /* ── Left rail ────────────────────────────────────────────────── */
@@ -377,11 +400,17 @@
   .callout p + p { margin-top: 8px; }
 
   /* ── Pin table ────────────────────────────────────────────────── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 4px 0 20px;
+    border-radius: 10px;
+  }
   table.pins {
     width: 100%;
+    min-width: 420px;
     border-collapse: collapse;
     font-size: 14px;
-    margin: 4px 0 20px;
+    margin: 0;
     background: var(--paper-raised);
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -391,6 +420,12 @@
     text-align: left;
     padding: 9px 14px;
     border-bottom: 1px solid var(--line);
+    overflow-wrap: anywhere;
+  }
+  table.pins td code { overflow-wrap: anywhere; white-space: normal; }
+  @media (max-width: 480px) {
+    table.pins { font-size: 12.5px; }
+    table.pins th, table.pins td { padding: 8px 9px; }
   }
   table.pins th {
     font-family: 'IBM Plex Mono', monospace;
@@ -463,6 +498,25 @@
       <li><a href="#problemas">Si algo falla</a></li>
     </ol>
   </nav>
+
+  <div class="mobile-nav">
+    <select onchange="if (this.value) { location.hash = this.value; this.selectedIndex = 0; }">
+      <option value="">Ir a…</option>
+      <option value="#capacidades">Qué hace el firmware</option>
+      <option value="#necesitas">Qué necesitas</option>
+      <option value="#supabase-proyecto">1 · Proyecto Supabase</option>
+      <option value="#supabase-tablas">2 · Crear las tablas</option>
+      <option value="#supabase-claves">3 · Copiar las claves</option>
+      <option value="#vercel">4 · Publicar el portal</option>
+      <option value="#arduino">5 · Preparar Arduino IDE</option>
+      <option value="#confighs">6 · Editar config.h</option>
+      <option value="#cableado">7 · Cableado del CAN</option>
+      <option value="#flashear">8 · Flashear la placa</option>
+      <option value="#comprobar">9 · Comprobar que va</option>
+      <option value="#ha">Extra · Home Assistant</option>
+      <option value="#problemas">Si algo falla</option>
+    </select>
+  </div>
 
   <header class="top">
     <span class="eyebrow">CanRider · guía de instalación</span>
@@ -651,6 +705,7 @@
         <li>Antes de darle a <i>Deploy</i>, despliega <span class="ui-path">Environment Variables</span> y añade estas tres:</li>
       </ol>
 
+      <div class="table-wrap">
       <table class="pins">
         <thead><tr><th>Variable</th><th>Valor</th></tr></thead>
         <tbody>
@@ -659,6 +714,7 @@
           <tr><td><code>NEXT_PUBLIC_VEHICLE_ID</code></td><td>el UUID que generaste en el paso 2</td></tr>
         </tbody>
       </table>
+      </div>
 
       <p>Pulsa <b>Deploy</b> y espera un par de minutos. Al terminar tendrás una URL pública tipo <code>tu-proyecto.vercel.app</code> con el panel — aunque todavía sin datos, porque la moto no ha enviado nada.</p>
 
@@ -786,6 +842,7 @@
       <div class="step-head"><span class="step-num">PASO 07</span><h2>Conecta el bus CAN</h2></div>
       <p class="step-sub">Cuatro cables entre el ESP32 y el transceptor, más los dos del propio bus.</p>
 
+      <div class="table-wrap">
       <table class="pins">
         <thead><tr><th>Señal</th><th>T-SIM7000G</th><th>T-A7670G</th><th>Transceptor CAN</th></tr></thead>
         <tbody>
@@ -795,6 +852,7 @@
           <tr><td>Tierra</td><td class="pin">GND</td><td class="pin">GND</td><td>GND</td></tr>
         </tbody>
       </table>
+      </div>
 
       <div class="callout note">
         <span class="k">Placas distintas, pines distintos</span>
