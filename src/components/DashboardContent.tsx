@@ -185,6 +185,7 @@ export default function DashboardContent() {
       label: 'BATERÍA A',
       value: socA != null ? `${Math.round(socA)}` : '---',
       unit: socA != null ? '%' : '',
+      pct: socA != null ? Math.max(0, Math.min(100, socA)) : null,
       icon: Battery,
       color: 'text-emerald-400',
       glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
@@ -194,6 +195,7 @@ export default function DashboardContent() {
       label: 'BATERÍA B',
       value: socB != null ? `${Math.round(socB)}` : '---',
       unit: socB != null ? '%' : '',
+      pct: socB != null ? Math.max(0, Math.min(100, socB)) : null,
       icon: Battery,
       color: 'text-teal-400',
       glow: 'shadow-[0_0_15px_rgba(45,212,191,0.3)]',
@@ -203,6 +205,7 @@ export default function DashboardContent() {
       label: 'VELOCIDAD',
       value: telemetry?.speed != null ? Math.round(telemetry.speed) : '---',
       unit: telemetry?.speed != null ? 'km/h' : '',
+      pct: null,
       icon: Navigation,
       color: 'text-cyan-400',
       glow: 'shadow-[0_0_15px_rgba(34,211,238,0.3)]',
@@ -212,6 +215,7 @@ export default function DashboardContent() {
       label: 'TENSIÓN',
       value: telemetry?.pack_voltage != null ? telemetry.pack_voltage.toFixed(1) : '---',
       unit: telemetry?.pack_voltage != null ? 'V' : '',
+      pct: null,
       icon: Zap,
       color: 'text-amber-400',
       glow: 'shadow-[0_0_15px_rgba(251,191,36,0.3)]',
@@ -221,6 +225,7 @@ export default function DashboardContent() {
       label: 'SISTEMA',
       value: telemetry ? (isCharging ? 'CHARGING' : 'READY') : '---',
       unit: '',
+      pct: null,
       icon: ShieldCheck,
       color: isCharging ? 'text-amber-400' : (telemetry ? 'text-indigo-400' : 'text-zinc-600'),
       glow: isCharging ? 'shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]',
@@ -230,6 +235,7 @@ export default function DashboardContent() {
       label: 'SEÑAL',
       value: telemetry?.signal_strength != null ? String(telemetry.signal_strength) : '---',
       unit: telemetry?.signal_strength != null ? 'dBm' : '',
+      pct: null,
       icon: Signal,
       color: telemetry?.signal_strength != null && telemetry.signal_strength > -85
         ? 'text-fuchsia-400'
@@ -286,9 +292,11 @@ export default function DashboardContent() {
         <div className={`p-3 rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
           <stat.icon size={22} />
         </div>
-        <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
-          <div className={`h-full bg-current ${stat.color} w-2/3 opacity-50`} />
-        </div>
+        {stat.pct != null && (
+          <div className="h-1 w-12 bg-zinc-800 rounded-full overflow-hidden">
+            <div className={`h-full bg-current ${stat.color} opacity-70`} style={{ width: `${stat.pct}%` }} />
+          </div>
+        )}
       </div>
       <p className="text-[10px] font-black tracking-[0.2em] text-zinc-500 mb-1 uppercase">{stat.label}</p>
       <div className="flex items-baseline gap-1">
@@ -319,9 +327,11 @@ export default function DashboardContent() {
 
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-cyan-500">
-              <Activity size={18} className="animate-pulse" />
-              <span className="text-xs font-black tracking-[0.2em] uppercase">Telemetry Link Active</span>
+            <div className={`flex items-center gap-2 ${isConfigured && telemetry && !isStale ? 'text-cyan-500' : 'text-red-500'}`}>
+              <Activity size={18} className={isConfigured && telemetry && !isStale ? 'animate-pulse' : ''} />
+              <span className="text-xs font-black tracking-[0.2em] uppercase">
+                {isConfigured && telemetry && !isStale ? 'Telemetry Link Active' : 'Telemetry Link Lost'}
+              </span>
             </div>
             {telemetry?.timestamp && (
               <div className="flex items-center gap-2 text-zinc-500 font-mono text-[10px]">
@@ -365,7 +375,10 @@ export default function DashboardContent() {
               </div>
             )}
 
-            <div className="pr-4 text-xs font-mono text-zinc-500">
+            <div
+              className="pr-4 text-xs font-mono text-zinc-500 truncate max-w-[110px] md:max-w-none"
+              title={telemetry?.motorcycle_id}
+            >
               {telemetry?.motorcycle_id || 'ESP32_NODE_01'}
             </div>
           </div>
