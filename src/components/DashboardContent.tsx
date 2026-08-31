@@ -327,6 +327,7 @@ export default function DashboardContent() {
 
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-12 gap-3 md:gap-6">
           <div className="space-y-1">
+            <h1 className="text-xl md:text-2xl font-black text-white tracking-tight">CanRider</h1>
             <div className={`flex items-center gap-2 ${isConfigured && telemetry && !isStale ? 'text-cyan-500' : 'text-red-500'}`}>
               <Activity size={18} className={isConfigured && telemetry && !isStale ? 'animate-pulse' : ''} />
               <span className="text-xs font-black tracking-[0.2em] uppercase">
