@@ -328,10 +328,16 @@ export default function DashboardContent() {
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-12 gap-3 md:gap-6">
           <div className="space-y-1">
             <h1 className="text-xl md:text-2xl font-black text-white tracking-tight">CanRider</h1>
-            <div className={`flex items-center gap-2 ${isConfigured && telemetry && !isStale ? 'text-cyan-500' : 'text-red-500'}`}>
-              <Activity size={18} className={isConfigured && telemetry && !isStale ? 'animate-pulse' : ''} />
-              <span className="text-xs font-black tracking-[0.2em] uppercase">
-                {isConfigured && telemetry && !isStale ? 'Telemetry Link Active' : 'Telemetry Link Lost'}
+            <div className={`inline-flex items-center gap-1.5 md:gap-2 px-2.5 py-1.5 md:px-4 md:py-2 rounded-xl border transition-all ${
+              isConfigured && telemetry && !isStale
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                : 'bg-red-500/10 text-red-400 border-red-500/20'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${
+                isConfigured && telemetry && !isStale ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
+              }`} />
+              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
+                {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
               </span>
             </div>
             {telemetry?.timestamp && (
@@ -344,19 +350,6 @@ export default function DashboardContent() {
 
           <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 md:gap-4 bg-zinc-900/50 backdrop-blur-md border border-white/10 p-1 rounded-2xl">
-            <div className={`flex items-center gap-1.5 md:gap-2 px-2.5 py-1.5 md:px-4 md:py-2 rounded-xl border transition-all ${
-              isConfigured && telemetry && !isStale
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : 'bg-red-500/10 text-red-400 border-red-500/20'
-            }`}>
-              <div className={`w-2 h-2 rounded-full ${
-                isConfigured && telemetry && !isStale ? 'bg-emerald-500 animate-ping' : 'bg-red-500'
-              }`} />
-              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
-                {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
-              </span>
-            </div>
-
             {/* Batería interna ESP32 (AT+CBC) */}
             {telemetry?.battery_level != null && (
               <div className={`flex items-center gap-1.5 px-2 py-1.5 md:px-3 md:py-2 rounded-xl border transition-all ${
