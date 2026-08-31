@@ -2,7 +2,7 @@
 
 Sistema de telemetría en tiempo real para vehículos eléctricos con bus CAN. Lee los datos del BMS a través del bus CAN, los transmite vía LTE a una base de datos en la nube y los muestra en un portal web accesible desde cualquier dispositivo — sin depender de WiFi.
 
-> **¿Primera vez con esto?** Hay una guía paso a paso pensada para gente sin experiencia previa: [`docs/guia-instalacion.html`](docs/guia-instalacion.html). Ábrela en el navegador y sigue los pasos en orden.
+> **¿Primera vez con esto?** Hay una guía paso a paso pensada para gente sin experiencia previa: [`docs/index.html`](docs/index.html). Ábrela en el navegador y sigue los pasos en orden.
 
 ---
 
@@ -85,7 +85,7 @@ Estos pines ya vienen puestos automáticamente en `config.h.example` según la p
 
 ## Instalación paso a paso
 
-Para una guía visual y muy detallada, usa [`docs/guia-instalacion.html`](docs/guia-instalacion.html). Resumen rápido aquí:
+Para una guía visual y muy detallada, usa [`docs/index.html`](docs/index.html). Resumen rápido aquí:
 
 ### 1. Clonar el repositorio
 
@@ -239,7 +239,7 @@ CanRider/
 │   └── can_rider/          # Integración de Home Assistant
 │
 ├── docs/
-│   └── guia-instalacion.html   # Guía visual paso a paso
+│   └── index.html              # Guía visual paso a paso (GitHub Pages)
 │
 └── supabase/
     ├── schema.sql                    # Tabla can_signals

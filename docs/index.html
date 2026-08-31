@@ -1,3 +1,8 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Manual de Puesta en Marcha</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
@@ -150,7 +155,11 @@
     max-width: 760px;
     margin: 0 auto 8px;
   }
-  @media (min-width: 901px) { header.top { grid-column: 2; margin: 0 0 8px; } }
+  @media (min-width: 901px) {
+    header.top { grid-column: 2; margin: 0 0 8px; }
+    .rail { grid-column: 1; }
+    main { grid-column: 2; }
+  }
   .eyebrow {
     display: inline-flex;
     align-items: center;
@@ -431,6 +440,8 @@
   }
   @media (min-width: 901px) { footer { grid-column: 2; margin-left: 0; margin-right: 0; } }
 </style>
+</head>
+<body>
 
 <div class="shell">
 
@@ -856,3 +867,5 @@
     sections.forEach(function (s) { io.observe(s); });
   })();
 </script>
+</body>
+</html>
