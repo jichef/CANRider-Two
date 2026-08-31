@@ -1,17 +1,87 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// Copia este archivo como config.h y rellena los valores reales.
-// config.h está en .gitignore y NUNCA debe commitearse.
+// ════════════════════════════════════════════════════════════════════════
+//  CONFIG.H — plantilla de configuración de CanRider
+//  Copia este archivo como "config.h" (mismo directorio) y edita SOLO los
+//  bloques marcados con >>> CAMBIA ESTO <<<. El resto no hace falta tocarlo.
+//
+//  config.h está en .gitignore y NUNCA debe subirse a git — aquí van tus
+//  credenciales reales.
+// ════════════════════════════════════════════════════════════════════════
 
-// ── Módulo modem ──────────────────────────────────────────────────────────────
-// Descomenta el módulo que tienes. Solo puede estar activo uno.
-//   A7670G  → LilyGo T-A7670G  (LTE Cat-1, recomendado para velocidad de datos)
-//   SIM7000G → LilyGo T-SIM7000G (LTE Cat-M1/NB-IoT, menor consumo)
-#define MODEM_A7670G
-// #define MODEM_SIM7000G
 
-// — Define de placa para AT/utilities.h — no tocar —
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> CAMBIA ESTO 1/4 — Qué placa tienes                                │
+// └──────────────────────────────────────────────────────────────────────┘
+// Descomenta SOLO la línea de tu placa (quita el "//" de delante) y deja
+// la otra comentada. Solo puede estar activa una a la vez.
+//
+//   SIM7000G → LilyGo T-SIM7000G — RECOMENDADA, es la que se ha probado
+//              a fondo con moto real en este proyecto (LTE Cat-M1/NB-IoT,
+//              menor consumo, GPS integrado).
+//   A7670G   → LilyGo T-A7670G  (LTE Cat-1, más velocidad de datos, pero
+//              el GPS de esta variante suele ser un módulo externo aparte
+//              — revisa la guía si la usas).
+
+// #define MODEM_A7670G
+#define MODEM_SIM7000G
+
+
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> CAMBIA ESTO 2/4 — Tus datos de Supabase y del vehículo            │
+// └──────────────────────────────────────────────────────────────────────┘
+// SUPABASE_URL y SUPABASE_KEY: Supabase → tu proyecto → Project Settings
+// → API. Usa la "anon public key", NUNCA la "service_role key".
+// VEHICLE_ID: cualquier UUID único para esta moto — puedes generarlo en el
+// SQL Editor de Supabase con: select gen_random_uuid();
+
+#define SUPABASE_URL \
+"https://XXXXXXXXXXXXXXXXXXXX.supabase.co"
+#define SUPABASE_KEY \
+"TU_SUPABASE_ANON_KEY_AQUI"
+#define VEHICLE_ID "tu-uuid-de-vehiculo-aqui"
+
+
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> CAMBIA ESTO 3/4 — APN de tu SIM                                   │
+// └──────────────────────────────────────────────────────────────────────┘
+// El APN lo da tu operador (búscalo como "APN <tu operador> IoT/M2M" o
+// mira la web del operador de tu tarjeta SIM). Si tu SIM necesita usuario/
+// contraseña (poco habitual), rellena GPRS_USER/GPRS_PASS también.
+
+#define APN        "internet.tuoperadora.es"
+#define GPRS_USER  ""
+#define GPRS_PASS  ""
+
+
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> CAMBIA ESTO 4/4 (solo si tu moto va a otra velocidad) — Bus CAN   │
+// └──────────────────────────────────────────────────────────────────────┘
+// Los pines ya están puestos correctamente para cada placa (no hace falta
+// tocarlos salvo que tengas un cableado distinto). Lo único que sí varía
+// según el vehículo es la VELOCIDAD del bus — pregunta a quien te haya
+// pasado el protocolo CAN de tu moto, o pruébalo si no lo sabes.
+
+#if defined(MODEM_A7670G)
+  #define CAN_TX_PIN     22   // pines adyacentes del header T-A7670G,
+  #define CAN_RX_PIN     21   // evita GPIO33 (RING del módem)
+#elif defined(MODEM_SIM7000G)
+  #define CAN_TX_PIN     32
+  #define CAN_RX_PIN     33
+#endif
+
+//   TWAI_TIMING_CONFIG_500KBITS()  → 500 kbps (CAN automotriz estándar)
+//   TWAI_TIMING_CONFIG_250KBITS()  → 250 kbps (J1939 / algunos vehículos eléctricos)
+//   TWAI_TIMING_CONFIG_125KBITS()  → 125 kbps
+#define CAN_SPEED        TWAI_TIMING_CONFIG_250KBITS()
+
+
+// ════════════════════════════════════════════════════════════════════════
+//  A partir de aquí no hace falta tocar nada — son solo los "#define" que
+//  usa el resto del firmware para saber qué placa compilar.
+// ════════════════════════════════════════════════════════════════════════
+
 #if defined(MODEM_A7670G) && defined(MODEM_SIM7000G)
   #error "Solo puede estar descomentado UNO de MODEM_A7670G / MODEM_SIM7000G, no los dos"
 #elif defined(MODEM_A7670G)
@@ -22,29 +92,8 @@
   #error "Define MODEM_A7670G o MODEM_SIM7000G en config.h"
 #endif
 
-#define GPRS_USER ""
-#define GPRS_PASS ""
-
-#define APN        "internet.tuoperadora.es"
-// URL base del proyecto Supabase (sin path, sin barra final)
-#define SUPABASE_URL \
-"https://XXXXXXXXXXXXXXXXXXXX.supabase.co"
-#define SUPABASE_KEY \
-"TU_SUPABASE_ANON_KEY_AQUI"
-#define VEHICLE_ID "tu-uuid-de-vehiculo-aqui"
-
-// ── CAN bus ────────────────────────────────────────────────────────────────────
-// Pines del transceptor CAN (MCP2551, TJA1050, etc.) conectado al ESP32.
-// Ajusta según tu cableado; cualquier GPIO de salida sirve.
-#define CAN_TX_PIN       21
-#define CAN_RX_PIN       22
-
-// Velocidad del bus. Macros disponibles del driver TWAI del ESP32:
-//   TWAI_TIMING_CONFIG_500KBITS()  → 500 kbps (CAN automotriz estándar)
-//   TWAI_TIMING_CONFIG_250KBITS()  → 250 kbps (J1939 / vehículos industriales)
-//   TWAI_TIMING_CONFIG_125KBITS()  → 125 kbps
-#define CAN_SPEED        TWAI_TIMING_CONFIG_500KBITS()
-// Las tramas TX se configuran desde el portal web (Supabase can_signals),
-// no hay IDs hardcodeados en el firmware.
+// Las señales CAN de tu moto concreta (qué trama leer/emitir, en qué byte,
+// con qué escala) se definen en setupCANSignals() dentro de main.ino, no
+// aquí — búscalo y edítalo con los datos de tu vehículo.
 
 #endif

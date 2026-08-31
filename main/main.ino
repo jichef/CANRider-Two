@@ -457,6 +457,41 @@ void readGPS() {
     storeTime(t);
 }
 #else // SIM7000G
+
+// Respaldo cuando no hay fix GPS: posición aproximada por triangulación de
+// celda (LBS), resuelta por el propio operador a través del módem. Mucha
+// menos precisión que el GPS (de cientos de metros a varios km según la
+// zona), pero mejor que no tener nada mientras se consigue un fix real —
+// típicamente los primeros minutos tras arrancar, o en interior/garaje.
+static void readLBS() {
+    static uint32_t lastTry = 0;
+    if (millis() - lastTry < 60000) return;
+    lastTry = millis();
+
+    String resp = queryAT("AT+CLBS=1,1", "+CLBS:", 10000);
+    int colon = resp.indexOf(':');
+    if (colon < 0) return;
+    String d = resp.substring(colon + 2); d.trim();
+
+    String f[4]; int fi = 0, prev = 0;
+    for (int i = 0; i <= (int)d.length() && fi < 4; i++) {
+        if (i == (int)d.length() || d[i] == ',') { f[fi++] = d.substring(prev, i); prev = i + 1; }
+    }
+    // f[0]=código de resultado (0=OK) f[1]=lat f[2]=lon
+    if (fi < 3 || f[0] != "0") return;
+
+    // Ojo: no se toca t.capturedAt aquí — solo posición, no hora. Si se
+    // pisara con millis() actual sin también avanzar hour/min/sec, el
+    // cálculo de segundos transcurridos de txSignalByte() se resetearía a
+    // 0 con una hora ya vieja, y el reloj de la moto saltaría hacia atrás.
+    TimeRef t   = snapshotTime();
+    t.hasPos    = true;
+    t.lat       = f[1].toFloat();
+    t.lon       = f[2].toFloat();
+    t.speed_kmh = 0;  // LBS no da velocidad; no arrastrar la última del GPS
+    storeTime(t);
+}
+
 // AT+CGNSINF → "+CGNSINF: run,fix,YYYYMMDDHHmmSS.sss,lat,lon,alt,speed,course,..."
 // lat/lon ya en grados decimales (positivo=N/E, negativo=S/W)
 void readGPS() {
@@ -483,7 +518,7 @@ void readGPS() {
             modem.enableGPS(MODEM_GPS_ENABLE_GPIO, MODEM_GPS_ENABLE_LEVEL);
         }
     }
-    if (fi < 7 || f[1] != "1" || f[2].length() < 14) return;
+    if (fi < 7 || f[1] != "1" || f[2].length() < 14) { readLBS(); return; }
 
     TimeRef t   = snapshotTime();
     t.hasPos    = true;
@@ -613,42 +648,18 @@ void canTask(void*) {
                     if (s.byteStart < 8)
                         msg.data[s.byteStart] = txSignalByte(s.name, s.offsetVal, t, now);
                 }
-                // DIAGNÓSTICO TEMPORAL — comprobando si la trama de la hora
-                // llega realmente al bus tras conectar a la moto; quitar en
-                // cuanto se confirme.
-                esp_err_t txErr = twai_transmit(&msg, pdMS_TO_TICKS(5));
-                static uint32_t lastTxLog = 0;
-                if (millis() - lastTxLog > 5000) {
-                    lastTxLog = millis();
-                    Serial.printf("[CANDBG] TX frame=0x%X err=%d bus_state=%d tx_err_cnt=%d rx_err_cnt=%d\n",
-                                  (unsigned)tf.frameId, (int)txErr, (int)twaiSt.state,
-                                  twaiSt.tx_error_counter, twaiSt.rx_error_counter);
-                }
+                twai_transmit(&msg, pdMS_TO_TICKS(5));
             }
             xSemaphoreGive(canMux);
         }
 
         // — Recepción (no bloqueante: lee todo lo que haya en la cola) —
         twai_message_t rx;
-        static uint32_t rxCount = 0, lastRxLog = 0;
-        static uint32_t count540 = 0, count541 = 0;
         while (twai_receive(&rx, 0) == ESP_OK) {
-            rxCount++;
-            // DIAGNÓSTICO TEMPORAL — confirmar si 0x540/0x541 (baterías)
-            // aparecen realmente en el bus real; quitar en cuanto se sepa.
-            if (rx.identifier == 0x540) count540++;
-            if (rx.identifier == 0x541) count541++;
             if (xSemaphoreTake(canMux, pdMS_TO_TICKS(5)) == pdTRUE) {
                 parseCANFrame(rx);
                 xSemaphoreGive(canMux);
             }
-        }
-        // DIAGNÓSTICO TEMPORAL — cuántas tramas ha visto el bus en total;
-        // quitar en cuanto se confirme si el bus recibe algo.
-        if (millis() - lastRxLog > 5000) {
-            lastRxLog = millis();
-            Serial.printf("[CANDBG] tramas RX totales=%u (0x540=%u 0x541=%u)\n",
-                          (unsigned)rxCount, (unsigned)count540, (unsigned)count541);
         }
 
         vTaskDelay(pdMS_TO_TICKS(200));

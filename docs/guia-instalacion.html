@@ -1,0 +1,858 @@
+<title>Manual de Puesta en Marcha</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --paper:      #EEF1EE;
+    --paper-raised: #FFFFFF;
+    --ink:        #182220;
+    --ink-soft:   #4C5A56;
+    --ink-faint:  #7C8985;
+    --line:       #D3DAD5;
+    --amber:      #C96A1E;
+    --amber-soft: #F3E1CC;
+    --teal:       #167A70;
+    --teal-soft:  #D4EBE7;
+    --rust:       #A83F28;
+    --rust-soft:  #F3DDD5;
+    --console-bg: #171F1D;
+    --console-ink: #E7EFEA;
+    --console-dim: #7FA79E;
+    --console-line: #2B3532;
+    --shadow: 0 1px 2px rgba(20, 30, 27, 0.06), 0 8px 24px rgba(20, 30, 27, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #141B19;
+      --paper-raised: #1B2321;
+      --ink:        #E8EEEA;
+      --ink-soft:   #AEBAB5;
+      --ink-faint:  #7C8985;
+      --line:       #2B3532;
+      --amber:      #E68A3C;
+      --amber-soft: #3A2A18;
+      --teal:       #4FC2B5;
+      --teal-soft:  #16302C;
+      --rust:       #E07257;
+      --rust-soft:  #3A2119;
+      --console-bg: #0D1211;
+      --console-ink: #DCEAE4;
+      --console-dim: #6E9891;
+      --console-line: #223028;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #141B19;
+    --paper-raised: #1B2321;
+    --ink:        #E8EEEA;
+    --ink-soft:   #AEBAB5;
+    --ink-faint:  #7C8985;
+    --line:       #2B3532;
+    --amber:      #E68A3C;
+    --amber-soft: #3A2A18;
+    --teal:       #4FC2B5;
+    --teal-soft:  #16302C;
+    --rust:       #E07257;
+    --rust-soft:  #3A2119;
+    --console-bg: #0D1211;
+    --console-ink: #DCEAE4;
+    --console-dim: #6E9891;
+    --console-line: #223028;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 {
+    font-family: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    color: var(--ink);
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  a { color: var(--teal); }
+  code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.88em;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+  }
+
+  /* ── Layout shell ─────────────────────────────────────────────── */
+  .shell {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 760px);
+    justify-content: center;
+    gap: 56px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 48px 24px 120px;
+  }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: minmax(0, 1fr); padding-top: 24px; }
+    .rail { display: none; }
+  }
+
+  /* ── Left rail ────────────────────────────────────────────────── */
+  .rail {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    height: calc(100vh - 64px);
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .rail-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    margin: 0 0 14px;
+  }
+  .rail ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-left: 1px solid var(--line);
+  }
+  .rail li { position: relative; }
+  .rail a {
+    display: block;
+    padding: 7px 0 7px 18px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    margin-left: -1px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .rail a:hover { color: var(--ink); }
+  .rail li.active a {
+    color: var(--amber);
+    border-left-color: var(--amber);
+    font-weight: 600;
+  }
+
+  /* ── Header ───────────────────────────────────────────────────── */
+  header.top {
+    grid-column: 1 / -1;
+    max-width: 760px;
+    margin: 0 auto 8px;
+  }
+  @media (min-width: 901px) { header.top { grid-column: 2; margin: 0 0 8px; } }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+  }
+  h1.title {
+    font-size: clamp(30px, 4.2vw, 42px);
+    font-weight: 700;
+    line-height: 1.08;
+    margin: 0 0 16px;
+  }
+  .dek {
+    font-size: 16.5px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 32px;
+  }
+
+  /* ── Architecture diagram ─────────────────────────────────────── */
+  .diagram-wrap {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 20px 18px;
+    box-shadow: var(--shadow);
+    margin-bottom: 40px;
+    overflow-x: auto;
+  }
+  .diagram-wrap svg { display: block; margin: 0 auto; min-width: 640px; }
+  .diagram-caption {
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-align: center;
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Main column ──────────────────────────────────────────────── */
+  main { min-width: 0; }
+
+  .lead-box {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 44px;
+    box-shadow: var(--shadow);
+  }
+  .lead-box h3 {
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 12px;
+  }
+  .checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .checklist li {
+    display: flex;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .checklist li::before {
+    content: "";
+    flex: none;
+    width: 16px; height: 16px;
+    margin-top: 2px;
+    border-radius: 4px;
+    border: 1.5px solid var(--teal);
+    background: var(--teal-soft);
+  }
+  .checklist b { color: var(--ink); font-weight: 600; }
+
+  section.step {
+    padding-top: 8px;
+    margin-bottom: 60px;
+    scroll-margin-top: 24px;
+  }
+  .step-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 6px;
+  }
+  .step-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--amber);
+    letter-spacing: 0.06em;
+  }
+  .step-head h2 {
+    font-size: 22px;
+    margin: 0;
+    font-weight: 600;
+  }
+  .step-sub {
+    color: var(--ink-faint);
+    font-size: 14px;
+    margin: 0 0 22px;
+  }
+  section.step h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 26px 0 10px;
+  }
+  section.step p { margin: 0 0 14px; color: var(--ink-soft); font-size: 15px; }
+  section.step p b, section.step li b { color: var(--ink); font-weight: 600; }
+  section.step ul, section.step ol.sub-list {
+    margin: 0 0 16px;
+    padding-left: 22px;
+    color: var(--ink-soft);
+    font-size: 15px;
+  }
+  section.step li { margin-bottom: 6px; }
+
+  .ui-path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85em;
+    background: var(--teal-soft);
+    color: var(--teal);
+    border-radius: 4px;
+    padding: 0.08em 0.45em;
+    white-space: nowrap;
+  }
+
+  /* ── Code / console blocks ────────────────────────────────────── */
+  .code-block {
+    position: relative;
+    background: var(--console-bg);
+    border-radius: 10px;
+    margin: 6px 0 20px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .code-block .label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--console-line);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--console-dim);
+  }
+  .code-block pre {
+    margin: 0;
+    padding: 14px 16px 16px;
+    overflow-x: auto;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--console-ink);
+  }
+  .code-block .cm { color: var(--console-dim); }
+  .copy-btn {
+    background: transparent;
+    border: 1px solid var(--console-line);
+    color: var(--console-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .copy-btn:hover { color: var(--console-ink); border-color: var(--console-dim); }
+  .copy-btn:focus-visible, a:focus-visible, .rail a:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+  }
+
+  /* ── Callouts ─────────────────────────────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 4px 0 20px;
+    font-size: 14px;
+    border-left: 3px solid transparent;
+  }
+  .callout .k {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .callout.tip { background: var(--teal-soft); border-color: var(--teal); }
+  .callout.tip .k { color: var(--teal); }
+  .callout.note { background: var(--amber-soft); border-color: var(--amber); }
+  .callout.note .k { color: var(--amber); }
+  .callout.warn { background: var(--rust-soft); border-color: var(--rust); }
+  .callout.warn .k { color: var(--rust); }
+  .callout p { margin: 0; color: var(--ink-soft); }
+  .callout p + p { margin-top: 8px; }
+
+  /* ── Pin table ────────────────────────────────────────────────── */
+  table.pins {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 4px 0 20px;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  table.pins th, table.pins td {
+    text-align: left;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  table.pins th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--paper);
+  }
+  table.pins tr:last-child td { border-bottom: none; }
+  table.pins td.pin { font-family: 'IBM Plex Mono', monospace; color: var(--teal); font-weight: 600; }
+
+  /* ── Wiring diagram ───────────────────────────────────────────── */
+  .wiring-wrap {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 4px 0 20px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  .wiring-wrap svg { display: block; margin: 0 auto; min-width: 560px; }
+
+  /* ── Done marker ──────────────────────────────────────────────── */
+  .done-check {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: var(--teal);
+    background: var(--teal-soft);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-top: 4px;
+  }
+
+  footer {
+    grid-column: 1 / -1;
+    max-width: 760px;
+    margin: 40px auto 0;
+    padding-top: 28px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-faint);
+    font-size: 13px;
+  }
+  @media (min-width: 901px) { footer { grid-column: 2; margin-left: 0; margin-right: 0; } }
+</style>
+
+<div class="shell">
+
+  <nav class="rail" aria-label="Progreso de la guía">
+    <p class="rail-title">Pasos</p>
+    <ol id="railList">
+      <li><a href="#necesitas">Qué necesitas</a></li>
+      <li><a href="#supabase-proyecto">1 · Proyecto Supabase</a></li>
+      <li><a href="#supabase-tablas">2 · Crear las tablas</a></li>
+      <li><a href="#supabase-claves">3 · Copiar las claves</a></li>
+      <li><a href="#vercel">4 · Publicar el portal</a></li>
+      <li><a href="#arduino">5 · Preparar Arduino IDE</a></li>
+      <li><a href="#confighs">6 · Editar config.h</a></li>
+      <li><a href="#cableado">7 · Cableado del CAN</a></li>
+      <li><a href="#flashear">8 · Flashear la placa</a></li>
+      <li><a href="#comprobar">9 · Comprobar que va</a></li>
+      <li><a href="#ha">Extra · Home Assistant</a></li>
+      <li><a href="#problemas">Si algo falla</a></li>
+    </ol>
+  </nav>
+
+  <header class="top">
+    <span class="eyebrow">CanRider · guía de instalación</span>
+    <h1 class="title">De la caja del ESP32 al mapa en vivo</h1>
+    <p class="dek">Todo lo que hay que hacer para tener tu moto eléctrica enviando telemetría real por CAN a un panel web propio: base de datos, portal, firmware y cableado — explicado paso a paso, sin dar nada por sabido.</p>
+
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 900 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama: la moto envía datos por CAN al ESP32, que los manda por LTE a Supabase, que alimenta el portal web y Home Assistant">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"></path>
+          </marker>
+        </defs>
+        <g font-family="'IBM Plex Mono', monospace" font-size="12" fill="var(--ink)">
+          <!-- Moto -->
+          <rect x="10" y="60" width="118" height="60" rx="9" fill="var(--paper)" stroke="var(--line)"></rect>
+          <text x="69" y="86" text-anchor="middle" font-weight="600">MOTO</text>
+          <text x="69" y="103" text-anchor="middle" font-size="10" fill="var(--ink-faint)">bus CAN</text>
+
+          <line x1="128" y1="90" x2="182" y2="90" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#arrow)"></line>
+
+          <!-- ESP32 -->
+          <rect x="184" y="52" width="140" height="76" rx="9" fill="var(--teal-soft)" stroke="var(--teal)"></rect>
+          <text x="254" y="82" text-anchor="middle" font-weight="600" fill="var(--teal)">ESP32</text>
+          <text x="254" y="98" text-anchor="middle" font-size="10" fill="var(--teal)">T-SIM7000G</text>
+          <text x="254" y="113" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">main.ino</text>
+
+          <line x1="324" y1="90" x2="378" y2="90" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#arrow)"></line>
+          <text x="351" y="78" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">LTE</text>
+
+          <!-- Supabase -->
+          <rect x="380" y="52" width="140" height="76" rx="9" fill="var(--paper)" stroke="var(--line)"></rect>
+          <text x="450" y="82" text-anchor="middle" font-weight="600">SUPABASE</text>
+          <text x="450" y="98" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">base de datos</text>
+          <text x="450" y="112" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">+ tiempo real</text>
+
+          <line x1="520" y1="90" x2="574" y2="90" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#arrow)"></line>
+
+          <!-- Vercel -->
+          <rect x="576" y="18" width="140" height="60" rx="9" fill="var(--amber-soft)" stroke="var(--amber)"></rect>
+          <text x="646" y="44" text-anchor="middle" font-weight="600" fill="var(--amber)">PORTAL WEB</text>
+          <text x="646" y="60" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">Vercel · Next.js</text>
+
+          <line x1="646" y1="78" x2="646" y2="102" stroke="var(--ink-faint)" stroke-width="1.2"></line>
+
+          <!-- HA -->
+          <rect x="576" y="102" width="140" height="60" rx="9" fill="var(--paper)" stroke="var(--line)" stroke-dasharray="3 3"></rect>
+          <text x="646" y="128" text-anchor="middle" font-weight="600">HOME ASSISTANT</text>
+          <text x="646" y="144" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">opcional</text>
+        </g>
+      </svg>
+      <p class="diagram-caption">CAN → ESP32 → LTE → Supabase → portal web (+ Home Assistant si quieres)</p>
+    </div>
+  </header>
+
+  <main>
+
+    <section id="necesitas" class="lead-box">
+      <h3>Qué vas a necesitar antes de empezar</h3>
+      <ul class="checklist">
+        <li><b>Placa LilyGo T-SIM7000G</b> — es la que usa y prueba este proyecto (lleva LTE + GPS integrados)</li>
+        <li><b>Transceptor CAN</b> (SN65HVD230, TJA1050 o similar) a 3.3V</li>
+        <li><b>Tarjeta SIM con datos</b> activados, con el PIN desactivado</li>
+        <li><b>Cable USB</b> de datos (no solo de carga) para la placa</li>
+        <li><b>Batería 18650</b> como respaldo de alimentación (recomendado, no imprescindible)</li>
+        <li><b>Acceso al bus CAN</b> de la moto — CAN-H y CAN-L, con su resistencia de terminación de 120 Ω en cada extremo</li>
+        <li>Una cuenta de <b>GitHub</b>, <b>Supabase</b> y <b>Vercel</b> — las tres son gratuitas</li>
+      </ul>
+    </section>
+
+    <!-- PASO 1 -->
+    <section id="supabase-proyecto" class="step">
+      <div class="step-head"><span class="step-num">PASO 01</span><h2>Crea el proyecto en Supabase</h2></div>
+      <p class="step-sub">Supabase es la base de datos en la nube donde vivirá toda la telemetría de tu moto.</p>
+
+      <ol class="sub-list">
+        <li>Entra en <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a> y pulsa <b>Start your project</b>. Regístrate con GitHub, es lo más rápido.</li>
+        <li>Pulsa <b>New project</b>. Elige un nombre (por ejemplo <code>canrider</code>), una contraseña de base de datos (guárdala en algún sitio seguro) y una región cercana a ti.</li>
+        <li>Espera 1-2 minutos mientras Supabase prepara el proyecto.</li>
+      </ol>
+
+      <div class="callout tip">
+        <span class="k">Truco</span>
+        <p>La contraseña de base de datos que te pide aquí <b>no es</b> la clave que usará el ESP32 — esa la sacamos más adelante. Puedes guardarla y olvidarte de ella.</p>
+      </div>
+    </section>
+
+    <!-- PASO 2 -->
+    <section id="supabase-tablas" class="step">
+      <div class="step-head"><span class="step-num">PASO 02</span><h2>Crea las tablas</h2></div>
+      <p class="step-sub">Con el SQL Editor de Supabase, en cuatro pegar-y-ejecutar tienes toda la base de datos lista.</p>
+
+      <p>Primero, clona o descarga el repositorio del proyecto en tu ordenador:</p>
+      <div class="code-block">
+        <div class="label"><span>terminal</span><button class="copy-btn" data-copy="git clone https://github.com/jichef/CANRider-Two.git">Copiar</button></div>
+        <pre>git clone https://github.com/jichef/CANRider-Two.git</pre>
+      </div>
+
+      <p>Dentro del proyecto en Supabase, abre <span class="ui-path">SQL Editor → New query</span>. Abre cada uno de estos archivos de la carpeta <code>supabase/</code> del repositorio, copia todo su contenido, pégalo en el editor y pulsa <b>Run</b> — en este orden:</p>
+
+      <ol class="sub-list">
+        <li><code>supabase/schema.sql</code> — tabla <code>can_signals</code></li>
+        <li><code>supabase/telemetry_schema.sql</code> — tabla <code>telemetry</code></li>
+        <li><code>supabase/trips_schema.sql</code> — tabla <code>trips</code></li>
+        <li><code>supabase/fix_missing_can_columns.sql</code> — columnas adicionales de batería</li>
+      </ol>
+
+      <p>Genera un identificador único para tu moto ejecutando esto en el mismo editor y guardando el resultado:</p>
+      <div class="code-block">
+        <div class="label"><span>sql</span><button class="copy-btn" data-copy="select gen_random_uuid();">Copiar</button></div>
+        <pre>select gen_random_uuid();</pre>
+      </div>
+
+      <div class="done-check">✓ Ese UUID es tu <code>VEHICLE_ID</code> — lo necesitarás en el paso 6.</div>
+    </section>
+
+    <!-- PASO 3 -->
+    <section id="supabase-claves" class="step">
+      <div class="step-head"><span class="step-num">PASO 03</span><h2>Copia la URL y la clave</h2></div>
+      <p class="step-sub">Dos datos que vas a pegar en varios sitios más adelante — merece la pena tenerlos ya a mano.</p>
+
+      <p>En Supabase, ve a <span class="ui-path">Project Settings → API</span> y copia:</p>
+      <ul>
+        <li><b>Project URL</b> — algo como <code>https://xxxxxxxx.supabase.co</code></li>
+        <li><b>anon public key</b> — una cadena larga que empieza por <code>eyJ...</code></li>
+      </ul>
+
+      <div class="callout warn">
+        <span class="k">Aviso</span>
+        <p>En esa misma pantalla verás otra clave llamada <b>service_role key</b>. Esa es de administrador total y <b>nunca</b> debe ir en el firmware, en el portal web ni en ningún sitio público. Usa siempre la <b>anon key</b>.</p>
+      </div>
+    </section>
+
+    <!-- PASO 4 -->
+    <section id="vercel" class="step">
+      <div class="step-head"><span class="step-num">PASO 04</span><h2>Publica el portal web</h2></div>
+      <p class="step-sub">Vercel construye y aloja la web automáticamente cada vez que actualices el repositorio de GitHub.</p>
+
+      <ol class="sub-list">
+        <li>Sube el proyecto a un repositorio propio en GitHub (o haz un <i>fork</i> de este).</li>
+        <li>Entra en <a href="https://vercel.com" target="_blank" rel="noopener">vercel.com</a>, inicia sesión con GitHub y pulsa <span class="ui-path">Add New → Project</span>.</li>
+        <li>Elige tu repositorio y pulsa <b>Import</b>.</li>
+        <li>Antes de darle a <i>Deploy</i>, despliega <span class="ui-path">Environment Variables</span> y añade estas tres:</li>
+      </ol>
+
+      <table class="pins">
+        <thead><tr><th>Variable</th><th>Valor</th></tr></thead>
+        <tbody>
+          <tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>tu Project URL del paso 3</td></tr>
+          <tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>tu anon key del paso 3</td></tr>
+          <tr><td><code>NEXT_PUBLIC_VEHICLE_ID</code></td><td>el UUID que generaste en el paso 2</td></tr>
+        </tbody>
+      </table>
+
+      <p>Pulsa <b>Deploy</b> y espera un par de minutos. Al terminar tendrás una URL pública tipo <code>tu-proyecto.vercel.app</code> con el panel — aunque todavía sin datos, porque la moto no ha enviado nada.</p>
+
+      <div class="callout note">
+        <span class="k">Nota</span>
+        <p>Si más adelante cambias alguna variable de entorno en Vercel, no se aplica sola — tienes que ir a <span class="ui-path">Deployments</span> y pulsar <b>Redeploy</b> en el último despliegue.</p>
+      </div>
+    </section>
+
+    <!-- PASO 5 -->
+    <section id="arduino" class="step">
+      <div class="step-head"><span class="step-num">PASO 05</span><h2>Prepara el Arduino IDE</h2></div>
+      <p class="step-sub">Instala el soporte para ESP32 y la librería del módem, una sola vez.</p>
+
+      <ol class="sub-list">
+        <li>Descarga e instala <a href="https://www.arduino.cc/en/software" target="_blank" rel="noopener">Arduino IDE 2.x</a>.</li>
+        <li>Ve a <span class="ui-path">Arduino IDE → Preferences</span> y en <i>Additional boards manager URLs</i> pega:</li>
+      </ol>
+      <div class="code-block">
+        <div class="label"><span>url</span><button class="copy-btn" data-copy="https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json">Copiar</button></div>
+        <pre>https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json</pre>
+      </div>
+      <ol class="sub-list" start="3">
+        <li>Ve a <span class="ui-path">Tools → Board → Boards Manager</span>, busca <code>esp32</code> e instala el paquete de Espressif.</li>
+        <li>Selecciona la placa: <span class="ui-path">Tools → Board → ESP32 Arduino → ESP32 Dev Module</span>.</li>
+        <li>Ve a <span class="ui-path">Tools → Manage Libraries</span>, busca <code>TinyGSM</code> e instálala.</li>
+      </ol>
+    </section>
+
+    <!-- PASO 6 -->
+    <section id="confighs" class="step">
+      <div class="step-head"><span class="step-num">PASO 06</span><h2>Edita config.h</h2></div>
+      <p class="step-sub">El único archivo del firmware que necesita tus datos — el resto ya viene listo.</p>
+
+      <p>Dentro de la carpeta del repositorio, copia la plantilla:</p>
+      <div class="code-block">
+        <div class="label"><span>terminal</span><button class="copy-btn" data-copy="cp main/config.h.example main/config.h">Copiar</button></div>
+        <pre>cp main/config.h.example main/config.h</pre>
+      </div>
+
+      <p>Abre <code>main/config.h</code> con cualquier editor de texto. Dentro está dividido en bloques marcados literalmente con <code>&gt;&gt;&gt; CAMBIA ESTO &lt;&lt;&lt;</code> — rellena estos cuatro y no toques nada más:</p>
+
+      <div class="code-block">
+        <div class="label"><span>main/config.h</span></div>
+        <pre><span class="cm">// 1/4 — deja SIM7000G activa (ya viene así)</span>
+#define MODEM_SIM7000G
+
+<span class="cm">// 2/4 — tus datos de Supabase y de la moto</span>
+#define SUPABASE_URL "https://xxxxxxxx.supabase.co"
+#define SUPABASE_KEY "eyJ..."
+#define VEHICLE_ID   "el-uuid-del-paso-2"
+
+<span class="cm">// 3/4 — el APN de tu operador (pregúntale o búscalo como
+// "APN M2M/IoT &lt;tu operador&gt;")</span>
+#define APN "internet.tuoperadora.es"
+
+<span class="cm">// 4/4 — solo si tu moto no va a 250 kbps</span>
+#define CAN_SPEED TWAI_TIMING_CONFIG_250KBITS()</pre>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">Truco</span>
+        <p>Las tramas CAN concretas de tu moto (qué leer, en qué byte) se definen dentro de <code>main/main.ino</code>, en una función llamada <code>setupCANSignals()</code> — no en <code>config.h</code>. Es a propósito: así el reloj y las baterías siempre funcionan sin depender de la red.</p>
+      </div>
+    </section>
+
+    <!-- PASO 7 -->
+    <section id="cableado" class="step">
+      <div class="step-head"><span class="step-num">PASO 07</span><h2>Conecta el bus CAN</h2></div>
+      <p class="step-sub">Cuatro cables entre el ESP32 y el transceptor, más los dos del propio bus.</p>
+
+      <table class="pins">
+        <thead><tr><th>ESP32 (T-SIM7000G)</th><th>Transceptor CAN</th></tr></thead>
+        <tbody>
+          <tr><td class="pin">GPIO 32</td><td>CTX / TXD</td></tr>
+          <tr><td class="pin">GPIO 33</td><td>CRX / RXD</td></tr>
+          <tr><td class="pin">3.3V</td><td>VCC</td></tr>
+          <tr><td class="pin">GND</td><td>GND</td></tr>
+        </tbody>
+      </table>
+
+      <div class="wiring-wrap">
+        <svg viewBox="0 0 620 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ESP32 GPIO32 a CTX, GPIO33 a CRX, 3.3V a VCC, GND a GND del transceptor, y CAN-H/CAN-L del transceptor al bus de la moto">
+          <g font-family="'IBM Plex Mono', monospace" font-size="12.5" fill="var(--ink)">
+            <rect x="20" y="30" width="160" height="160" rx="10" fill="var(--teal-soft)" stroke="var(--teal)"></rect>
+            <text x="100" y="58" text-anchor="middle" font-weight="600" fill="var(--teal)">ESP32</text>
+            <text x="100" y="74" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">T-SIM7000G</text>
+
+            <text x="34" y="102" font-size="11">GPIO32</text>
+            <text x="34" y="128" font-size="11">GPIO33</text>
+            <text x="34" y="154" font-size="11">3.3V</text>
+            <text x="34" y="180" font-size="11">GND</text>
+
+            <line x1="180" y1="98" x2="260" y2="98" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+            <line x1="180" y1="124" x2="260" y2="124" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+            <line x1="180" y1="150" x2="260" y2="150" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+            <line x1="180" y1="176" x2="260" y2="176" stroke="var(--ink-faint)" stroke-width="1.3"></line>
+
+            <rect x="262" y="30" width="150" height="160" rx="10" fill="var(--paper)" stroke="var(--line)"></rect>
+            <text x="337" y="58" text-anchor="middle" font-weight="600">TRANSCEPTOR</text>
+            <text x="337" y="74" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">SN65HVD230</text>
+            <text x="290" y="102" font-size="11">CTX</text>
+            <text x="290" y="128" font-size="11">CRX</text>
+            <text x="290" y="154" font-size="11">VCC</text>
+            <text x="290" y="180" font-size="11">GND</text>
+
+            <line x1="412" y1="80" x2="470" y2="80" stroke="var(--amber)" stroke-width="1.6"></line>
+            <line x1="412" y1="106" x2="470" y2="106" stroke="var(--amber)" stroke-width="1.6"></line>
+
+            <text x="478" y="84" font-size="11" fill="var(--amber)">CAN-H</text>
+            <text x="478" y="110" font-size="11" fill="var(--amber)">CAN-L</text>
+
+            <text x="337" y="210" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">→ bus de la moto, 120 Ω en cada extremo</text>
+          </g>
+        </svg>
+      </div>
+
+      <p>Si tu transceptor tiene un pin <code>3V3-STDBY</code> o similar, conéctalo también a 3.3V para que arranque en modo activo normal. Inserta la SIM en el módem con la placa apagada, y conecta la antena LTE y la antena GPS a sus conectores (son distintos, no los confundas).</p>
+    </section>
+
+    <!-- PASO 8 -->
+    <section id="flashear" class="step">
+      <div class="step-head"><span class="step-num">PASO 08</span><h2>Sube el firmware a la placa</h2></div>
+      <p class="step-sub">Con todo cableado y la SIM puesta, ya se puede flashear.</p>
+
+      <ol class="sub-list">
+        <li>Abre <code>main/main.ino</code> en Arduino IDE (abrirá también <code>config.h</code>, <code>structs.h</code> y el resto de pestañas del proyecto).</li>
+        <li>Conecta la placa al ordenador por USB.</li>
+        <li>Selecciona el puerto en <span class="ui-path">Tools → Port</span>.</li>
+        <li>Pulsa <b>Upload</b> (o <code>Ctrl+U</code> / <code>Cmd+U</code>).</li>
+      </ol>
+
+      <div class="callout warn">
+        <span class="k">Si no conecta</span>
+        <p>Algunas placas con auto-reset poco fiable necesitan entrada manual en modo bootloader: mantén pulsado <b>BOOT</b>, toca <b>RESET</b> una vez sin soltar BOOT, y suelta BOOT justo antes de pulsar Upload.</p>
+      </div>
+    </section>
+
+    <!-- PASO 9 -->
+    <section id="comprobar" class="step">
+      <div class="step-head"><span class="step-num">PASO 09</span><h2>Comprueba que funciona</h2></div>
+      <p class="step-sub">Abre el Monitor Serie (115200 baudios) y sigue el arranque en vivo.</p>
+
+      <p>Un arranque sano se ve así, en este orden aproximado:</p>
+      <div class="code-block">
+        <div class="label"><span>monitor serie · 115200</span></div>
+        <pre>[CAN] TWAI listo
+[CAN] 4 señales (1 frames TX)
+[STATE] NET_SETUP...
+[STATE] HTTP_SETUP...
+[TIME] UTC: 2026-08-31 12:03:41
+[STATE] RUNNING
+[POST] {"motorcycle_id":"...","moto_battery_b":54,...}
+[OK] Telemetría enviada</pre>
+      </div>
+
+      <p>En cuanto veas <code>[OK] Telemetría enviada</code> al menos una vez, abre la URL de tu portal en Vercel — deberían aparecer ya los primeros datos.</p>
+
+      <div class="done-check">✓ Si ves eso, tu CanRider está funcionando de punta a punta.</div>
+    </section>
+
+    <!-- EXTRA -->
+    <section id="ha" class="step">
+      <div class="step-head"><span class="step-num">EXTRA</span><h2>Home Assistant (opcional)</h2></div>
+      <p class="step-sub">Si ya tienes Home Assistant, puedes traer los datos de la moto como cualquier otro dispositivo.</p>
+
+      <ol class="sub-list">
+        <li>Copia la carpeta <code>custom_components/can_rider</code> del repositorio a <code>config/custom_components/</code> en tu instalación de Home Assistant.</li>
+        <li>Reinicia Home Assistant.</li>
+        <li>Ve a <span class="ui-path">Ajustes → Dispositivos y servicios → Añadir integración</span> y busca <b>CanRider</b>.</li>
+        <li>Rellena la URL y anon key de Supabase, el <code>VEHICLE_ID</code> y el modelo de placa.</li>
+      </ol>
+
+      <p>Aparecerán sensores de batería A y B de la moto, batería del ESP32, velocidad, señal de red, seguimiento GPS y datos del último viaje.</p>
+    </section>
+
+    <!-- PROBLEMAS -->
+    <section id="problemas" class="step">
+      <div class="step-head"><span class="step-num">SI ALGO FALLA</span><h2>Solución de problemas</h2></div>
+
+      <h3>El ESP32 no conecta a la red</h3>
+      <ul>
+        <li>Revisa que el <code>APN</code> en <code>config.h</code> coincide exactamente con el de tu operador</li>
+        <li>Confirma que la SIM tiene datos activos y no pide PIN</li>
+        <li>Busca <code>[ERROR]</code> o <code>[TIMEOUT]</code> en el Monitor Serie</li>
+      </ul>
+
+      <h3>No aparecen datos en el portal</h3>
+      <ul>
+        <li>Revisa las tres variables de entorno en Vercel (paso 4) y haz <b>Redeploy</b> si las acabas de cambiar</li>
+        <li>Confirma que el <code>VEHICLE_ID</code> es idéntico en <code>config.h</code> y en Vercel</li>
+      </ul>
+
+      <h3>El GPS no encuentra posición</h3>
+      <ul>
+        <li>Comprueba que la antena GPS está en su conector (no en el de LTE)</li>
+        <li>Puede tardar varios minutos a la intemperie la primera vez</li>
+        <li>Mientras tanto, el firmware intenta una posición aproximada por triangulación de celda (LBS) automáticamente</li>
+      </ul>
+
+      <h3>Las señales CAN no llegan</h3>
+      <ul>
+        <li>Revisa <code>CAN_SPEED</code> en <code>config.h</code> frente a la velocidad real del bus de tu moto</li>
+        <li>Comprueba el cableado del paso 7 y la terminación de 120 Ω en el bus</li>
+        <li>Si ves <code>[CAN] Bus-off detectado</code>, el propio firmware se recupera solo — si se repite mucho, revisa la terminación</li>
+      </ul>
+    </section>
+
+  </main>
+
+  <footer>CanRider — guía de instalación · consulta <code>README.md</code> en el repositorio para más detalle técnico.</footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
+      var done = function () {
+        var original = btn.textContent;
+        btn.textContent = 'Copiado';
+        setTimeout(function () { btn.textContent = original; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        done();
+      }
+    });
+  });
+
+  (function () {
+    var sections = Array.prototype.slice.call(document.querySelectorAll('main section[id], .lead-box[id]'));
+    var links = {};
+    document.querySelectorAll('.rail li').forEach(function (li) {
+      var a = li.querySelector('a');
+      if (a) links[a.getAttribute('href').slice(1)] = li;
+    });
+    if (!sections.length || !('IntersectionObserver' in window)) return;
+    var current = null;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          if (current) current.classList.remove('active');
+          var li = links[entry.target.id];
+          if (li) { li.classList.add('active'); current = li; }
+        }
+      });
+    }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+    sections.forEach(function (s) { io.observe(s); });
+  })();
+</script>
