@@ -13,7 +13,6 @@ import {
   Thermometer,
   Signal,
 } from 'lucide-react';
-import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
@@ -51,6 +50,7 @@ export default function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [isConfigured] = useState(!!supabase);
   const [isStale, setIsStale] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'live' | 'trips' | 'map'>('live');
 
   const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
   const [hasLiveFix, setHasLiveFix] = useState(false);
@@ -385,32 +385,35 @@ export default function DashboardContent() {
           </div>
         </header>
 
-        {/* Stats principales */}
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-2.5 md:gap-6 mb-3 md:mb-6">
-          {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
+        {/* Pestaña LIVE (móvil: solo esta sección; escritorio: siempre visible) */}
+        <div className={mobileTab === 'live' ? '' : 'hidden md:block'}>
+          {/* Stats principales */}
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-2.5 md:gap-6 mb-3 md:mb-6">
+            {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
+          </div>
+
+          {/* Stats CAN — solo visibles cuando el bus ha enviado datos */}
+          {hasCAN && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4 mb-6 md:mb-10">
+              {canStats.map((stat) => stat.value != null && (
+                <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-3.5 py-3 md:px-5 md:py-4 rounded-xl md:rounded-2xl transition-all hover:bg-zinc-900/50`}>
+                  <div className="flex items-center gap-2 mb-1 md:mb-2">
+                    <stat.icon size={14} className={stat.color} />
+                    <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase truncate">{stat.label}</p>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className={`text-lg md:text-xl font-black font-mono ${stat.color}`}>{stat.value}</span>
+                    <span className="text-[10px] font-bold text-zinc-600">{stat.unit}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Stats CAN — solo visibles cuando el bus ha enviado datos */}
-        {hasCAN && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-4 mb-6 md:mb-10">
-            {canStats.map((stat) => stat.value != null && (
-              <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-3.5 py-3 md:px-5 md:py-4 rounded-xl md:rounded-2xl transition-all hover:bg-zinc-900/50`}>
-                <div className="flex items-center gap-2 mb-1 md:mb-2">
-                  <stat.icon size={14} className={stat.color} />
-                  <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase truncate">{stat.label}</p>
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className={`text-lg md:text-xl font-black font-mono ${stat.color}`}>{stat.value}</span>
-                  <span className="text-[10px] font-bold text-zinc-600">{stat.unit}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Mapa */}
-          <div className="lg:col-span-2 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex flex-col transition-all hover:border-white/20">
+          {/* Mapa — pestaña MAP en móvil */}
+          <div className={`lg:col-span-2 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-auto ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
             <div className="p-5 border-b border-white/5 flex items-center justify-between bg-zinc-950/20">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-red-500/10 text-red-500">
@@ -471,7 +474,7 @@ export default function DashboardContent() {
                 </button>
               )}
             </div>
-            <div className="flex-1 relative min-h-[450px]">
+            <div className="flex-1 relative md:min-h-[450px]">
               <Map
                 center={currentPosition}
               />
@@ -479,8 +482,8 @@ export default function DashboardContent() {
             </div>
           </div>
 
-          {/* Historial de viajes */}
-          <div className="bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl">
+          {/* Historial de viajes — pestaña TRIPS en móvil */}
+          <div className={`bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl ${mobileTab === 'trips' ? 'block' : 'hidden md:block'}`}>
             <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
@@ -506,7 +509,11 @@ export default function DashboardContent() {
                   return (
                     <button
                       key={trip.id}
-                      onClick={() => setSelectedTrip(isSelected ? null : trip.id)}
+                      onClick={() => {
+                        const next = isSelected ? null : trip.id;
+                        setSelectedTrip(next);
+                        if (next) setMobileTab('map');
+                      }}
                       className={`w-full group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
                         isSelected
                           ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]'
@@ -556,22 +563,23 @@ export default function DashboardContent() {
         </div>
       </div>
 
-      {/* Navegación inferior (móvil) */}
+      {/* Navegación inferior (móvil) — cambia qué sección se muestra arriba */}
       <nav className="fixed bottom-6 left-6 right-6 md:hidden z-50">
         <div className="bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-2 flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
           {[
-            { icon: Activity, label: 'Live', href: '/' },
-            { icon: RouteIcon, label: 'Trips', href: '/' },
-            { icon: MapPin, label: 'Map', href: '/' },
-          ].map((item, i) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all ${i === 0 ? 'bg-cyan-500/20 text-cyan-400' : 'text-zinc-500'}`}
+            { key: 'live' as const, icon: Activity, label: 'Live' },
+            { key: 'trips' as const, icon: RouteIcon, label: 'Trips' },
+            { key: 'map' as const, icon: MapPin, label: 'Map' },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setMobileTab(item.key)}
+              className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all ${mobileTab === item.key ? 'bg-cyan-500/20 text-cyan-400' : 'text-zinc-500'}`}
             >
               <item.icon size={20} />
               <span className="text-[9px] font-black uppercase tracking-widest">{item.label}</span>
-            </Link>
+            </button>
           ))}
         </div>
       </nav>
