@@ -92,8 +92,28 @@
   #error "Define MODEM_A7670G o MODEM_SIM7000G en config.h"
 #endif
 
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ Señales CAN — se editan en main.ino, no aquí                          │
+// └──────────────────────────────────────────────────────────────────────┘
 // Las señales CAN de tu moto concreta (qué trama leer/emitir, en qué byte,
-// con qué escala) se definen en setupCANSignals() dentro de main.ino, no
-// aquí — búscalo y edítalo con los datos de tu vehículo.
+// con qué escala) NO se configuran en este archivo — se definen a mano en
+// setupCANSignals(), dentro de main/main.ino. Es a propósito: así el
+// reloj y las baterías funcionan siempre, sin depender de la red para
+// descargar nada en el arranque.
+//
+// Por defecto, setupCANSignals() trae estas 4 señales (frame_id en
+// hexadecimal, byte dentro de la trama de 8 bytes):
+//
+//   Nombre           Dirección  Frame  Byte   Qué es
+//   ───────────────  ─────────  ─────  ────   ──────────────────────────
+//   clock_hours      TX (envía) 0x200  0      hora   → reloj del panel
+//   clock_minutes    TX (envía) 0x200  1      minuto → reloj del panel
+//   moto_battery     RX (lee)   0x300  0      % batería A
+//   moto_battery_b   RX (lee)   0x301  0      % batería B
+//
+// Para adaptarlo a tu moto: abre main/main.ino, busca "setupCANSignals()"
+// y cambia los frame_id/byte de las llamadas a addCANSignal(...) — o
+// añade llamadas nuevas para leer más señales (nunca de tipo TX salvo que
+// sepas exactamente qué trama es y estés seguro de que tu moto la acepta).
 
 #endif
