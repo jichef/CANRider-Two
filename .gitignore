@@ -25,6 +25,9 @@ main/config.h
 *.elf
 *.o
 
+# Tramas CAN reales de un vehículo concreto — no se publican en el repo abierto
+supabase/seed_cpx.sql
+
 # OS files
 .DS_Store
 Thumbs.db
