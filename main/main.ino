@@ -791,6 +791,24 @@ bool httpPostTo(const String& tablePath, const String& body) {
 
 static TripState tripState;
 
+// Si el POST de cierre de viaje falla (típicamente por el mismo problema de
+// red que provoca los huecos irregulares en la telemetría), el viaje no se
+// descarta: se guarda aquí para reintentar el envío en los siguientes ciclos
+// hasta que funcione. Sin esto, un viaje entero se perdía en silencio si la
+// red fallaba justo en el momento de apagar la moto.
+static String pendingTripBody = "";
+
+static bool flushPendingTrip() {
+    if (pendingTripBody.length() == 0) return false;
+    if (httpPostTo("/rest/v1/trips", pendingTripBody)) {
+        Serial.println("[TRIP] Viaje pendiente enviado correctamente");
+        pendingTripBody = "";
+        return true;
+    }
+    Serial.println("[TRIP] Viaje pendiente sigue sin poder enviarse, reintento en el próximo ciclo");
+    return false;
+}
+
 static bool canBusAlive() {
     uint32_t last = lastCanFrameMs;   // volatile, lectura atómica
     if (last == 0) return false;      // nunca se ha visto ninguna trama desde el arranque
@@ -858,8 +876,10 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         body += "}";
 
         Serial.print("[TRIP] Fin (CAN en silencio): "); Serial.println(body);
-        if (!httpPostTo("/rest/v1/trips", body))
-            Serial.println("[TRIP] Error al guardar viaje");
+        if (!httpPostTo("/rest/v1/trips", body)) {
+            Serial.println("[TRIP] Error al guardar viaje, se reintentará");
+            pendingTripBody = body;
+        }
 
         tripState.active = false;
         return true;   // sesión HTTP consumida → caller debe re-inicializar
@@ -1094,6 +1114,10 @@ void loop() {
 
         // Actualizar viaje; si termina, re-inicializar sesión HTTP
         if (updateTrip(busAlive, t.speed_kmh, currentSoc, t.lat, t.lon, t.hasPos, t))
+            state = HTTP_SETUP;
+
+        // Si quedó un viaje sin poder guardarse en un ciclo anterior, reintentarlo
+        if (flushPendingTrip())
             state = HTTP_SETUP;
         break;
     }
