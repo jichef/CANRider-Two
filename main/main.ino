@@ -840,6 +840,13 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         tripState.lastLon    = lon;
         tripState.sy = t.year; tripState.sm = t.month; tripState.sd = t.day;
         tripState.sh = t.hour; tripState.smin = t.min; tripState.ss = t.sec;
+        tripState.trackCount = 0;
+        if (hasPos) {
+            tripState.trackLat[0]   = lat;
+            tripState.trackLon[0]   = lon;
+            tripState.trackSpeed[0] = speed;
+            tripState.trackCount    = 1;
+        }
         Serial.println("[TRIP] Inicio de viaje (CAN activo)");
         return false;
     }
@@ -851,6 +858,14 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     if (hasPos && tripState.hasLastPos)
         tripState.distanceKm += haversineKm(tripState.lastLat, tripState.lastLon, lat, lon);
     if (hasPos) { tripState.lastLat = lat; tripState.lastLon = lon; tripState.hasLastPos = true; }
+
+    if (hasPos && tripState.trackCount < MAX_TRIP_POINTS) {
+        int i = tripState.trackCount;
+        tripState.trackLat[i]   = lat;
+        tripState.trackLon[i]   = lon;
+        tripState.trackSpeed[i] = speed;
+        tripState.trackCount++;
+    }
 
     if (!busAlive) {
         uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
@@ -873,6 +888,19 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         body += ",\"start_battery_level\":"   + String(tripState.startSoc, 1);
         body += ",\"end_battery_level\":"     + String(soc, 1);
         body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
+
+        // Traza real del recorrido (lat/lon/velocidad por punto) para
+        // dibujar la ruta coloreada por velocidad en el mapa, en vez de
+        // solo una línea recta entre inicio y fin.
+        body += ",\"track\":[";
+        for (int i = 0; i < tripState.trackCount; i++) {
+            if (i > 0) body += ",";
+            body += "[" + String(tripState.trackLat[i],   5) + ","
+                        + String(tripState.trackLon[i],   5) + ","
+                        + String(tripState.trackSpeed[i], 1) + "]";
+        }
+        body += "]";
+
         body += "}";
 
         Serial.print("[TRIP] Fin (CAN en silencio): "); Serial.println(body);

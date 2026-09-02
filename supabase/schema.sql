@@ -201,8 +201,13 @@ CREATE TABLE IF NOT EXISTS trips (
     max_speed             float,       -- km/h
     start_battery_level   float,       -- SoC al inicio (%)
     end_battery_level     float,       -- SoC al final (%)
-    consumption           float        -- start_battery_level − end_battery_level (%)
+    consumption           float,       -- start_battery_level − end_battery_level (%)
+    track                 jsonb        -- [[lat,lon,velocidad_kmh], ...] — traza real del recorrido
 );
+
+-- Por si la tabla ya existía de una versión anterior sin esta columna:
+ALTER TABLE trips
+  ADD COLUMN IF NOT EXISTS track jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_trips_motorcycle_ts
     ON trips (motorcycle_id, start_time DESC);

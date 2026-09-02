@@ -174,6 +174,18 @@ export default function DashboardContent() {
     .filter((v): v is number => v != null);
   const avgTemp = temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : undefined;
 
+  // Traza del viaje seleccionado (solo existe en viajes guardados con el
+  // firmware que ya registra [lat,lon,velocidad] por punto — los viajes
+  // antiguos no tienen "track" y el mapa cae a mostrar solo un aviso).
+  const selectedTripData = trips.find((t) => t.id === selectedTrip);
+  const track: [number, number, number][] | undefined = selectedTripData?.track;
+  const trackSpeeds = track?.map(([, , v]) => v) ?? [];
+  const avgSpeed = trackSpeeds.length > 0
+    ? trackSpeeds.reduce((a, b) => a + b, 0) / trackSpeeds.length
+    : null;
+  const movingSpeeds = trackSpeeds.filter((v) => v > 2); // excluye paradas/ruido en reposo
+  const minSpeed = movingSpeeds.length > 0 ? Math.min(...movingSpeeds) : null;
+
   const hasCAN = telemetry?.pack_voltage != null
     || telemetry?.battery_current != null
     || avgTemp != null
@@ -423,9 +435,15 @@ export default function DashboardContent() {
                     )}
                   </div>
                   {selectedTrip ? (
-                    <span className="text-[10px] text-zinc-500 font-mono uppercase">
-                      {`Trip ID: ${selectedTrip.slice(0, 8)}`}
-                    </span>
+                    trackSpeeds.length > 0 ? (
+                      <div className="flex items-center gap-3 text-[10px] font-mono">
+                        <span className="text-red-400">MAX {Math.round(selectedTripData?.max_speed ?? 0)} km/h</span>
+                        <span className="text-amber-400">MEDIA {Math.round(avgSpeed ?? 0)} km/h</span>
+                        <span className="text-cyan-400">MIN {Math.round(minSpeed ?? 0)} km/h</span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-zinc-500 font-mono uppercase">Sin traza guardada para este viaje</span>
+                    )
                   ) : hasLiveFix ? (
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       {address && (
@@ -460,6 +478,7 @@ export default function DashboardContent() {
             <div className="flex-1 relative md:min-h-[300px]">
               <Map
                 center={currentPosition}
+                track={selectedTrip ? track : undefined}
               />
               <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_2px,3px_100%] z-20 opacity-20" />
             </div>

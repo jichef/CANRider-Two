@@ -25,13 +25,36 @@ function MapResizer({ bounds }: { bounds?: L.LatLngBoundsExpression }) {
   return null;
 }
 
+// Gradiente estilo Garmin/Strava: azul (lento) → verde → amarillo → rojo (rápido).
+// El ratio es relativo a la velocidad máxima de ESE viaje, no una escala fija en
+// km/h — así funciona igual de bien en un ciclomotor que en una moto más rápida.
+function speedColor(ratio: number): string {
+  const stops = [
+    [59, 130, 246],   // azul
+    [34, 197, 94],    // verde
+    [250, 204, 21],   // amarillo
+    [239, 68, 68],    // rojo
+  ];
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const seg = clamped * (stops.length - 1);
+  const idx = Math.min(Math.floor(seg), stops.length - 2);
+  const t = seg - idx;
+  const [r1, g1, b1] = stops[idx];
+  const [r2, g2, b2] = stops[idx + 1];
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
 interface MapProps {
   center: [number, number];
   zoom?: number;
-  path?: [number, number][];
+  /** Traza real del viaje: [lat, lon, velocidad_kmh] por punto */
+  track?: [number, number, number][];
 }
 
-export default function Map({ center, zoom = 15, path }: MapProps) {
+export default function Map({ center, zoom = 15, track }: MapProps) {
   const [icons, setIcons] = useState<{ start: L.Icon, end: L.Icon } | null>(null);
 
   useEffect(() => {
@@ -63,12 +86,15 @@ export default function Map({ center, zoom = 15, path }: MapProps) {
     </div>
   );
 
-  const bounds = path && path.length > 0 ? L.latLngBounds(path) : undefined;
+  const hasTrack = track && track.length > 1;
+  const positions: [number, number][] = hasTrack ? track!.map(([lat, lon]) => [lat, lon]) : [];
+  const bounds = hasTrack ? L.latLngBounds(positions) : undefined;
+  const maxSpeed = hasTrack ? Math.max(1, ...track!.map(([, , v]) => v)) : 1;
 
   return (
-    <MapContainer 
-      center={center} 
-      zoom={zoom} 
+    <MapContainer
+      center={center}
+      zoom={zoom}
       style={{ height: '100%', width: '100%' }}
       scrollWheelZoom={false}
     >
@@ -76,8 +102,8 @@ export default function Map({ center, zoom = 15, path }: MapProps) {
         attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
       />
-      
-      {!path && (
+
+      {!hasTrack && (
         <>
           <Marker position={center} icon={icons.start}>
             <Popup>Ubicación actual</Popup>
@@ -86,27 +112,37 @@ export default function Map({ center, zoom = 15, path }: MapProps) {
         </>
       )}
 
-      {path && path.length > 0 && (
+      {hasTrack && (
         <>
           {/* Marcador de INICIO */}
-          <Marker position={path[0]} icon={icons.start}>
+          <Marker position={positions[0]} icon={icons.start}>
             <Popup>Punto de inicio</Popup>
           </Marker>
 
           {/* Marcador de FIN */}
-          <Marker position={path[path.length - 1]} icon={icons.end}>
+          <Marker position={positions[positions.length - 1]} icon={icons.end}>
             <Popup>Punto de destino</Popup>
           </Marker>
 
-          <Polyline 
-            positions={path} 
-            pathOptions={{ 
-              color: '#ef4444',
-              weight: 6,
-              opacity: 0.9,
-              lineJoin: 'round',
-            }} 
-          />
+          {/* Un segmento por par de puntos consecutivos, coloreado según la
+              velocidad media de ese tramo — efecto de traza tipo Garmin/Strava */}
+          {track!.slice(0, -1).map(([lat1, lon1, v1], i) => {
+            const [lat2, lon2, v2] = track![i + 1];
+            const avgSpeed = (v1 + v2) / 2;
+            return (
+              <Polyline
+                key={i}
+                positions={[[lat1, lon1], [lat2, lon2]]}
+                pathOptions={{
+                  color: speedColor(avgSpeed / maxSpeed),
+                  weight: 6,
+                  opacity: 0.9,
+                  lineJoin: 'round',
+                  lineCap: 'round',
+                }}
+              />
+            );
+          })}
           <MapResizer bounds={bounds} />
         </>
       )}

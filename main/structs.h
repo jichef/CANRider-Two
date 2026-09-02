@@ -41,6 +41,15 @@ struct TxFrame {
 
 struct BatReading { bool valid; int pct; float volts; bool charging; };
 
+// Puntos de traza guardados durante el viaje (lat/lon/velocidad) para poder
+// dibujar la ruta real en el mapa, coloreada por velocidad, en vez de solo
+// una línea recta entre inicio y fin. Un punto por ciclo de POST
+// (POST_INTERVAL_MS) mientras hay fix GPS — a 15s/punto, 300 puntos cubren
+// 75 minutos de viaje, de sobra para un trayecto urbano típico. Si un
+// viaje dura más, se dejan de añadir puntos nuevos (se pierde el tramo
+// final, no el inicio) en vez de crecer sin límite.
+#define MAX_TRIP_POINTS 300
+
 struct TripState {
     bool     active      = false;
     uint32_t startMs     = 0;
@@ -50,4 +59,8 @@ struct TripState {
     float    lastLat     = 0, lastLon = 0;
     bool     hasLastPos  = false;
     int      sy, sm, sd, sh, smin, ss;
+    float    trackLat[MAX_TRIP_POINTS];
+    float    trackLon[MAX_TRIP_POINTS];
+    float    trackSpeed[MAX_TRIP_POINTS];
+    int      trackCount  = 0;
 };
