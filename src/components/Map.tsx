@@ -25,6 +25,26 @@ function MapResizer({ bounds }: { bounds?: L.LatLngBoundsExpression }) {
   return null;
 }
 
+// Leaflet calcula el tamaño del mapa al montarse — si en ese momento su
+// contenedor está oculto (display:none, como pasa con las pestañas
+// Live/Trips/Map en móvil) o cambia de tamaño después (al hacerse visible,
+// al rotar la pantalla, al cambiar el layout), Leaflet no se entera solo y
+// se queda pintando con las dimensiones antiguas: de ahí los trozos sin
+// cargar. Un ResizeObserver sobre el propio contenedor avisa a Leaflet
+// cada vez que su tamaño cambia de verdad, sea cual sea la causa.
+function MapAutoResize() {
+  const map = useMap();
+  useEffect(() => {
+    const container = map.getContainer();
+    const ro = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [map]);
+  return null;
+}
+
 // Gradiente estilo Garmin/Strava: azul (lento) → verde → amarillo → rojo (rápido).
 // El ratio es relativo a la velocidad máxima de ESE viaje, no una escala fija en
 // km/h — así funciona igual de bien en un ciclomotor que en una moto más rápida.
@@ -102,6 +122,7 @@ export default function Map({ center, zoom = 15, track }: MapProps) {
         attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
       />
+      <MapAutoResize />
 
       {!hasTrack && (
         <>
