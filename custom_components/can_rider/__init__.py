@@ -47,18 +47,31 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
             async with asyncio.timeout(15):
                 results = {"telemetry": None, "last_trip": None}
 
+                # En el primer refresco tras arrancar/recargar HA,
+                # last_telemetry está vacío — si se pide solo la última fila
+                # y el CAN lleva un rato en silencio, todos sus campos
+                # llegarían null sin nada con qué rellenarlos (se vería
+                # "unknown" en vez del último valor real). Se pide una
+                # ventana más amplia solo esa primera vez para arrancar ya
+                # con el último estado conocido de verdad.
+                first_load = not last_telemetry
+                tel_limit = 50 if first_load else 1
                 tel_url = (
                     f"{url}/rest/v1/telemetry"
-                    f"?motorcycle_id=eq.{vehicle_id}&select=*&order=timestamp.desc&limit=1"
+                    f"?motorcycle_id=eq.{vehicle_id}&select=*&order=timestamp.desc&limit={tel_limit}"
                 )
                 async with session.get(tel_url, headers=headers) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         if data:
-                            row = data[0]
                             merged = dict(last_telemetry)
-                            merged.update({k: v for k, v in row.items() if v is not None})
-                            for k, v in row.items():
+                            # data va de más reciente a más antigua; se
+                            # recorre al revés para que, si varias filas
+                            # tienen el mismo campo no-nulo, gane la más
+                            # reciente.
+                            for row in reversed(data):
+                                merged.update({k: v for k, v in row.items() if v is not None})
+                            for k, v in data[0].items():
                                 if v is None and k not in merged:
                                     merged[k] = None
                             last_telemetry = merged

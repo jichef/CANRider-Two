@@ -77,14 +77,21 @@ export default function DashboardContent() {
     }
 
     const fetchData = async () => {
-      const { data: telData } = await supabase
+      // Se piden las últimas 50 filas (no solo la más reciente) y se
+      // rellena cada campo con el último valor no-nulo visto entre ellas.
+      // Si se carga la página con el CAN ya en silencio desde hace rato,
+      // la fila más reciente sola vendría con todo a null — así el primer
+      // render ya arranca con el último estado conocido de verdad, no con
+      // ---. La suscripción realtime de abajo sigue usando mergeTelemetry
+      // sobre este estado ya poblado para las actualizaciones siguientes.
+      const { data: telRows } = await supabase
         .from('telemetry')
         .select('*')
         .order('timestamp', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(50);
 
-      if (telData) {
+      if (telRows && telRows.length > 0) {
+        const telData = telRows.reduce((acc: any, row: any) => mergeTelemetry(row, acc));
         setTelemetry((prev: any) => mergeTelemetry(prev, telData));
         if (telData.latitude && telData.longitude) {
           setCurrentPosition([telData.latitude, telData.longitude]);
