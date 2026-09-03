@@ -23,14 +23,38 @@ import { createClient } from '@/lib/supabase';
 // estado con ese null, se conserva el último valor no-null que se vio.
 function mergeTelemetry(prev: any, next: any) {
   if (!next) return prev;
-  if (!prev) return next;
+  if (!prev) {
+    return {
+      ...next,
+      _positionAt: (next.latitude != null && next.longitude != null) ? next.timestamp : undefined,
+    };
+  }
   const merged: any = { ...next };
   for (const key of Object.keys(next)) {
     if (next[key] === null || next[key] === undefined) {
       if (prev[key] !== undefined) merged[key] = prev[key];
     }
   }
+  // La posición se mantiene igual que el resto de campos (último valor
+  // conocido), pero además se guarda CUÁNDO fue esa última lectura real —
+  // telemetry.timestamp por sí solo no sirve para esto, porque puede ser
+  // más reciente que la posición si esa fila concreta trajo otros datos
+  // pero no GPS.
+  merged._positionAt = (next.latitude != null && next.longitude != null)
+    ? next.timestamp
+    : prev._positionAt;
   return merged;
+}
+
+function timeAgo(isoString?: string | null) {
+  if (!isoString) return null;
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'ahora mismo';
+  if (mins < 60) return `hace ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `hace ${hours}h ${mins % 60}min`;
+  return `hace ${Math.floor(hours / 24)}d`;
 }
 
 const Map = dynamic(() => import('@/components/Map'), {
@@ -459,6 +483,9 @@ export default function DashboardContent() {
                       <span className="text-[10px] text-zinc-600 font-mono">
                         {Math.abs(currentPosition[0]).toFixed(4)}° {currentPosition[0] >= 0 ? 'N' : 'S'}, {Math.abs(currentPosition[1]).toFixed(4)}° {currentPosition[1] >= 0 ? 'E' : 'W'}
                       </span>
+                      {timeAgo(telemetry?._positionAt) && (
+                        <span className="text-[10px] text-zinc-600 font-mono">· {timeAgo(telemetry?._positionAt)}</span>
+                      )}
                       <a
                         href={`https://www.google.com/maps?q=${currentPosition[0]},${currentPosition[1]}`}
                         target="_blank"
