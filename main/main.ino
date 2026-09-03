@@ -1137,6 +1137,176 @@ bool networkSetup() {
 }
 #endif
 
+// ── Cuerpo de telemetría ─────────────────────────────────────────────────────
+// Extraído de lo que antes vivía inline en el caso RUNNING para poder
+// reutilizarlo también desde el rescate por WiFi (ver más abajo) sin
+// duplicar la lectura de GPS/batería/CAN. El struct TelemetrySnapshot vive
+// en structs.h (ver comentario ahí sobre por qué no está inline aquí).
+static TelemetrySnapshot buildTelemetrySnapshot() {
+    TelemetrySnapshot snap;
+    readGPS();
+    BatReading bat = readBattery();
+    int16_t    rssi = readSignalStrength();
+    snap.t        = snapshotTime();
+    snap.busAlive = canBusAlive();
+
+    // GPS moviéndose sin CAN = posible sustracción, ver THEFT_SPEED_KMH.
+    bool movingWithoutCan = snap.t.hasPos && !snap.busAlive && snap.t.speed_kmh >= THEFT_SPEED_KMH;
+    if (movingWithoutCan)
+        Serial.println("[ALERTA] Movimiento GPS sin tramas CAN — posible sustracción");
+
+    String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
+    if (snap.t.hasPos) {
+        body += ",\"latitude\":"  + String(snap.t.lat,       6);
+        body += ",\"longitude\":" + String(snap.t.lon,       6);
+        body += ",\"speed\":"     + String(snap.t.speed_kmh, 1);
+        body += ",\"position_source\":\"";
+        body += (snap.t.posSource == 'l') ? "lbs" : "gps";
+        body += "\"";
+    } else {
+        body += ",\"speed\":0";
+    }
+    body += ",\"moving_without_can\":" + String(movingWithoutCan ? "true" : "false");
+    if (bat.valid) {
+        body += ",\"battery_level\":"   + String(bat.pct);
+        body += ",\"battery_voltage\":" + String(bat.volts, 3);
+        body += ",\"is_charging\":"     + String(bat.charging ? "true" : "false");
+    }
+    if (rssi != INT16_MIN) {
+        body += ",\"signal_strength\":" + String(rssi);
+    }
+
+    // La CPX reporta el SoC por 0x540 (moto_battery) o 0x541
+    // (moto_battery_b) según el "modo de batería" activo en el BMS —
+    // en la práctica solo uno de los dos trae datos reales a la vez,
+    // así que se usa el que no esté a cero.
+    float socA = 0, socB = 0;
+    if (xSemaphoreTake(canMux, pdMS_TO_TICKS(10)) == pdTRUE) {
+        for (int i = 0; i < canSignalCount; i++) {
+            if (canSignals[i].direction == 't') continue;  // TX no va a telemetría
+            if (strcmp(canSignals[i].name, "moto_battery")   == 0) socA = canSignals[i].value;
+            if (strcmp(canSignals[i].name, "moto_battery_b") == 0) socB = canSignals[i].value;
+            if (canSignals[i].updated) {
+                body += ",\"" + String(canSignals[i].name) + "\":"
+                      + String(canSignals[i].value, canSignals[i].byteLen == 1 ? 0 : 2);
+                canSignals[i].updated = false;
+            }
+        }
+        xSemaphoreGive(canMux);
+    }
+    snap.currentSoc = (socA > 0) ? socA : socB;
+    body += "}";
+    snap.body = body;
+    return snap;
+}
+
+// ── Rescate de conectividad por WiFi ─────────────────────────────────────────
+// Sin WIFI_FALLBACK_SSID_1 definido en config.h, nada de esto se compila.
+//
+// Se activa SOLO mientras la LTE está fallando (state == ERROR_WAIT) — con
+// la LTE funcionando normal (RUNNING) esta función nunca hace nada, a
+// propósito: es un rescate para cuando hay mala cobertura, no un cambio de
+// prioridad permanente entre LTE y WiFi.
+//
+// Solo manda telemetría (posición/batería/CAN) por este camino — el inicio
+// y cierre de viajes se sigue gestionando por LTE cuando vuelva; si un
+// viaje termina justo durante una ventana de rescate WiFi, se queda en
+// pendingTripBody y se reintenta en cuanto la LTE se recupere (ver
+// flushPendingTrip()), no se pierde.
+#if defined(WIFI_FALLBACK_SSID_1)
+
+#include <WiFi.h>
+#include <WiFiMulti.h>
+#include <HTTPClient.h>
+
+#define WIFI_FALLBACK_TIMEOUT_MS 120000UL   // 2 min probando antes de rendirse
+
+static WiFiMulti wifiMulti;
+static bool      wifiMultiSetup = false;
+
+enum WifiFallbackState { WF_IDLE, WF_CONNECTING, WF_CONNECTED };
+static WifiFallbackState wfState     = WF_IDLE;
+static uint32_t          wfStartedMs = 0;
+static uint32_t          wfNextPost  = 0;
+
+static void wifiFallbackSetupOnce() {
+    if (wifiMultiSetup) return;
+    wifiMulti.addAP(WIFI_FALLBACK_SSID_1, WIFI_FALLBACK_PASS_1);
+#if defined(WIFI_FALLBACK_SSID_2)
+    wifiMulti.addAP(WIFI_FALLBACK_SSID_2, WIFI_FALLBACK_PASS_2);
+#endif
+    wifiMultiSetup = true;
+}
+
+// Sin verificación de certificado — igual que el resto del firmware
+// (AT+HTTPPARA "SSLCFG",0 en el camino del módem): no se compara con un
+// nivel de seguridad distinto al que ya se acepta ahí.
+static bool wifiHttpPostTo(const String& tablePath, const String& body) {
+    HTTPClient http;
+    String url = String(SUPABASE_URL) + tablePath + "?apikey=" + SUPABASE_KEY;
+    http.begin(url);
+    http.setConnectTimeout(8000);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Bearer " SUPABASE_KEY);
+    int code = http.POST(body);
+    http.end();
+    return (code == 200 || code == 201);
+}
+
+static void wifiFallbackLoop() {
+    wifiFallbackSetupOnce();
+    switch (wfState) {
+    case WF_IDLE:
+        Serial.println("[WIFI] LTE fallando, probando WiFi de rescate...");
+        WiFi.mode(WIFI_STA);
+        wfStartedMs = millis();
+        wfState     = WF_CONNECTING;
+        break;
+
+    case WF_CONNECTING:
+        if (wifiMulti.run() == WL_CONNECTED) {
+            Serial.printf("[WIFI] Conectado a %s, IP %s\n",
+                          WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+            wfState    = WF_CONNECTED;
+            wfNextPost = millis();
+        } else if (millis() - wfStartedMs > WIFI_FALLBACK_TIMEOUT_MS) {
+            Serial.println("[WIFI] No se pudo conectar a ninguna red conocida, se apaga y sigue con LTE");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            wfState = WF_IDLE;
+        }
+        break;
+
+    case WF_CONNECTED:
+        if (wifiMulti.run() != WL_CONNECTED) {
+            Serial.println("[WIFI] Se ha perdido la conexión, vuelve a intentar por LTE");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            wfState = WF_IDLE;
+            break;
+        }
+        if (millis() < wfNextPost) break;
+        wfNextPost = millis() + POST_INTERVAL_MS;
+
+        {
+            TelemetrySnapshot snap = buildTelemetrySnapshot();
+            Serial.print("[WIFI POST] "); Serial.println(snap.body);
+            if (wifiHttpPostTo("/rest/v1/telemetry", snap.body))
+                Serial.println("[OK] Telemetría enviada por WiFi");
+            else
+                Serial.println("[ERROR] Fallo POST por WiFi");
+        }
+        break;
+    }
+}
+
+static bool wifiFallbackActive() { return wfState != WF_IDLE; }
+
+#else
+static void wifiFallbackLoop()   {}
+static bool wifiFallbackActive() { return false; }
+#endif
+
 // ── Arranque ──────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200); delay(1000);
@@ -1230,62 +1400,10 @@ void loop() {
         if (millis() < nextPost) break;
         nextPost = millis() + POST_INTERVAL_MS;
 
-        readGPS();
-        BatReading bat      = readBattery();
-        int16_t    rssi     = readSignalStrength();
-        TimeRef    t        = snapshotTime();
-        bool       busAlive = canBusAlive();
+        TelemetrySnapshot snap = buildTelemetrySnapshot();
 
-        // GPS moviéndose sin CAN = posible sustracción, ver THEFT_SPEED_KMH.
-        bool movingWithoutCan = t.hasPos && !busAlive && t.speed_kmh >= THEFT_SPEED_KMH;
-        if (movingWithoutCan)
-            Serial.println("[ALERTA] Movimiento GPS sin tramas CAN — posible sustracción");
-
-        String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
-        if (t.hasPos) {
-            body += ",\"latitude\":"  + String(t.lat,       6);
-            body += ",\"longitude\":" + String(t.lon,       6);
-            body += ",\"speed\":"     + String(t.speed_kmh, 1);
-            body += ",\"position_source\":\"";
-            body += (t.posSource == 'l') ? "lbs" : "gps";
-            body += "\"";
-        } else {
-            body += ",\"speed\":0";
-        }
-        body += ",\"moving_without_can\":" + String(movingWithoutCan ? "true" : "false");
-        if (bat.valid) {
-            body += ",\"battery_level\":"   + String(bat.pct);
-            body += ",\"battery_voltage\":" + String(bat.volts, 3);
-            body += ",\"is_charging\":"     + String(bat.charging ? "true" : "false");
-        }
-        if (rssi != INT16_MIN) {
-            body += ",\"signal_strength\":" + String(rssi);
-        }
-
-        // Añadir señales CAN decodificadas (solo RX); capturar soc para viajes.
-        // La CPX reporta el SoC por 0x540 (moto_battery) o 0x541
-        // (moto_battery_b) según el "modo de batería" activo en el BMS —
-        // en la práctica solo uno de los dos trae datos reales a la vez,
-        // así que se usa el que no esté a cero.
-        float socA = 0, socB = 0;
-        if (xSemaphoreTake(canMux, pdMS_TO_TICKS(10)) == pdTRUE) {
-            for (int i = 0; i < canSignalCount; i++) {
-                if (canSignals[i].direction == 't') continue;  // TX no va a telemetría
-                if (strcmp(canSignals[i].name, "moto_battery")   == 0) socA = canSignals[i].value;
-                if (strcmp(canSignals[i].name, "moto_battery_b") == 0) socB = canSignals[i].value;
-                if (canSignals[i].updated) {
-                    body += ",\"" + String(canSignals[i].name) + "\":"
-                          + String(canSignals[i].value, canSignals[i].byteLen == 1 ? 0 : 2);
-                    canSignals[i].updated = false;
-                }
-            }
-            xSemaphoreGive(canMux);
-        }
-        float currentSoc = (socA > 0) ? socA : socB;
-        body += "}";
-
-        Serial.print("[POST] "); Serial.println(body);
-        if (httpPost(body)) {
+        Serial.print("[POST] "); Serial.println(snap.body);
+        if (httpPost(snap.body)) {
             httpFails = 0;
             Serial.println("[OK] Telemetría enviada");
         } else {
@@ -1310,7 +1428,7 @@ void loop() {
         }
 
         // Actualizar viaje; si termina, re-inicializar sesión HTTP
-        if (updateTrip(busAlive, t.speed_kmh, currentSoc, t.lat, t.lon, t.hasPos, t))
+        if (updateTrip(snap.busAlive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t))
             state = HTTP_SETUP;
 
         // Si quedó un viaje sin poder guardarse en un ciclo anterior, reintentarlo
@@ -1321,6 +1439,12 @@ void loop() {
 
     case ERROR_WAIT:
         while (SerialAT.available()) Serial.write(SerialAT.read());
+        // Mientras la LTE está fallando, se prueba/mantiene el rescate por
+        // WiFi si hay redes configuradas — mientras esté intentando o ya
+        // conectado, se pausa el reintento normal de LTE de abajo para no
+        // pelear los dos caminos a la vez.
+        wifiFallbackLoop();
+        if (wifiFallbackActive()) break;
         if (millis() - stateAt > RETRY_WAIT_MS) {
 #if defined(MODEM_A7670G)
             sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");

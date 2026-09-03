@@ -41,6 +41,18 @@ struct TxFrame {
 
 struct BatReading { bool valid; int pct; float volts; bool charging; };
 
+// Cuerpo de telemetría ya construido + los datos que necesita updateTrip()
+// después de mandarlo — definido aquí (no inline en main.ino) porque el
+// generador automático de prototipos de Arduino inserta el prototipo de
+// buildTelemetrySnapshot() antes de que el struct exista si se define en
+// el propio .ino.
+struct TelemetrySnapshot {
+    String  body;
+    bool    busAlive;
+    float   currentSoc;
+    TimeRef t;
+};
+
 // Puntos de traza guardados durante el viaje (lat/lon/velocidad) para poder
 // dibujar la ruta real en el mapa, coloreada por velocidad, en vez de solo
 // una línea recta entre inicio y fin. Un punto por ciclo de POST

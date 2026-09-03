@@ -175,4 +175,27 @@
 
 // #define OTA_AP_PASSWORD "cambia-esto-por-algo-tuyo"
 
+
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> OPCIONAL — Rescate de conectividad por WiFi                       │
+// └──────────────────────────────────────────────────────────────────────┘
+// Sin rellenar (por defecto), esta función no existe.
+//
+// Pensado para cuando la cobertura LTE es mala: si definida, se prueban
+// estas redes conocidas (hasta 2, la segunda es opcional) SOLO mientras
+// la LTE está fallando — con la LTE funcionando normal, el WiFi nunca se
+// enciende. Si no consigue conectar a ninguna en 2 minutos, se apaga y
+// sigue reintentando por LTE como siempre.
+//
+// Mientras está conectado por WiFi solo se manda telemetría (posición,
+// batería, señales CAN) — el guardado de inicio/fin de viaje sigue
+// dependiendo de la LTE; si un viaje termina justo en esa ventana, se
+// reintenta en cuanto la LTE vuelva (no se pierde, ver pendingTripBody).
+
+// #define WIFI_FALLBACK_SSID_1 "tu-red-1"
+// #define WIFI_FALLBACK_PASS_1 "contraseña-red-1"
+
+// #define WIFI_FALLBACK_SSID_2 "tu-red-2"
+// #define WIFI_FALLBACK_PASS_2 "contraseña-red-2"
+
 #endif
