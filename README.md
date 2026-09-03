@@ -20,7 +20,8 @@ Este proyecto se publica **tal cual («as is»), sin garantía de ningún tipo**
 - **Emite una trama CAN**: la hora sincronizada por red, para la pantalla del vehículo — y **nunca nada más** que eso
 - **Envía telemetría** cada 15 segundos a Supabase vía LTE (sin WiFi)
 - **Posición GPS**, con respaldo automático por triangulación de celda (LBS) si no hay fix GPS
-- **Registra viajes** automáticamente: distancia, velocidad máxima, consumo de batería
+- **Registra viajes** automáticamente: empiezan con la primera trama CAN (moto encendida) y terminan cuando el bus lleva 8s en silencio (moto apagada) — distancia, velocidad máxima, consumo de batería y la traza real del recorrido (para pintarla en el mapa coloreada por velocidad; se guardan hasta 300 puntos por viaje, ~75 min a un punto cada 15s — pasado eso, el resto del viaje sigue contando para distancia/duración pero no se añaden más puntos al dibujo)
+- **Detección de sustracción**: si el GPS mide movimiento real (≥5 km/h) mientras el bus CAN lleva rato en silencio, no hay explicación normal — la moto no se mueve sola apagada. Puede ser indicio de que la están transportando sin la llave
 - **Panel web** en tiempo real con mapa, historial de viajes y estado del sistema
 - **Integración con Home Assistant** opcional (`custom_components/can_rider`)
 
@@ -168,7 +169,7 @@ Si cambias variables de entorno después del primer deploy, tienes que forzar un
 
 Copia la carpeta `custom_components/can_rider` a tu instalación de Home Assistant (`config/custom_components/`), reinicia HA, y añade la integración desde **Ajustes → Dispositivos y servicios → Añadir integración → CanRider**. Te pedirá la URL y anon key de Supabase, el `VEHICLE_ID` y el modelo de placa.
 
-Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red, seguimiento GPS (`device_tracker`), estado de carga y datos del último viaje.
+Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red, seguimiento GPS (`device_tracker`), estado de carga (`binary_sensor`) y datos del último viaje. También incluye el sensor **«Movimiento Sin CAN»** (`binary_sensor`, clase `tamper`): se activa si el GPS mide movimiento real con el bus CAN en silencio (moto apagada) — útil para montar una automatización de aviso ante una posible sustracción.
 
 ---
 
@@ -176,7 +177,9 @@ Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red,
 
 ### Panel de telemetría (`/`)
 
-Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE, batería del ESP32, indicador de si la posición es GPS real o aproximada por LBS, mapa con la posición actual y el historial de viajes.
+Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE, batería del ESP32, indicador de si la posición es GPS real o aproximada por LBS, mapa con la posición actual y el historial de viajes — al seleccionar un viaje se dibuja su recorrido real coloreado por velocidad (no solo una línea recta entre inicio y fin).
+
+> **Nota:** `moving_without_can` (posible sustracción, ver más abajo) se guarda en cada lectura de `telemetry` pero de momento no tiene ninguna alerta en el panel web — solo aparece como aviso en el Monitor Serie del firmware. Sería una buena mejora a futuro para el portal.
 
 > **Seguridad CAN:** el firmware nunca transmite nada que no sea la trama de la hora, definida directamente en el código (`setupCANSignals()` en `main.ino`), nunca configurable de forma remota. La tabla `can_signals` de Supabase no tiene efecto en tiempo de ejecución — se mantiene solo como referencia opcional (ver comentario en `supabase/schema.sql`).
 
@@ -203,8 +206,12 @@ Encendido
     │            1. Lee GPS (respaldo por LBS si no hay fix)
     │            2. Lee batería interna (AT+CBC) y señal de red
     │            3. Construye JSON con los datos CAN acumulados
-    │            4. HTTP POST → Supabase /telemetry
-    │            5. Gestiona inicio/fin de viaje automáticamente
+    │            4. Si hay movimiento GPS con el bus CAN en silencio,
+    │               marca moving_without_can (posible sustracción)
+    │            5. HTTP POST → Supabase /telemetry
+    │            6. Gestiona inicio/fin de viaje según actividad del bus
+    │               CAN (no según velocidad GPS) y acumula la traza
+    │               del recorrido (lat/lon/velocidad por punto)
     │
     └── Task CAN (núcleo paralelo, cada 200 ms):
            · Emite la trama de la hora (solo con hora de red válida)

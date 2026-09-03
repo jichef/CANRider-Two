@@ -149,4 +149,30 @@
 // #define CAN_CHARGING_BYTE
 // #define CAN_CHARGING_BITMASK
 
+
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> OPCIONAL — Actualización OTA por BLE + WiFi                       │
+// └──────────────────────────────────────────────────────────────────────┘
+// Sin rellenar (por defecto), esta función no existe: el firmware no
+// anuncia BLE ni levanta ningún AP WiFi.
+//
+// Si defines una contraseña aquí: el ESP32 anuncia BLE de forma continua
+// (bajo consumo). Al conectar desde Ajustes → Bluetooth del móvil (nativo
+// de iOS/Android, sin ninguna app) — y SOLO si la moto está apagada (bus
+// CAN en silencio) — levanta un AP WiFi "CanRiderTwo" con esta contraseña
+// y sirve una página en http://192.168.4.1/ para subir un .bin y
+// actualizar el firmware sin cable. El AP se apaga solo a los 10 min sin
+// uso, o de inmediato si la moto se enciende a mitad de la ventana.
+//
+// Usa una contraseña propia de al menos 8 caracteres — es un secreto igual
+// que SUPABASE_KEY, no la compartas ni la subas a git.
+//
+// IMPORTANTE: BLE+WiFi no caben en el esquema de particiones por defecto
+// de Arduino IDE (da un error de compilación tipo "text section exceeds
+// available space"). Antes de compilar con esto activado, cambia
+// Tools → Partition Scheme a "Minimal SPIFFS (1.9MB APP with OTA/190KB
+// SPIFFS)" — ver paso 5 de la guía.
+
+// #define OTA_AP_PASSWORD "cambia-esto-por-algo-tuyo"
+
 #endif

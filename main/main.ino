@@ -915,6 +915,173 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     return false;
 }
 
+// ── OTA vía BLE + AP WiFi ─────────────────────────────────────────────────────
+// Sin OTA_AP_PASSWORD definido en config.h, nada de esto se compila: el
+// firmware no anuncia BLE ni levanta ningún AP, cero coste.
+//
+// Diseño: el ESP32 anuncia BLE de forma continua (bajo consumo). Al conectar
+// desde Ajustes → Bluetooth del móvil — nativo de iOS/Android, sin ninguna
+// app propia — y SOLO si la moto está apagada (canBusAlive()==false, mismo
+// criterio que el fin de viaje), se levanta un AP WiFi "CanRiderTwo" con la
+// contraseña de config.h y un servidor mínimo para subir un .bin y
+// actualizar el firmware. El AP se apaga solo pasado OTA_AP_TIMEOUT_MS sin
+// actividad, o de inmediato si la moto se enciende a mitad de la ventana —
+// nunca se actualiza el firmware con la moto en marcha.
+#if defined(OTA_AP_PASSWORD)
+
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+
+#define OTA_AP_SSID       "CanRiderTwo"
+#define OTA_BLE_NAME      "CanRiderTwo"
+#define OTA_AP_TIMEOUT_MS 600000UL   // 10 min sin actividad → se apaga solo
+
+static WebServer otaServer(80);
+static bool      otaApActive     = false;
+static uint32_t  otaLastActivity = 0;
+
+const char OTA_PAGE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CanRider OTA</title>
+<style>
+body{font-family:-apple-system,system-ui,sans-serif;background:#0d1211;color:#e7efea;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}
+.card{background:#171f1d;border:1px solid #2b3532;border-radius:14px;padding:28px;max-width:360px;width:100%}
+h1{font-size:18px;margin:0 0 4px}
+p.sub{color:#7fa79e;font-size:12px;margin:0 0 20px}
+input[type=file]{width:100%;margin-bottom:16px;color:#e7efea}
+button{width:100%;background:#167a70;color:#fff;border:0;border-radius:8px;padding:12px;
+       font-size:14px;font-weight:600;cursor:pointer}
+button:disabled{opacity:0.5}
+#status{margin-top:16px;font-size:13px;color:#7fa79e;white-space:pre-wrap}
+#bar{height:6px;background:#2b3532;border-radius:3px;overflow:hidden;margin-top:12px;display:none}
+#bar div{height:100%;width:0;background:#167a70;transition:width .2s}
+</style></head><body>
+<div class="card">
+  <h1>CanRider &mdash; Actualizaci&oacute;n OTA</h1>
+  <p class="sub">Sube el .bin exportado desde Arduino IDE (Sketch &rarr; Export Compiled Binary)</p>
+  <input type="file" id="f" accept=".bin">
+  <button id="btn" onclick="up()">Actualizar firmware</button>
+  <div id="bar"><div id="barfill"></div></div>
+  <div id="status"></div>
+</div>
+<script>
+function up(){
+  var f=document.getElementById('f').files[0];
+  if(!f){document.getElementById('status').textContent='Elige un archivo .bin primero';return;}
+  var btn=document.getElementById('btn');btn.disabled=true;
+  var bar=document.getElementById('bar');bar.style.display='block';
+  var fill=document.getElementById('barfill');
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/update',true);
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){fill.style.width=Math.round(e.loaded/e.total*100)+'%';}
+  };
+  xhr.onload=function(){
+    document.getElementById('status').textContent=xhr.responseText;
+    if(xhr.status===200){document.getElementById('status').textContent+='\nReiniciando...';}
+    else{btn.disabled=false;}
+  };
+  xhr.onerror=function(){
+    document.getElementById('status').textContent='Error de conexión';
+    btn.disabled=false;
+  };
+  var fd=new FormData();fd.append('firmware',f);
+  xhr.send(fd);
+}
+</script></body></html>
+)HTML";
+
+static void otaStartAP() {
+    if (otaApActive) return;
+    Serial.println("[OTA] Moto apagada + BLE conectado -> levantando AP");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(OTA_AP_SSID, OTA_AP_PASSWORD);
+
+    otaServer.on("/", HTTP_GET, []() {
+        otaServer.send_P(200, "text/html", OTA_PAGE);
+    });
+
+    otaServer.on("/update", HTTP_POST, []() {
+        bool ok = !Update.hasError();
+        otaServer.send(ok ? 200 : 500, "text/plain",
+                        ok ? "OK, firmware actualizado" : "Error al escribir firmware");
+        delay(500);
+        if (ok) ESP.restart();
+    }, []() {
+        HTTPUpload& upload = otaServer.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            Serial.printf("[OTA] Recibiendo %s\n", upload.filename.c_str());
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) Update.printError(Serial);
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (Update.end(true)) Serial.printf("[OTA] OK, %u bytes\n", (unsigned)upload.totalSize);
+            else Update.printError(Serial);
+        }
+        otaLastActivity = millis();
+    });
+
+    otaServer.begin();
+    otaApActive     = true;
+    otaLastActivity = millis();
+}
+
+static void otaStopAP() {
+    if (!otaApActive) return;
+    Serial.println("[OTA] Apagando AP");
+    otaServer.stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_OFF);
+    otaApActive = false;
+}
+
+class OtaBleCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer* /*server*/) override {
+        Serial.println("[OTA] BLE conectado");
+        if (!canBusAlive()) {
+            otaStartAP();
+        } else {
+            Serial.println("[OTA] Moto encendida, se ignora (solo con CAN en silencio)");
+        }
+        BLEDevice::startAdvertising();  // seguir anunciando para permitir reconexión
+    }
+    void onDisconnect(BLEServer* /*server*/) override {
+        Serial.println("[OTA] BLE desconectado");
+        BLEDevice::startAdvertising();
+    }
+};
+
+static void setupOTA() {
+    BLEDevice::init(OTA_BLE_NAME);
+    BLEServer* bleServer = BLEDevice::createServer();
+    bleServer->setCallbacks(new OtaBleCallbacks());
+    BLEDevice::getAdvertising()->start();
+    Serial.println("[OTA] BLE anunciando");
+}
+
+static void otaLoop() {
+    if (!otaApActive) return;
+    otaServer.handleClient();
+    if (canBusAlive()) {
+        Serial.println("[OTA] Moto encendida a mitad de ventana OTA -> cerrando AP");
+        otaStopAP();
+        return;
+    }
+    if (millis() - otaLastActivity > OTA_AP_TIMEOUT_MS) {
+        Serial.println("[OTA] Sin actividad, cerrando AP");
+        otaStopAP();
+    }
+}
+
+#else
+static void setupOTA() {}
+static void otaLoop()  {}
+#endif
+
 // ── Red ───────────────────────────────────────────────────────────────────────
 #if defined(MODEM_A7670G)
 bool networkSetup() {
@@ -1004,11 +1171,13 @@ void setup() {
     setupCAN();
     setupCANSignals();
     xTaskCreatePinnedToCore(canTask, "CAN", 3072, NULL, 1, NULL, 0);
+    setupOTA();
     stateAt = millis();
 }
 
 // ── Loop principal (Core 1) ───────────────────────────────────────────────────
 void loop() {
+    otaLoop();   // no bloqueante; no hace nada salvo que el AP OTA esté activo
     switch (state) {
 
     case MODEM_BOOT:

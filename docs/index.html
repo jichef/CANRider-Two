@@ -629,6 +629,7 @@
         <li><b>Avisa de movimiento sin CAN</b>: si el GPS mide que la moto se mueve mientras el bus CAN lleva varios segundos en silencio (apagada), lo marca como posible sustracción — la moto no se mueve sola apagada</li>
         <li><b>Aguanta roaming inestable</b> — reintentos con espera entre fallos y reconexión completa de red tras fallos consecutivos, en vez de machacar la red del operador</li>
         <li><b>Dos placas soportadas</b> — LilyGo T-SIM7000G y T-A7670G — con los pines de cada una ya resueltos: solo hay que elegir cuál tienes en <code>config.h</code></li>
+        <li><b>Actualización OTA opcional</b> — anuncia Bluetooth de bajo consumo; al conectar desde el móvil (sin ninguna app) y solo con la moto apagada, levanta un WiFi propio con una página para subir el nuevo firmware sin cable ni Arduino IDE</li>
       </ul>
     </section>
 
@@ -776,8 +777,14 @@
       <ol class="sub-list" start="3">
         <li>Ve a <span class="ui-path">Tools → Board → Boards Manager</span>, busca <code>esp32</code> e instala el paquete de Espressif.</li>
         <li>Selecciona la placa: <span class="ui-path">Tools → Board → ESP32 Arduino → ESP32 Dev Module</span>.</li>
+        <li>Ve a <span class="ui-path">Tools → Partition Scheme</span> y elige <b>«Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)»</b> en vez de la que viene por defecto.</li>
         <li>Ve a <span class="ui-path">Tools → Manage Libraries</span>, busca <code>TinyGSM</code> e instálala.</li>
       </ol>
+
+      <div class="callout note">
+        <span class="k">¿Por qué cambiar el esquema de particiones?</span>
+        <p>El de por defecto solo deja 1.2 MB para el firmware — de sobra para el firmware normal, pero no para la actualización OTA opcional (BLE + WiFi ocupan bastante flash). Cambiarlo ahora, aunque no vayas a usar OTA, evita un error de compilación confuso más adelante si algún día lo activas.</p>
+      </div>
     </section>
 
     <!-- PASO 6 -->
@@ -1038,6 +1045,11 @@
         <li>Comprueba el cableado del paso 7</li>
         <li>Comprueba que has descomentado y rellenado el bloque 5/5 de <code>config.h</code> — si lo dejaste tal cual venía, el firmware no transmite ni lee ninguna señal (lo verás en el Monitor Serie como <code>[CAN] 0 señales</code>)</li>
         <li>Si ves <code>[CAN] Bus-off detectado</code>, el propio firmware se recupera solo — si se repite mucho, revisa la terminación del bus</li>
+      </ul>
+
+      <h3>Error al compilar: "text section exceeds available space"</h3>
+      <ul>
+        <li>Has activado <code>OTA_AP_PASSWORD</code> en <code>config.h</code> pero sigues con el esquema de particiones por defecto — ve a <span class="ui-path">Tools → Partition Scheme</span> y elige <b>«Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)»</b> (ver paso 5), luego vuelve a compilar</li>
       </ul>
     </section>
 
