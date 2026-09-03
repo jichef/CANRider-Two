@@ -3,12 +3,15 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Este es el ÚNICO archivo SQL que hace falta ejecutar para dejar Supabase
 -- listo. Crea las tres tablas que usa el proyecto (can_signals, telemetry,
--- trips), sus índices y sus permisos de acceso.
+-- trips), sus índices y sus permisos de acceso — y limpia cualquier resto
+-- de una versión anterior del proyecto (otras tablas, columnas o tipos)
+-- que pudiera quedar en la base de datos.
 --
 -- Es seguro ejecutarlo más de una vez: todas las instrucciones comprueban
--- primero si la tabla, columna o índice ya existe antes de crearlo, así que
--- si lo vuelves a pegar y ejecutar por error no vas a romper nada ni a
--- duplicar datos.
+-- primero si la tabla, columna o índice ya existe antes de crearlo (y las
+-- que corrigen tipos de una versión anterior no hacen nada si ya están
+-- bien), así que si lo vuelves a pegar y ejecutar por error no vas a
+-- romper nada ni a duplicar datos.
 --
 -- Instrucciones de uso paso a paso (para quien nunca ha tocado una base de
 -- datos): ver el apartado "Volcar la base de datos" de docs/index.html,
@@ -122,6 +125,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
     signal_strength     smallint,
 
     -- CAN: estado general del pack EV
+    moto_battery        int,            -- SoC (%) — modo A del BMS (0x540)
+    moto_battery_b      int,            -- SoC (%) — modo B del BMS (0x541); en la práctica solo uno de los dos trae dato real a la vez
     soc                 float,
     pack_voltage        float,
     battery_current     float,
@@ -148,6 +153,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
 ALTER TABLE telemetry
   ADD COLUMN IF NOT EXISTS position_source     text,
   ADD COLUMN IF NOT EXISTS moving_without_can  boolean,
+  ADD COLUMN IF NOT EXISTS moto_battery        int,
+  ADD COLUMN IF NOT EXISTS moto_battery_b      int,
   ADD COLUMN IF NOT EXISTS soc                 float,
   ADD COLUMN IF NOT EXISTS pack_voltage        float,
   ADD COLUMN IF NOT EXISTS battery_current     float,
@@ -182,6 +189,45 @@ CREATE POLICY "select anon"
     ON telemetry FOR SELECT
     USING (true);
 
+-- Columnas sueltas de una versión anterior del proyecto (con PostGIS y
+-- otro diseño de tablas) que ya no se usa — el firmware actual nunca las
+-- lee ni las escribe. Se quitan para que el esquema real coincida con lo
+-- que este archivo documenta.
+ALTER TABLE telemetry
+  DROP COLUMN IF EXISTS location,
+  DROP COLUMN IF EXISTS bat_a_volts,
+  DROP COLUMN IF EXISTS bat_a_amps,
+  DROP COLUMN IF EXISTS bat_a_temp,
+  DROP COLUMN IF EXISTS bat_b_volts,
+  DROP COLUMN IF EXISTS bat_b_amps,
+  DROP COLUMN IF EXISTS bat_b_temp,
+  DROP COLUMN IF EXISTS is_charging_b,
+  DROP COLUMN IF EXISTS location_type,
+  DROP COLUMN IF EXISTS date,
+  DROP COLUMN IF EXISTS is_trip_active,
+  DROP COLUMN IF EXISTS trip_duration,
+  DROP COLUMN IF EXISTS trip_start,
+  DROP COLUMN IF EXISTS trip_end,
+  DROP COLUMN IF EXISTS start_time,
+  DROP COLUMN IF EXISTS end_time,
+  DROP COLUMN IF EXISTS duration;
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Limpieza: tablas de una versión anterior del proyecto (no se usan)
+-- ─────────────────────────────────────────────────────────────────────────
+-- motorcycles, locations, theft_events y can_configurations vienen de un
+-- diseño anterior (con PostGIS) que se abandonó. El firmware y el portal
+-- actuales no las leen ni las escriben — se eliminan para que el esquema
+-- real de Supabase coincida con lo que usa el proyecto. CASCADE se lleva
+-- también la clave foránea que trips.motorcycle_id tenía hacia
+-- motorcycles(id), heredada de ese mismo diseño anterior.
+
+DROP TABLE IF EXISTS motorcycles       CASCADE;
+DROP TABLE IF EXISTS locations         CASCADE;
+DROP TABLE IF EXISTS theft_events      CASCADE;
+DROP TABLE IF EXISTS can_configurations CASCADE;
+
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Tabla 3: trips
@@ -208,6 +254,29 @@ CREATE TABLE IF NOT EXISTS trips (
 -- Por si la tabla ya existía de una versión anterior sin esta columna:
 ALTER TABLE trips
   ADD COLUMN IF NOT EXISTS track jsonb;
+
+-- Por si la tabla ya existía de la versión anterior con otros tipos u
+-- otras columnas (ver comentario de la sección de limpieza más arriba):
+-- CREATE TABLE IF NOT EXISTS no toca una tabla que ya existe, así que sin
+-- esto los tipos incorrectos se quedarían para siempre y el firmware
+-- nunca podría guardar un viaje (duration llegaba como texto contra una
+-- columna integer, consumption como decimal contra integer, etc).
+-- Repetir estas líneas en una tabla ya corregida es una operación sin
+-- efecto, no rompe nada.
+ALTER TABLE trips ALTER COLUMN duration            TYPE text  USING duration::text;
+ALTER TABLE trips ALTER COLUMN consumption         TYPE float USING consumption::float;
+ALTER TABLE trips ALTER COLUMN start_battery_level TYPE float USING start_battery_level::float;
+ALTER TABLE trips ALTER COLUMN end_battery_level   TYPE float USING end_battery_level::float;
+ALTER TABLE trips ALTER COLUMN motorcycle_id       TYPE text  USING motorcycle_id::text;
+
+ALTER TABLE trips
+  DROP COLUMN IF EXISTS avg_speed,
+  DROP COLUMN IF EXISTS path,
+  DROP COLUMN IF EXISTS trip_start,
+  DROP COLUMN IF EXISTS trip_end,
+  DROP COLUMN IF EXISTS trip_duration,
+  DROP COLUMN IF EXISTS is_theft_detected,
+  DROP COLUMN IF EXISTS created_at;
 
 CREATE INDEX IF NOT EXISTS idx_trips_motorcycle_ts
     ON trips (motorcycle_id, start_time DESC);
