@@ -1217,6 +1217,7 @@ static TelemetrySnapshot buildTelemetrySnapshot() {
 
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
 #define WIFI_FALLBACK_TIMEOUT_MS 120000UL   // 2 min probando antes de rendirse
@@ -1240,15 +1241,28 @@ static void wifiFallbackSetupOnce() {
 
 // Sin verificación de certificado — igual que el resto del firmware
 // (AT+HTTPPARA "SSLCFG",0 en el camino del módem): no se compara con un
-// nivel de seguridad distinto al que ya se acepta ahí.
+// nivel de seguridad distinto al que ya se acepta ahí. HTTPClient::begin()
+// con una URL a pelo NO hace esto solo — sin un WiFiClientSecure con
+// setInsecure() de por medio, el handshake TLS falla porque no hay CA
+// raíz configurada y el POST nunca llega a completarse.
 static bool wifiHttpPostTo(const String& tablePath, const String& body) {
+    Serial.printf("[WIFI] IP local %s, RSSI %d, gateway %s\n",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI(),
+                  WiFi.gatewayIP().toString().c_str());
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
     String url = String(SUPABASE_URL) + tablePath + "?apikey=" + SUPABASE_KEY;
-    http.begin(url);
+    if (!http.begin(client, url)) {
+        Serial.println("[WIFI] http.begin() falló (URL mal formada?)");
+        return false;
+    }
     http.setConnectTimeout(8000);
+    http.setTimeout(8000);
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", "Bearer " SUPABASE_KEY);
     int code = http.POST(body);
+    Serial.printf("[WIFI] HTTPClient código: %d (%s)\n", code, http.errorToString(code).c_str());
     http.end();
     return (code == 200 || code == 201);
 }
