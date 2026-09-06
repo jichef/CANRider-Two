@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
 
     -- Identificación
     motorcycle_id       text      NOT NULL,
+    connection_type     text,           -- 'wifi' o 'lte' — por qué camino se mandó esta fila
 
     -- GPS / modem
     latitude            float,
@@ -151,6 +152,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
 
 -- Por si la tabla ya existía de una versión anterior sin estas columnas:
 ALTER TABLE telemetry
+  ADD COLUMN IF NOT EXISTS connection_type     text,
   ADD COLUMN IF NOT EXISTS position_source     text,
   ADD COLUMN IF NOT EXISTS moving_without_can  boolean,
   ADD COLUMN IF NOT EXISTS moto_battery        int,

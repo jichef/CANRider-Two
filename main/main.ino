@@ -1138,7 +1138,7 @@ bool networkSetup() {
 // reutilizarlo también desde el rescate por WiFi (ver más abajo) sin
 // duplicar la lectura de GPS/batería/CAN. El struct TelemetrySnapshot vive
 // en structs.h (ver comentario ahí sobre por qué no está inline aquí).
-static TelemetrySnapshot buildTelemetrySnapshot() {
+static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     TelemetrySnapshot snap;
     readGPS();
     BatReading bat = readBattery();
@@ -1152,6 +1152,7 @@ static TelemetrySnapshot buildTelemetrySnapshot() {
         Serial.println("[ALERTA] Movimiento GPS sin tramas CAN — posible sustracción");
 
     String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
+    body += ",\"connection_type\":\"" + String(connectionType) + "\"";
     if (snap.t.hasPos) {
         body += ",\"latitude\":"  + String(snap.t.lat,       6);
         body += ",\"longitude\":" + String(snap.t.lon,       6);
@@ -1317,7 +1318,7 @@ static void wifiFallbackLoop() {
         wfNextPost = millis() + POST_INTERVAL_MS;
 
         {
-            TelemetrySnapshot snap = buildTelemetrySnapshot();
+            TelemetrySnapshot snap = buildTelemetrySnapshot("wifi");
             Serial.print("[WIFI POST] "); Serial.println(snap.body);
             if (wifiHttpPostTo("/rest/v1/telemetry", snap.body))
                 Serial.println("[OK] Telemetría enviada por WiFi");
@@ -1437,7 +1438,7 @@ void loop() {
         // para no duplicar el POST.
         if (wifiConnected()) break;
 
-        TelemetrySnapshot snap = buildTelemetrySnapshot();
+        TelemetrySnapshot snap = buildTelemetrySnapshot("lte");
 
         Serial.print("[POST] "); Serial.println(snap.body);
         if (httpPost(snap.body)) {

@@ -12,6 +12,7 @@ import {
   Activity,
   Thermometer,
   Signal,
+  Wifi,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
@@ -383,6 +384,20 @@ export default function DashboardContent() {
               {isConfigured && telemetry && !isStale ? 'Online' : 'Offline'}
             </span>
           </div>
+
+          {/* Por qué camino se mandó la última telemetría — ver connection_type en main.ino */}
+          {telemetry?.connection_type && (
+            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
+              telemetry.connection_type === 'wifi'
+                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                : 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+            }`}>
+              {telemetry.connection_type === 'wifi' ? <Wifi size={12} /> : <Signal size={12} />}
+              <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
+                {telemetry.connection_type === 'wifi' ? 'WiFi' : 'LTE'}
+              </span>
+            </div>
+          )}
 
           {/* Batería interna ESP32 (AT+CBC) */}
           {telemetry?.battery_level != null && (
