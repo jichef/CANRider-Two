@@ -1,6 +1,6 @@
 # CanRider — Telemetría CAN para Vehículo Eléctrico
 
-Sistema de telemetría en tiempo real para vehículos eléctricos con bus CAN. Lee los datos del BMS a través del bus CAN, los transmite vía LTE a una base de datos en la nube y los muestra en un portal web accesible desde cualquier dispositivo — sin depender de WiFi.
+Sistema de telemetría en tiempo real para vehículos eléctricos con bus CAN. Lee los datos del BMS a través del bus CAN, los transmite a una base de datos en la nube (por LTE siempre disponible, o por WiFi cuando hay una red conocida al alcance) y los muestra en un portal web accesible desde cualquier dispositivo.
 
 > **¿Primera vez con esto?** Hay una guía paso a paso pensada para gente sin experiencia previa: [`docs/index.html`](docs/index.html). Ábrela en el navegador y sigue los pasos en orden.
 
@@ -18,11 +18,12 @@ Este proyecto se publica **tal cual («as is»), sin garantía de ningún tipo**
 
 - **Lee el bus CAN** del vehículo (estado de carga de baterías, etc.)
 - **Emite una trama CAN**: la hora sincronizada por red, para la pantalla del vehículo — y **nunca nada más** que eso
-- **Envía telemetría** cada 15 segundos a Supabase vía LTE (sin WiFi)
+- **Envía telemetría** cada 15 segundos a Supabase, por LTE siempre disponible o por **WiFi preferente** (opcional) cuando hay una red conocida al alcance — más barato y estable; vuelve a LTE solo si el WiFi deja de estar disponible
 - **Posición GPS**, con respaldo automático por triangulación de celda (LBS) si no hay fix GPS
 - **Registra viajes** automáticamente: empiezan con la primera trama CAN (moto encendida) y terminan cuando el bus lleva 8s en silencio (moto apagada) — distancia, velocidad máxima, consumo de batería y la traza real del recorrido (para pintarla en el mapa coloreada por velocidad; se guardan hasta 300 puntos por viaje, ~75 min a un punto cada 15s — pasado eso, el resto del viaje sigue contando para distancia/duración pero no se añaden más puntos al dibujo)
 - **Detección de sustracción**: si el GPS mide movimiento real (≥5 km/h) mientras el bus CAN lleva rato en silencio, no hay explicación normal — la moto no se mueve sola apagada. Puede ser indicio de que la están transportando sin la llave
-- **Panel web** en tiempo real con mapa, historial de viajes y estado del sistema
+- **Actualización de firmware por WiFi (OTA, opcional)**: al apagar la moto, levanta su propio WiFi con un portal cautivo para subir un nuevo firmware o reiniciar el ESP32 — sin cable, sin Arduino IDE, sin Bluetooth ni ninguna app
+- **Panel web** en tiempo real con mapa, historial de viajes (con opción de eliminarlos) y estado del sistema
 - **Integración con Home Assistant** opcional (`custom_components/can_rider`)
 
 ---
@@ -34,7 +35,7 @@ Este proyecto se publica **tal cual («as is»), sin garantía de ningún tipo**
       │  CAN bus (250 kbps)
       ▼
 [ LilyGo T-SIM7000G ]  ←── firmware Arduino (main/main.ino)
-      │  LTE (HTTPS)
+      │  LTE (HTTPS) o WiFi (HTTPS) si hay red conocida al alcance
       ▼
 [ Supabase ]  ←── base de datos PostgreSQL en la nube
       │  WebSocket / REST
@@ -108,7 +109,7 @@ cd CANRider-Two
 
 1. Entra en [supabase.com](https://supabase.com/) y crea un proyecto nuevo.
 2. Anota la **URL del proyecto** y la **anon key** (*Project Settings → API*).
-3. En el **SQL Editor**, pega y ejecuta el contenido completo de `supabase/schema.sql` — crea las tres tablas (`can_signals`, `telemetry`, `trips`) de una vez. Es idempotente: se puede volver a ejecutar sin duplicar nada.
+3. En el **SQL Editor**, pega y ejecuta el contenido completo de `supabase/schema.sql` — crea las tres tablas (`can_signals`, `telemetry`, `trips`) de una vez. Es idempotente: se puede volver a ejecutar sin duplicar nada. Si vienes de una versión muy antigua del proyecto (con PostGIS, tablas `motorcycles`/`locations`/etc.), este mismo script también limpia esos restos para que el esquema real coincida con el que usa el firmware actual.
 
 ### 3. Configurar el firmware
 
@@ -118,7 +119,12 @@ cp main/config.h.example main/config.h
 
 Edita `main/config.h` — el propio archivo tiene marcado con `>>> CAMBIA ESTO <<<` exactamente qué rellenar (placa, credenciales de Supabase, APN, y el frame ID/byte de las 5 señales CAN por defecto: hora, batería A, batería B y estado de carga). Cada señal es independiente: puedes dejar comentadas las que no te interesen, el firmware simplemente las omite.
 
-Si necesitas leer alguna señal CAN adicional a esas 4, o emitir alguna trama TX nueva, eso sí requiere editar `setupCANSignals()` dentro de `main/main.ino` directamente — es una decisión deliberada del proyecto: así nunca se puede ampliar lo que el ESP32 transmite por CAN solo con tocar un archivo de configuración.
+Si necesitas leer alguna señal CAN adicional a esas 5, o emitir alguna trama TX nueva, eso sí requiere editar `setupCANSignals()` dentro de `main/main.ino` directamente — es una decisión deliberada del proyecto: así nunca se puede ampliar lo que el ESP32 transmite por CAN solo con tocar un archivo de configuración.
+
+Más abajo en el mismo archivo hay dos bloques marcados `>>> OPCIONAL <<<`, ninguno necesario para que CanRider funcione:
+
+- **WiFi preferente sobre LTE** (`WIFI_FALLBACK_SSID_1`/`PASS_1`, y una segunda red opcional): si defines una red conocida, la telemetría se manda por ahí en vez de por LTE en cuanto esté al alcance. Solo redes de 2.4 GHz — el ESP32 no ve redes de 5 GHz.
+- **Actualización OTA por WiFi** (`OTA_AP_PASSWORD`): al apagar la moto, el ESP32 levanta su propio WiFi `CanRiderTwo` con portal cautivo en `192.168.4.1` para subir un `.bin` (exportado desde Arduino IDE con `Sketch → Export Compiled Binary`) o reiniciar en remoto. Se apaga solo a los 4 min sin actividad o 2 min tras desconectarse el último cliente. Usa una contraseña propia de 8+ caracteres — es un secreto, como `SUPABASE_KEY`.
 
 ### 4. Cargar el firmware
 
@@ -173,11 +179,23 @@ Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red,
 
 ---
 
+## Actualización OTA (opcional)
+
+Si configuraste `OTA_AP_PASSWORD` en el paso 3, no hace falta abrir la moto ni un cable cada vez que actualices el firmware. Guía completa paso a paso con capturas en [`docs/index.html`](docs/index.html#ota) — resumen aquí:
+
+1. Apaga la moto. En cuanto el bus CAN lleva unos segundos en silencio, el ESP32 levanta el WiFi **`CanRiderTwo`** (portal cautivo, IP `192.168.4.1`).
+2. Conéctate a esa red con la contraseña de `OTA_AP_PASSWORD`. La página de actualización se abre sola en la mayoría de móviles/portátiles; si no, entra a mano en `http://192.168.4.1/`.
+3. Sube el `.bin` (Arduino IDE → `Sketch → Export Compiled Binary`) o pulsa **Reiniciar ESP32** para un reinicio remoto sin actualizar nada.
+
+El AP se apaga solo a los 4 min sin actividad HTTP, o 2 min tras desconectarse el último cliente (lo que llegue antes), o de inmediato si enciendes la moto a mitad de la ventana — nunca se puede actualizar con el vehículo en marcha. Si el WiFi de telemetría del paso 3 ya está conectado en ese momento, el AP de OTA no se levanta hasta que se libere la antena (comparten el mismo radio WiFi).
+
+---
+
 ## Uso del portal web
 
 ### Panel de telemetría (`/`)
 
-Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE, batería del ESP32, indicador de si la posición es GPS real o aproximada por LBS, mapa con la posición actual y el historial de viajes — al seleccionar un viaje se dibuja su recorrido real coloreado por velocidad (no solo una línea recta entre inicio y fin).
+Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE, batería del ESP32, indicador de si la posición es GPS real o aproximada por LBS (con un "hace X min/h/d" junto a la posición), un indicador **WiFi/LTE** de por cuál de los dos se mandó la última lectura, mapa con la posición actual y el historial de viajes — al seleccionar un viaje se dibuja su recorrido real coloreado por velocidad (no solo una línea recta entre inicio y fin). Cada viaje del historial se puede eliminar con el icono de papelera (pide confirmación, no se puede deshacer).
 
 > **Nota:** `moving_without_can` (posible sustracción, ver más abajo) se guarda en cada lectura de `telemetry` pero de momento no tiene ninguna alerta en el panel web — solo aparece como aviso en el Monitor Serie del firmware. Sería una buena mejora a futuro para el portal.
 
@@ -217,6 +235,16 @@ Encendido
            · Emite la trama de la hora (solo con hora de red válida)
            · Procesa las tramas RX recibidas
            · Recupera el bus automáticamente si entra en bus-off
+
+En paralelo a todo lo anterior, desde el arranque (no forma parte de esta
+máquina de estados ni espera a que termine):
+
+  · WiFi opcional — si hay redes conocidas en config.h, intenta unirse de
+    fondo sin parar; en cuanto conecta, la telemetría se manda por ahí en
+    vez de por LTE (el guardado de inicio/fin de viaje sigue usando LTE)
+  · AP OTA opcional — en cuanto el bus CAN queda en silencio (moto
+    apagada), si hay contraseña configurada, levanta el WiFi CanRiderTwo
+    con portal cautivo para actualizar firmware o reiniciar en remoto
 ```
 
 ---
@@ -277,6 +305,16 @@ CanRider/
 - Verifica los pines `CAN_TX_PIN` / `CAN_RX_PIN` y el cableado del transceptor
 - Comprueba que has descomentado y rellenado el bloque 5/5 de `config.h` — si lo dejas tal cual viene (comentado), el firmware no transmite ni lee ninguna señal (`[CAN] 0 señales` en el Serial Monitor)
 - Si el Serial Monitor muestra `[CAN] Bus-off detectado`, el propio firmware se recupera solo — si se repite mucho, revisa la terminación del bus/cableado
+
+### El WiFi «CanRiderTwo» no aparece al apagar la moto
+- Confirma que rellenaste `OTA_AP_PASSWORD` en `config.h` — sin eso, el firmware no levanta ningún AP
+- Tarda unos segundos: se activa cuando el bus CAN lleva un rato en silencio, no en el instante exacto de apagar
+- Si el WiFi opcional de telemetría está conectado en ese momento, el AP de OTA espera a que se libere la antena
+
+### El WiFi de telemetría no conecta
+- Revisa que `WIFI_FALLBACK_SSID_1`/`PASS_1` coinciden exactamente con tu red (sensible a mayúsculas)
+- Solo funciona con redes de 2.4 GHz — el ESP32 no ve redes de 5 GHz
+- Si no hay ninguna red conocida al alcance, es el comportamiento esperado: el firmware sigue con LTE y reintenta WiFi más adelante
 
 ---
 
