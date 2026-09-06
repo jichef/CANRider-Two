@@ -313,6 +313,13 @@ CREATE POLICY "insert anon" ON trips FOR INSERT WITH CHECK (true);
 DROP POLICY IF EXISTS "select anon" ON trips;
 CREATE POLICY "select anon" ON trips FOR SELECT USING (true);
 
+-- Permite borrar viajes desde el portal (botón de la papelera en el
+-- historial) — mismo nivel de acceso que insert/select de arriba, ya
+-- abierto con la anon key: este proyecto no tiene autenticación de
+-- usuario, así que no hay un "propietario" distinto que distinguir.
+DROP POLICY IF EXISTS "delete anon" ON trips;
+CREATE POLICY "delete anon" ON trips FOR DELETE USING (true);
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Fin. Si el editor de Supabase dice "Success. No rows returned" al final,
 -- todo se ha creado correctamente.

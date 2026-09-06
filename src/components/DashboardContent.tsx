@@ -13,6 +13,7 @@ import {
   Thermometer,
   Signal,
   Wifi,
+  Trash2,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
@@ -352,6 +353,18 @@ export default function DashboardContent() {
 
   void loading; // usado implícitamente via isConfigured + telemetry===null
 
+  const deleteTrip = async (tripId: string) => {
+    if (!supabase) return;
+    if (!window.confirm('¿Eliminar este viaje? No se puede deshacer.')) return;
+    const { error } = await supabase.from('trips').delete().eq('id', tripId);
+    if (error) {
+      alert('No se pudo eliminar el viaje: ' + error.message);
+      return;
+    }
+    setTrips((prev) => prev.filter((t) => t.id !== tripId));
+    if (selectedTrip === tripId) setSelectedTrip(null);
+  };
+
   return (
     <div className="min-h-[100dvh] md:h-[100dvh] md:overflow-y-auto bg-black text-zinc-300 font-sans selection:bg-cyan-500/30 pb-24 md:pb-0">
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_-20%,_#1e1b4b_0%,_#000_80%)] pointer-events-none" />
@@ -547,9 +560,11 @@ export default function DashboardContent() {
             <div className="space-y-4 md:flex-1 md:min-h-0 md:overflow-y-auto">
               {trips.length > 0 ? (
                 trips.map((trip) => {
-                  const date = new Date(trip.start_time)
+                  const startDate = new Date(trip.start_time);
+                  const date = startDate
                     .toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
                     .toUpperCase();
+                  const startTime = startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
                   const isSelected = selectedTrip === trip.id;
                   const batteryUsed = trip.consumption ?? (
                     trip.start_battery_level != null && trip.end_battery_level != null
@@ -558,48 +573,56 @@ export default function DashboardContent() {
                   );
 
                   return (
-                    <button
-                      key={trip.id}
-                      onClick={() => {
-                        const next = isSelected ? null : trip.id;
-                        setSelectedTrip(next);
-                        if (next) setMobileTab('map');
-                      }}
-                      className={`w-full group flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 ${
-                        isSelected
-                          ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]'
-                          : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
-                      }`}
-                    >
-                      <div className="space-y-1 text-left">
-                        <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
-                          isSelected ? 'text-cyan-400' : 'text-zinc-500'
-                        }`}>
-                          {date}
-                        </span>
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                            <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />
-                            {trip.distance} KM
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
-                            <Clock size={12} />
-                            {trip.duration ?? trip.time ?? 'N/A'}
-                          </div>
-                          {batteryUsed != null && (
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500/80">
-                              <Battery size={12} />
-                              -{batteryUsed}%
+                    <div key={trip.id} className="relative group">
+                      <button
+                        onClick={() => {
+                          const next = isSelected ? null : trip.id;
+                          setSelectedTrip(next);
+                          if (next) setMobileTab('map');
+                        }}
+                        className={`w-full flex items-center justify-between p-4 pr-12 rounded-2xl border transition-all duration-300 ${
+                          isSelected
+                            ? 'bg-cyan-500/20 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]'
+                            : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-950'
+                        }`}
+                      >
+                        <div className="space-y-1 text-left">
+                          <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
+                            isSelected ? 'text-cyan-400' : 'text-zinc-500'
+                          }`}>
+                            {date} · {startTime}
+                          </span>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                              <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />
+                              {trip.distance} KM
                             </div>
-                          )}
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
+                              <Clock size={12} />
+                              {trip.duration ?? trip.time ?? 'N/A'}
+                            </div>
+                            {batteryUsed != null && (
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500/80">
+                                <Battery size={12} />
+                                -{batteryUsed}%
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className={`p-2 rounded-xl transition-all ${
-                        isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
-                      }`}>
-                        <Zap size={14} fill={isSelected ? 'currentColor' : 'none'} />
-                      </div>
-                    </button>
+                        <div className={`p-2 rounded-xl transition-all ${
+                          isSelected ? 'bg-cyan-500 text-black scale-110' : 'bg-zinc-900 group-hover:bg-zinc-800 text-cyan-500'
+                        }`}>
+                          <Zap size={14} fill={isSelected ? 'currentColor' : 'none'} />
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteTrip(trip.id); }}
+                        title="Eliminar viaje"
+                        className="absolute top-3 right-3 p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   );
                 })
               ) : (
