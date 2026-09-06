@@ -189,6 +189,28 @@ CREATE POLICY "select anon"
     ON telemetry FOR SELECT
     USING (true);
 
+-- Triggers de la versión anterior sobre telemetry/trips (por ejemplo, uno
+-- que mantenía is_trip_active) — se eliminan ANTES de quitar las columnas
+-- de abajo: un trigger que referencia una columna ya borrada no falla al
+-- borrar la columna, falla en el momento de cada INSERT futuro con un
+-- error de Postgres tipo "record new has no field ...". El RAISE NOTICE
+-- deja ver en el resultado del SQL Editor qué se ha eliminado, si algo.
+DO $$
+DECLARE
+  trig record;
+BEGIN
+  FOR trig IN
+    SELECT t.tgname, c.relname
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    WHERE c.relname IN ('telemetry', 'trips')
+      AND NOT t.tgisinternal
+  LOOP
+    RAISE NOTICE 'Eliminando trigger % de tabla %', trig.tgname, trig.relname;
+    EXECUTE format('DROP TRIGGER %I ON %I', trig.tgname, trig.relname);
+  END LOOP;
+END $$;
+
 -- Columnas sueltas de una versión anterior del proyecto (con PostGIS y
 -- otro diseño de tablas) que ya no se usa — el firmware actual nunca las
 -- lee ni las escribe. Se quitan para que el esquema real coincida con lo
