@@ -16,7 +16,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 
 // Algunos campos CAN (moto_battery, moto_battery_b, bms_charging...) llegan
@@ -72,6 +72,9 @@ export default function DashboardContent() {
   const supabase = createClient();
   const [telemetry, setTelemetry] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
+  const TRIPS_PER_PAGE = 5;
+  const [tripPage, setTripPage] = useState(0);
+  const [tripCount, setTripCount] = useState(0);
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isConfigured] = useState(!!supabase);
@@ -162,13 +165,6 @@ export default function DashboardContent() {
         }
       }
 
-      const { data: tripData } = await supabase
-        .from('trips')
-        .select('*')
-        .order('start_time', { ascending: false })
-        .limit(5);
-
-      if (tripData) setTrips(tripData);
       setLoading(false);
     };
 
@@ -192,6 +188,27 @@ export default function DashboardContent() {
 
     return () => { supabase.removeChannel(channel); };
   }, [supabase]);
+
+  // Historial de viajes paginado: count exacto (para saber cuántas páginas
+  // hay) + range() para traer solo los 5 de la página pedida, no toda la
+  // tabla. Se saca del efecto de telemetría de arriba porque tiene su
+  // propio "cuándo recargar" (cambio de página, o al borrar un viaje).
+  const fetchTrips = useCallback(async (page: number) => {
+    if (!supabase) return;
+    const from = page * TRIPS_PER_PAGE;
+    const to = from + TRIPS_PER_PAGE - 1;
+    const { data, count } = await supabase
+      .from('trips')
+      .select('*', { count: 'exact' })
+      .order('start_time', { ascending: false })
+      .range(from, to);
+    setTrips(data ?? []);
+    setTripCount(count ?? 0);
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchTrips(tripPage);
+  }, [fetchTrips, tripPage]);
 
   // Municipio/calle aproximados a partir de las coordenadas (Nominatim,
   // OpenStreetMap — gratis, sin API key). Solo se repite la consulta si la
@@ -398,8 +415,15 @@ export default function DashboardContent() {
       alert('No se pudo eliminar el viaje: ' + error.message);
       return;
     }
-    setTrips((prev) => prev.filter((t) => t.id !== tripId));
     if (selectedTrip === tripId) setSelectedTrip(null);
+    // Si era el único viaje de esta página (y no es la primera), retrocede
+    // una página; si no, recarga la página actual para que el siguiente
+    // viaje de la lista suba a rellenar el hueco.
+    if (trips.length === 1 && tripPage > 0) {
+      setTripPage((p) => p - 1);
+    } else {
+      fetchTrips(tripPage);
+    }
   };
 
   return (
@@ -675,6 +699,28 @@ export default function DashboardContent() {
                 </div>
               )}
             </div>
+
+            {tripCount > TRIPS_PER_PAGE && (
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5 md:shrink-0">
+                <button
+                  onClick={() => setTripPage((p) => Math.max(0, p - 1))}
+                  disabled={tripPage === 0}
+                  className="px-3 py-1 rounded-lg bg-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  ← Anteriores
+                </button>
+                <span className="text-[10px] font-mono text-zinc-600">
+                  {tripPage + 1} / {Math.max(1, Math.ceil(tripCount / TRIPS_PER_PAGE))}
+                </span>
+                <button
+                  onClick={() => setTripPage((p) => p + 1)}
+                  disabled={(tripPage + 1) * TRIPS_PER_PAGE >= tripCount}
+                  className="px-3 py-1 rounded-lg bg-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  Siguientes →
+                </button>
+              </div>
+            )}
 
           </div>
         </div>
