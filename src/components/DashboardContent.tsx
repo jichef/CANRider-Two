@@ -78,7 +78,7 @@ export default function DashboardContent() {
   const [isStale, setIsStale] = useState(false);
   const [mobileTab, setMobileTab] = useState<'live' | 'trips' | 'map'>('live');
 
-  const [currentPosition, setCurrentPosition] = useState<[number, number]>([40.41678, -3.70379]);
+  const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [hasLiveFix, setHasLiveFix] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
 
@@ -118,9 +118,46 @@ export default function DashboardContent() {
 
       if (telRows && telRows.length > 0) {
         const telData = telRows.reduce((acc: any, row: any) => mergeTelemetry(row, acc));
-        setTelemetry((prev: any) => mergeTelemetry(prev, telData));
-        if (telData.latitude && telData.longitude) {
-          setCurrentPosition([telData.latitude, telData.longitude]);
+
+        // Las últimas 50 filas (~12 min) pueden venir todas sin posición si
+        // el GPS/LBS lleva más tiempo sin fix (túnel, garaje, sin cobertura).
+        // En vez de no mostrar nada (o peor, un centro por defecto inventado),
+        // se busca la última fila de SIEMPRE que sí tuviera coordenadas — la
+        // moto debe mostrar siempre su última posición real conocida, por
+        // vieja que sea, igual que ya se hace con la batería.
+        let posLat = telData.latitude;
+        let posLon = telData.longitude;
+        let posSource = telData.position_source;
+        let posAt = (posLat != null && posLon != null) ? telData.timestamp : undefined;
+
+        if (posLat == null || posLon == null) {
+          const { data: lastPosRows } = await supabase
+            .from('telemetry')
+            .select('latitude,longitude,position_source,timestamp')
+            .not('latitude', 'is', null)
+            .order('timestamp', { ascending: false })
+            .limit(1);
+          const fb = lastPosRows?.[0];
+          if (fb) {
+            posLat = fb.latitude;
+            posLon = fb.longitude;
+            posSource = fb.position_source;
+            posAt = fb.timestamp;
+          }
+        }
+
+        setTelemetry((prev: any) => {
+          const merged = mergeTelemetry(prev, telData);
+          if (posLat != null && posLon != null) {
+            merged.latitude = posLat;
+            merged.longitude = posLon;
+            merged.position_source = posSource;
+            merged._positionAt = posAt;
+          }
+          return merged;
+        });
+        if (posLat != null && posLon != null) {
+          setCurrentPosition([posLat, posLon]);
           setHasLiveFix(true);
         }
       }
@@ -162,7 +199,7 @@ export default function DashboardContent() {
   // vez, para no machacar el servicio con cada tick de telemetría.
   const lastGeocodedRef = useRef<{ lat: number; lon: number; at: number } | null>(null);
   useEffect(() => {
-    if (!hasLiveFix) return;
+    if (!hasLiveFix || !currentPosition) return;
     const [lat, lon] = currentPosition;
     const prev = lastGeocodedRef.current;
     if (prev) {
@@ -503,7 +540,7 @@ export default function DashboardContent() {
                     ) : (
                       <span className="text-[10px] text-zinc-500 font-mono uppercase">Sin traza guardada para este viaje</span>
                     )
-                  ) : hasLiveFix ? (
+                  ) : hasLiveFix && currentPosition ? (
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       {address && (
                         <span className="text-[10px] text-zinc-500 font-mono uppercase">{address} (aprox.)</span>
@@ -538,10 +575,16 @@ export default function DashboardContent() {
               )}
             </div>
             <div className="flex-1 relative md:min-h-[300px]">
-              <Map
-                center={currentPosition}
-                track={selectedTrip ? track : undefined}
-              />
+              {currentPosition ? (
+                <Map
+                  center={currentPosition}
+                  track={selectedTrip ? track : undefined}
+                />
+              ) : (
+                <div className="h-full w-full bg-zinc-900 flex items-center justify-center">
+                  <span className="text-zinc-500 font-mono text-[10px] tracking-widest">ESPERANDO_POSICIÓN...</span>
+                </div>
+              )}
               <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_2px,3px_100%] z-20 opacity-20" />
             </div>
           </div>
@@ -618,7 +661,7 @@ export default function DashboardContent() {
                       <button
                         onClick={(e) => { e.stopPropagation(); deleteTrip(trip.id); }}
                         title="Eliminar viaje"
-                        className="absolute top-3 right-3 p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        className="absolute top-1/2 -translate-y-1/2 right-3 p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                       >
                         <Trash2 size={14} />
                       </button>

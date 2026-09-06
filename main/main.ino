@@ -136,7 +136,7 @@ static void captureCfCookie(const String& raw) {
 // Petición HTTPS genérica (GET sin body, o POST con body). Devuelve el código
 // HTTP en httpStatus y el cuerpo de la respuesta en respBody.
 static bool sim7000Request(const String& method, const String& path, const String& body,
-                            int& httpStatus, String& respBody) {
+                            int& httpStatus, String& respBody, bool preferMerge = false) {
     httpStatus = 0; respBody = "";
     String host = sim7000Host();
 
@@ -158,6 +158,13 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     sslClient.print("Authorization: Bearer "); sslClient.print(SUPABASE_KEY); sslClient.print("\r\n");
     if (g_cfCookie.length() > 0) {
         sslClient.print("Cookie: "); sslClient.print(g_cfCookie); sslClient.print("\r\n");
+    }
+    // Con esto, reenviar el mismo POST de cierre de viaje (mismo "id", ver
+    // generateUUID()) tras un fallo de red que en realidad SÍ había llegado
+    // al servidor ya no crea un viaje duplicado: Postgres hace upsert sobre
+    // la primary key en vez de fallar o insertar de nuevo.
+    if (preferMerge) {
+        sslClient.print("Prefer: resolution=merge-duplicates\r\n");
     }
     if (body.length() > 0) {
         sslClient.print("Content-Type: application/json\r\n");
@@ -730,6 +737,12 @@ bool httpPost(const String& body) {
 
 bool httpPostTo(const String& tablePath, const String& body) {
     bool ok = false;
+    // Con Prefer: resolution=merge-duplicates, reenviar el mismo POST de
+    // cierre de viaje (mismo "id", ver generateUUID()) tras un fallo de red
+    // que en realidad SÍ había llegado al servidor ya no crea un viaje
+    // duplicado: Postgres hace upsert sobre la primary key en vez de
+    // insertar de nuevo.
+    bool preferMerge = (tablePath == "/rest/v1/trips");
     sendAT("AT+HTTPTERM");
     do {
         if (!sendAT("AT+HTTPINIT"))               break;
@@ -739,7 +752,9 @@ bool httpPostTo(const String& tablePath, const String& body) {
         if (!sendAT(urlCmd.c_str()))               break;
         if (!sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"")) break;
         String ud = String("AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer ")
-                    + SUPABASE_KEY + "\"";
+                    + SUPABASE_KEY;
+        if (preferMerge) ud += "\r\nPrefer: resolution=merge-duplicates";
+        ud += "\"";
         if (!sendAT(ud.c_str()))                   break;
         String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
         if (!sendAT(dcmd.c_str(), "DOWNLOAD", 6000)) break;
@@ -763,7 +778,8 @@ bool httpPost(const String& body) {
 
 bool httpPostTo(const String& tablePath, const String& body) {
     int status; String respBody;
-    if (!sim7000Request("POST", tablePath, body, status, respBody)) return false;
+    bool preferMerge = (tablePath == "/rest/v1/trips");
+    if (!sim7000Request("POST", tablePath, body, status, respBody, preferMerge)) return false;
     return (status == 200 || status == 201);
 }
 
@@ -813,6 +829,28 @@ static bool canBusAlive() {
     uint32_t last = lastCanFrameMs;   // volatile, lectura atómica
     if (last == 0) return false;      // nunca se ha visto ninguna trama desde el arranque
     return (millis() - last) < CAN_ALIVE_TIMEOUT_MS;
+}
+
+// UUID v4 generado en el propio ESP32 para el "id" del viaje: así, si el POST
+// de cierre falla y pendingTripBody se reintenta en ciclos siguientes, todos
+// los intentos llevan el MISMO id — combinado con Prefer: resolution=
+// merge-duplicates en httpPostTo(), un reintento de un envío que en realidad
+// sí había llegado al servidor hace un upsert en vez de crear un viaje
+// duplicado (visto en producción: 5 filas idénticas del mismo viaje).
+static String generateUUID() {
+    uint8_t b[16];
+    for (int i = 0; i < 16; i += 4) {
+        uint32_t r = esp_random();
+        memcpy(&b[i], &r, 4);
+    }
+    b[6] = (b[6] & 0x0F) | 0x40;  // versión 4
+    b[8] = (b[8] & 0x3F) | 0x80;  // variante RFC 4122
+    char buf[37];
+    snprintf(buf, sizeof(buf),
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+    return String(buf);
 }
 
 static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
@@ -885,7 +923,8 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         snprintf(durStr,   sizeof(durStr),   "%uh %02umin",
                  (unsigned)(durMin / 60), (unsigned)(durMin % 60));
 
-        String body = "{\"motorcycle_id\":\"" VEHICLE_ID "\"";
+        String tripId = generateUUID();
+        String body = "{\"id\":\"" + tripId + "\",\"motorcycle_id\":\"" VEHICLE_ID "\"";
         body += ",\"start_time\":\""         + String(startISO)                    + "\"";
         body += ",\"end_time\":\""            + String(endISO)                     + "\"";
         body += ",\"distance\":"              + String(tripState.distanceKm, 2);
@@ -1123,10 +1162,14 @@ static void otaLoop() {
     }
 
     // AP no activo: se levanta en cuanto el bus CAN se queda en silencio
-    // (moto apagada), sin esperar ningún margen — salvo que el WiFi de
-    // telemetría ya esté conectado, para no interrumpirlo.
+    // (moto apagada), sin esperar ningún margen. El OTA tiene prioridad
+    // sobre el WiFi de telemetría — si está conectado o intentándolo, se
+    // le corta el radio: aparcada no hay urgencia de telemetría en vivo,
+    // y así el AP funciona también en casa, donde lo normal es tener el
+    // WiFi de telemetría al alcance. Al cerrarse el AP (por tiempo o
+    // porque la moto se enciende), el WiFi de telemetría se retoma solo.
     if (canBusAlive()) return;
-    if (wifiConnected()) return;
+    wifiForceDisconnect();
     otaStartAP();
 }
 
@@ -1403,10 +1446,23 @@ static void wifiFallbackLoop() {
 static bool wifiFallbackActive() { return wfState != WF_IDLE; }
 static bool wifiConnected()      { return wfState == WF_CONNECTED; }
 
+// El OTA tiene prioridad sobre este WiFi de telemetría al aparcar (no
+// pueden convivir en el mismo radio) — esto corta cualquier conexión o
+// intento en curso y vuelve a WF_IDLE, para que se retome sola en cuanto
+// el AP de OTA se libere.
+static void wifiForceDisconnect() {
+    if (wfState == WF_IDLE) return;
+    Serial.println("[WIFI] Cediendo el radio al AP de OTA");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    wfState = WF_IDLE;
+}
+
 #else
-static void wifiFallbackLoop()   {}
-static bool wifiFallbackActive() { return false; }
-static bool wifiConnected()      { return false; }
+static void wifiFallbackLoop()     {}
+static bool wifiFallbackActive()   { return false; }
+static bool wifiConnected()        { return false; }
+static void wifiForceDisconnect()  {}
 #endif
 
 // ── Arranque ──────────────────────────────────────────────────────────────────

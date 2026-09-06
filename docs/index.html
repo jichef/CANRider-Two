@@ -530,6 +530,7 @@
       <li><a href="#cableado">7 · Cableado del CAN</a></li>
       <li><a href="#flashear">8 · Flashear la placa</a></li>
       <li><a href="#comprobar">9 · Comprobar que va</a></li>
+      <li><a href="#ota">Extra · Actualizar por WiFi</a></li>
       <li><a href="#ha">Extra · Home Assistant</a></li>
       <li><a href="#problemas">Si algo falla</a></li>
     </ol>
@@ -549,6 +550,7 @@
       <option value="#cableado">7 · Cableado del CAN</option>
       <option value="#flashear">8 · Flashear la placa</option>
       <option value="#comprobar">9 · Comprobar que va</option>
+      <option value="#ota">Extra · Actualizar por WiFi</option>
       <option value="#ha">Extra · Home Assistant</option>
       <option value="#problemas">Si algo falla</option>
     </select>
@@ -873,6 +875,33 @@
         <p>Con el bloque 5/5 de <code>config.h</code> te basta para adaptar la hora, las dos baterías y el estado de carga a tu moto — no hace falta tocar ningún otro archivo para eso.</p>
         <p>Solo si necesitas leer alguna señal CAN <b>adicional</b>, o enviar alguna trama nueva por el bus, hay que editar la función <code>setupCANSignals()</code> dentro de <code>main/main.ino</code> directamente. Es a propósito: así nunca se puede ampliar lo que el ESP32 transmite por CAN con solo tocar un archivo de configuración — cualquier trama nueva de salida exige tocar el propio código.</p>
       </div>
+
+      <p>Más abajo en el mismo archivo hay dos bloques marcados como <code>&gt;&gt;&gt; OPCIONAL &lt;&lt;&lt;</code>. Ninguno de los dos es necesario para que CanRider funcione — puedes dejarlos comentados tal cual y saltarte esta parte:</p>
+
+      <div class="code-block">
+        <div class="label"><span>main/config.h</span></div>
+        <pre><span class="cm">// OPCIONAL 1/2 — WiFi preferente sobre LTE. Sin rellenar, esta función
+// no existe (coste cero). Si defines una red (la segunda es opcional),
+// el ESP32 la busca al arrancar y manda la telemetría por ahí en vez
+// de por LTE en cuanto esté al alcance — normalmente más barato y
+// estable. Si no hay ninguna red conocida, sigue usando LTE sin más.</span>
+// #define WIFI_FALLBACK_SSID_1 "tu-red-1"
+// #define WIFI_FALLBACK_PASS_1 "contraseña-red-1"
+
+// #define WIFI_FALLBACK_SSID_2 "tu-red-2"
+// #define WIFI_FALLBACK_PASS_2 "contraseña-red-2"
+
+<span class="cm">// OPCIONAL 2/2 — Actualizar el firmware por WiFi más adelante, sin
+// cable ni Arduino IDE (ver paso EXTRA de esta guía). Sin rellenar,
+// el firmware no levanta ningún WiFi propio. Usa una contraseña
+// tuya de al menos 8 caracteres — es un secreto, como SUPABASE_KEY.</span>
+// #define OTA_AP_PASSWORD "cambia-esto-por-algo-tuyo"</pre>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">Sobre el WiFi preferente</span>
+        <p>Mientras el ESP32 esté usando WiFi solo manda la telemetría normal (posición, batería, señales CAN) — guardar el inicio/fin de un viaje sigue necesitando LTE. Si un viaje termina justo mientras usas WiFi, no se pierde: el firmware lo guarda y lo reintenta en cuanto la LTE vuelva a estar disponible.</p>
+      </div>
     </section>
 
     <!-- PASO 7 -->
@@ -993,6 +1022,37 @@
       <p>En cuanto veas <code>[OK] Telemetría enviada</code> al menos una vez, abre la URL de tu portal en Vercel — deberían aparecer ya los primeros datos.</p>
 
       <div class="done-check">✓ Si ves eso, tu CanRider está funcionando de punta a punta.</div>
+
+      <div class="callout note">
+        <span class="k">Si configuraste el WiFi opcional del paso 6</span>
+        <p>Verás líneas como <code>[WIFI] Buscando redes conocidas...</code> y <code>[WIFI] Conectado a tu-red, IP 192.168.1.x</code> en el Monitor Serie. En el panel web, junto a los datos en vivo, aparece un indicador <b>WiFi</b> o <b>LTE</b> que muestra por cuál de los dos se mandó la última lectura.</p>
+      </div>
+    </section>
+
+    <!-- EXTRA -->
+    <section id="ota" class="step">
+      <div class="step-head"><span class="step-num">EXTRA</span><h2>Actualizar el firmware por WiFi (OTA)</h2></div>
+      <p class="step-sub">Si configuraste <code>OTA_AP_PASSWORD</code> en el paso 6, no hace falta destornillar la moto ni conectar un cable cada vez que cambies el firmware.</p>
+
+      <p>Funciona así, sin nada que activar a mano:</p>
+      <ol class="sub-list">
+        <li>Apaga la moto. En cuanto el bus CAN lleva unos segundos en silencio (el mismo momento en que se cierra el viaje), el ESP32 levanta su propio WiFi llamado <code>CanRiderTwo</code>.</li>
+        <li>En tu móvil u ordenador, conéctate a esa red WiFi con la contraseña que pusiste en <code>OTA_AP_PASSWORD</code>.</li>
+        <li>El propio dispositivo debería abrir la página de actualización solo, como al conectarte al WiFi de una cafetería o un aeropuerto. Si no se abre sola, entra a mano en el navegador a <code>http://192.168.4.1/</code>.</li>
+        <li>Verás dos botones: uno para subir un archivo <code>.bin</code> y actualizar el firmware, y otro para simplemente reiniciar el ESP32 en remoto.</li>
+      </ol>
+
+      <p>Para generar el <code>.bin</code> que subes en el paso anterior: en Arduino IDE, con <code>main/main.ino</code> abierto, ve a <span class="ui-path">Sketch → Export Compiled Binary</span>. El archivo aparece en la carpeta <code>main/</code>.</p>
+
+      <div class="callout tip">
+        <span class="k">No hace falta apagarlo ni vigilarlo</span>
+        <p>Este WiFi se apaga solo — a los 4 minutos sin ninguna actividad, o 2 minutos después de que el último dispositivo conectado se desconecte (lo que llegue antes), o de inmediato en cuanto enciendas la moto. Nunca se puede actualizar el firmware con la moto en marcha.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="k">No es Bluetooth ni necesita ninguna app</span>
+        <p>Es un WiFi normal con una página web sencilla — no hay nada que instalar en el móvil. Los dos WiFi (el de telemetría y este) comparten la misma antena y no pueden estar activos a la vez: si tienes el WiFi opcional del paso 6 conectado en ese momento, el propio firmware lo corta al apagar la moto, para que este WiFi de actualización se levante siempre — esté o no esa red al alcance.</p>
+      </div>
     </section>
 
     <!-- EXTRA -->
@@ -1040,6 +1100,20 @@
         <li>Comprueba el cableado del paso 7</li>
         <li>Comprueba que has descomentado y rellenado el bloque 5/5 de <code>config.h</code> — si lo dejaste tal cual venía, el firmware no transmite ni lee ninguna señal (lo verás en el Monitor Serie como <code>[CAN] 0 señales</code>)</li>
         <li>Si ves <code>[CAN] Bus-off detectado</code>, el propio firmware se recupera solo — si se repite mucho, revisa la terminación del bus</li>
+      </ul>
+
+      <h3>No me aparece el WiFi «CanRiderTwo» al apagar la moto</h3>
+      <ul>
+        <li>Confirma que rellenaste <code>OTA_AP_PASSWORD</code> en el paso 6 — sin eso, el firmware no levanta ningún WiFi</li>
+        <li>Espera unos segundos: se activa cuando el bus CAN lleva un rato en silencio, no en el instante exacto de apagar</li>
+        <li>Si tienes también configurado el WiFi opcional de telemetría, no hace falta que se desconecte solo: el firmware le corta el WiFi de telemetría en cuanto detecta el CAN en silencio, precisamente para que este WiFi de actualización pueda levantarse siempre</li>
+      </ul>
+
+      <h3>El WiFi de telemetría no conecta</h3>
+      <ul>
+        <li>Revisa que el SSID y la contraseña en <code>config.h</code> son exactamente los de tu red (sensible a mayúsculas)</li>
+        <li>Solo funciona con redes de 2.4 GHz — si tu red es de 5 GHz o solo tiene esa banda activa, el ESP32 no la verá</li>
+        <li>Si no hay ninguna red conocida al alcance, es normal: el firmware sigue usando LTE sin más y lo reintenta más adelante</li>
       </ul>
     </section>
 
