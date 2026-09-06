@@ -915,33 +915,37 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     return false;
 }
 
-// ── OTA vía BLE + AP WiFi ─────────────────────────────────────────────────────
+// ── OTA vía AP WiFi automático al aparcar ────────────────────────────────────
 // Sin OTA_AP_PASSWORD definido en config.h, nada de esto se compila: el
-// firmware no anuncia BLE ni levanta ningún AP, cero coste.
+// firmware no levanta ningún AP, cero coste.
 //
-// Diseño: el ESP32 anuncia BLE de forma continua (bajo consumo). Al conectar
-// desde Ajustes → Bluetooth del móvil — nativo de iOS/Android, sin ninguna
-// app propia — y SOLO si la moto está apagada (canBusAlive()==false, mismo
-// criterio que el fin de viaje), se levanta un AP WiFi "CanRiderTwo" con la
-// contraseña de config.h y un servidor mínimo para subir un .bin y
-// actualizar el firmware. El AP se apaga solo pasado OTA_AP_TIMEOUT_MS sin
+// Diseño (v2 — se descartó BLE como disparador: iOS solo lista en Ajustes >
+// Bluetooth periféricos que anuncian servicios estándar reconocidos, un ESP32
+// con un servicio propio no aparece nunca ahí, así que "tócalo en Ajustes,
+// sin ninguna app" no era viable de verdad). Ahora es automático por tiempo:
+// unos minutos después de que el bus CAN se quede en silencio (moto apagada,
+// mismo criterio que el fin de viaje) se levanta solo un AP WiFi
+// "CanRiderTwo" con la contraseña de config.h y un servidor mínimo para
+// subir un .bin y actualizar el firmware — sin Bluetooth, sin ninguna app,
+// solo aparcar y esperar. El AP se apaga solo pasado OTA_AP_TIMEOUT_MS sin
 // actividad, o de inmediato si la moto se enciende a mitad de la ventana —
-// nunca se actualiza el firmware con la moto en marcha.
+// nunca se actualiza el firmware con la moto en marcha. Si el WiFi de
+// telemetría (ver más abajo) ya está conectado, no se interrumpe para
+// levantar el AP — ambos usan el radio WiFi y no pueden convivir.
 #if defined(OTA_AP_PASSWORD)
 
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
 
 #define OTA_AP_SSID       "CanRiderTwo"
-#define OTA_BLE_NAME      "CanRiderTwo"
+#define OTA_PARK_DELAY_MS 120000UL   // 2 min aparcada antes de levantar el AP
 #define OTA_AP_TIMEOUT_MS 600000UL   // 10 min sin actividad → se apaga solo
 
 static WebServer otaServer(80);
 static bool      otaApActive     = false;
 static uint32_t  otaLastActivity = 0;
+static uint32_t  otaParkedSince  = 0;
 
 const char OTA_PAGE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -997,7 +1001,7 @@ function up(){
 
 static void otaStartAP() {
     if (otaApActive) return;
-    Serial.println("[OTA] Moto apagada + BLE conectado -> levantando AP");
+    Serial.println("[OTA] Moto aparcada un rato -> levantando AP");
     WiFi.mode(WIFI_AP);
     WiFi.softAP(OTA_AP_SSID, OTA_AP_PASSWORD);
 
@@ -1039,47 +1043,39 @@ static void otaStopAP() {
     otaApActive = false;
 }
 
-class OtaBleCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer* /*server*/) override {
-        Serial.println("[OTA] BLE conectado");
-        if (!canBusAlive()) {
-            otaStartAP();
-        } else {
-            Serial.println("[OTA] Moto encendida, se ignora (solo con CAN en silencio)");
-        }
-        BLEDevice::startAdvertising();  // seguir anunciando para permitir reconexión
-    }
-    void onDisconnect(BLEServer* /*server*/) override {
-        Serial.println("[OTA] BLE desconectado");
-        BLEDevice::startAdvertising();
-    }
-};
-
 static void setupOTA() {
-    BLEDevice::init(OTA_BLE_NAME);
-    BLEServer* bleServer = BLEDevice::createServer();
-    bleServer->setCallbacks(new OtaBleCallbacks());
-    BLEDevice::getAdvertising()->start();
-    Serial.println("[OTA] BLE anunciando");
+    // Nada que hacer al arrancar — todo se gestiona por tiempo en otaLoop().
 }
 
 static void otaLoop() {
-    if (!otaApActive) return;
-    otaServer.handleClient();
-    if (canBusAlive()) {
-        Serial.println("[OTA] Moto encendida a mitad de ventana OTA -> cerrando AP");
-        otaStopAP();
+    if (otaApActive) {
+        otaServer.handleClient();
+        if (canBusAlive()) {
+            Serial.println("[OTA] Moto encendida a mitad de ventana OTA -> cerrando AP");
+            otaStopAP();
+            otaParkedSince = 0;
+            return;
+        }
+        if (millis() - otaLastActivity > OTA_AP_TIMEOUT_MS) {
+            Serial.println("[OTA] Sin actividad, cerrando AP");
+            otaStopAP();
+        }
         return;
     }
-    if (millis() - otaLastActivity > OTA_AP_TIMEOUT_MS) {
-        Serial.println("[OTA] Sin actividad, cerrando AP");
-        otaStopAP();
-    }
+
+    // AP no activo: contar cuánto lleva la moto aparcada (CAN en silencio).
+    if (canBusAlive()) { otaParkedSince = 0; return; }
+    if (otaParkedSince == 0) { otaParkedSince = millis(); return; }
+    if (wifiConnected()) return;  // no interrumpir una sesión de telemetría por WiFi
+    if (millis() - otaParkedSince >= OTA_PARK_DELAY_MS) otaStartAP();
 }
+
+static bool otaActive() { return otaApActive; }
 
 #else
 static void setupOTA() {}
 static void otaLoop()  {}
+static bool otaActive() { return false; }
 #endif
 
 // ── Red ───────────────────────────────────────────────────────────────────────
@@ -1200,19 +1196,25 @@ static TelemetrySnapshot buildTelemetrySnapshot() {
     return snap;
 }
 
-// ── Rescate de conectividad por WiFi ─────────────────────────────────────────
+// ── Conectividad por WiFi (preferente sobre LTE) ─────────────────────────────
 // Sin WIFI_FALLBACK_SSID_1 definido en config.h, nada de esto se compila.
 //
-// Se activa SOLO mientras la LTE está fallando (state == ERROR_WAIT) — con
-// la LTE funcionando normal (RUNNING) esta función nunca hace nada, a
-// propósito: es un rescate para cuando hay mala cobertura, no un cambio de
-// prioridad permanente entre LTE y WiFi.
+// Prioridad: al arrancar, se busca una red conocida antes de nada. Si
+// conecta, la telemetría se manda por ahí (más barato en datos,
+// normalmente más estable) y el envío por LTE de ese ciclo se salta (ver
+// el guard en el caso RUNNING). Si no hay ninguna red conocida al
+// alcance, se usa LTE — y una vez la LTE está funcionando (state ==
+// RUNNING) no se vuelve a buscar WiFi mientras siga yendo bien, para no
+// andar cambiando de red sin necesidad. Solo si la LTE falla (o si la
+// conexión WiFi que ya estaba activa se cae) se vuelve a intentar WiFi;
+// si tampoco hay red al alcance en ese momento, se sigue con LTE como
+// siempre.
 //
 // Solo manda telemetría (posición/batería/CAN) por este camino — el inicio
-// y cierre de viajes se sigue gestionando por LTE cuando vuelva; si un
-// viaje termina justo durante una ventana de rescate WiFi, se queda en
-// pendingTripBody y se reintenta en cuanto la LTE se recupere (ver
-// flushPendingTrip()), no se pierde.
+// y cierre de viajes se sigue gestionando por LTE; si un viaje termina
+// justo mientras se está usando WiFi, se queda en pendingTripBody y se
+// reintenta en cuanto la LTE esté disponible (ver flushPendingTrip()), no
+// se pierde.
 #if defined(WIFI_FALLBACK_SSID_1)
 
 #include <WiFi.h>
@@ -1275,7 +1277,15 @@ static void wifiFallbackLoop() {
     wifiFallbackSetupOnce();
     switch (wfState) {
     case WF_IDLE:
-        Serial.println("[WIFI] LTE fallando, probando WiFi de rescate...");
+        // Solo se busca WiFi al arrancar o cuando la LTE ha fallado — no
+        // mientras la LTE va bien (state==RUNNING): "conecta LTE? mantengo,
+        // hasta que falle" en vez de andar cambiando de red sin necesidad.
+        if (state == RUNNING) break;
+        // El AP de OTA (WIFI_AP) y esta conexión de telemetría (WIFI_STA)
+        // no pueden convivir — mientras el AP de OTA esté activo, no se
+        // interrumpe para buscar redes.
+        if (otaActive()) break;
+        Serial.println("[WIFI] Buscando redes conocidas...");
         WiFi.mode(WIFI_STA);
         wfStartedMs = millis();
         wfState     = WF_CONNECTING;
@@ -1288,7 +1298,7 @@ static void wifiFallbackLoop() {
             wfState    = WF_CONNECTED;
             wfNextPost = millis();
         } else if (millis() - wfStartedMs > WIFI_FALLBACK_TIMEOUT_MS) {
-            Serial.println("[WIFI] No se pudo conectar a ninguna red conocida, se apaga y sigue con LTE");
+            Serial.println("[WIFI] Ninguna red conocida al alcance por ahora, se apaga y usa LTE; se reintentará");
             WiFi.disconnect(true);
             WiFi.mode(WIFI_OFF);
             wfState = WF_IDLE;
@@ -1297,7 +1307,7 @@ static void wifiFallbackLoop() {
 
     case WF_CONNECTED:
         if (wifiMulti.run() != WL_CONNECTED) {
-            Serial.println("[WIFI] Se ha perdido la conexión, vuelve a intentar por LTE");
+            Serial.println("[WIFI] Se ha perdido la conexión, se pasa a LTE mientras se reintenta");
             WiFi.disconnect(true);
             WiFi.mode(WIFI_OFF);
             wfState = WF_IDLE;
@@ -1319,10 +1329,12 @@ static void wifiFallbackLoop() {
 }
 
 static bool wifiFallbackActive() { return wfState != WF_IDLE; }
+static bool wifiConnected()      { return wfState == WF_CONNECTED; }
 
 #else
 static void wifiFallbackLoop()   {}
 static bool wifiFallbackActive() { return false; }
+static bool wifiConnected()      { return false; }
 #endif
 
 // ── Arranque ──────────────────────────────────────────────────────────────────
@@ -1365,7 +1377,8 @@ void setup() {
 
 // ── Loop principal (Core 1) ───────────────────────────────────────────────────
 void loop() {
-    otaLoop();   // no bloqueante; no hace nada salvo que el AP OTA esté activo
+    otaLoop();          // no bloqueante; no hace nada salvo que el AP OTA esté activo
+    wifiFallbackLoop();  // no bloqueante; siempre intentando WiFi de fondo (ver comentario arriba)
     switch (state) {
 
     case MODEM_BOOT:
@@ -1418,6 +1431,12 @@ void loop() {
         if (millis() < nextPost) break;
         nextPost = millis() + POST_INTERVAL_MS;
 
+        // El WiFi tiene prioridad: si está conectado, ya se está encargando
+        // de mandar esta telemetría por su cuenta (wifiFallbackLoop, con su
+        // propio temporizador) — se salta el envío por LTE de este ciclo
+        // para no duplicar el POST.
+        if (wifiConnected()) break;
+
         TelemetrySnapshot snap = buildTelemetrySnapshot();
 
         Serial.print("[POST] "); Serial.println(snap.body);
@@ -1457,12 +1476,10 @@ void loop() {
 
     case ERROR_WAIT:
         while (SerialAT.available()) Serial.write(SerialAT.read());
-        // Mientras la LTE está fallando, se prueba/mantiene el rescate por
-        // WiFi si hay redes configuradas — mientras esté intentando o ya
-        // conectado, se pausa el reintento normal de LTE de abajo para no
-        // pelear los dos caminos a la vez.
-        wifiFallbackLoop();
-        if (wifiFallbackActive()) break;
+        // El WiFi ya se gestiona de fondo (wifiFallbackLoop() al principio
+        // de loop()), independiente de esto — la LTE sigue reintentando
+        // igual aquí aunque el WiFi esté conectado, para que esté lista en
+        // cuanto el WiFi deje de estar al alcance.
         if (millis() - stateAt > RETRY_WAIT_MS) {
 #if defined(MODEM_A7670G)
             sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");

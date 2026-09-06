@@ -151,51 +151,49 @@
 
 
 // ┌──────────────────────────────────────────────────────────────────────┐
-// │ >>> OPCIONAL — Actualización OTA por BLE + WiFi                       │
-// └──────────────────────────────────────────────────────────────────────┘
-// Sin rellenar (por defecto), esta función no existe: el firmware no
-// anuncia BLE ni levanta ningún AP WiFi.
-//
-// Si defines una contraseña aquí: el ESP32 anuncia BLE de forma continua
-// (bajo consumo). Al conectar desde Ajustes → Bluetooth del móvil (nativo
-// de iOS/Android, sin ninguna app) — y SOLO si la moto está apagada (bus
-// CAN en silencio) — levanta un AP WiFi "CanRiderTwo" con esta contraseña
-// y sirve una página en http://192.168.4.1/ para subir un .bin y
-// actualizar el firmware sin cable. El AP se apaga solo a los 10 min sin
-// uso, o de inmediato si la moto se enciende a mitad de la ventana.
-//
-// Usa una contraseña propia de al menos 8 caracteres — es un secreto igual
-// que SUPABASE_KEY, no la compartas ni la subas a git.
-//
-// IMPORTANTE: BLE+WiFi no caben en el esquema de particiones por defecto
-// de Arduino IDE (da un error de compilación tipo "text section exceeds
-// available space"). Antes de compilar con esto activado, cambia
-// Tools → Partition Scheme a "Minimal SPIFFS (1.9MB APP with OTA/190KB
-// SPIFFS)" — ver paso 5 de la guía.
-
-// #define OTA_AP_PASSWORD "cambia-esto-por-algo-tuyo"
-
-
-// ┌──────────────────────────────────────────────────────────────────────┐
-// │ >>> OPCIONAL — Rescate de conectividad por WiFi                       │
+// │ >>> OPCIONAL — WiFi preferente sobre LTE                              │
 // └──────────────────────────────────────────────────────────────────────┘
 // Sin rellenar (por defecto), esta función no existe.
 //
-// Pensado para cuando la cobertura LTE es mala: si definida, se prueban
-// estas redes conocidas (hasta 2, la segunda es opcional) SOLO mientras
-// la LTE está fallando — con la LTE funcionando normal, el WiFi nunca se
-// enciende. Si no consigue conectar a ninguna en 2 minutos, se apaga y
-// sigue reintentando por LTE como siempre.
+// Si está definida, al arrancar el ESP32 busca estas redes conocidas
+// (hasta 2, la segunda es opcional) antes que nada. Si conecta, la
+// telemetría se manda por ahí (normalmente más barato en datos y más
+// estable) en vez de por LTE. Si no hay ninguna al alcance, se usa LTE —
+// y mientras la LTE vaya bien no se vuelve a buscar WiFi, para no andar
+// cambiando de red sin necesidad. Solo si la LTE falla, o si la conexión
+// WiFi que ya estaba activa se cae, se reintenta WiFi; si tampoco hay red
+// al alcance en ese momento, se sigue con LTE.
 //
-// Mientras está conectado por WiFi solo se manda telemetría (posición,
-// batería, señales CAN) — el guardado de inicio/fin de viaje sigue
-// dependiendo de la LTE; si un viaje termina justo en esa ventana, se
-// reintenta en cuanto la LTE vuelva (no se pierde, ver pendingTripBody).
+// Mientras se usa WiFi solo se manda telemetría (posición, batería,
+// señales CAN) — el guardado de inicio/fin de viaje sigue dependiendo de
+// la LTE; si un viaje termina justo mientras se usa WiFi, se reintenta en
+// cuanto la LTE esté disponible (no se pierde, ver pendingTripBody).
 
 // #define WIFI_FALLBACK_SSID_1 "tu-red-1"
 // #define WIFI_FALLBACK_PASS_1 "contraseña-red-1"
 
 // #define WIFI_FALLBACK_SSID_2 "tu-red-2"
 // #define WIFI_FALLBACK_PASS_2 "contraseña-red-2"
+
+
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> OPCIONAL — Actualización OTA automática al aparcar                │
+// └──────────────────────────────────────────────────────────────────────┘
+// Sin rellenar (por defecto), esta función no existe: el firmware no
+// levanta ningún AP WiFi.
+//
+// Si defines una contraseña aquí: unos minutos después de que el bus CAN
+// se quede en silencio (moto apagada), se levanta solo un AP WiFi
+// "CanRiderTwo" con esta contraseña y sirve una página en
+// http://192.168.4.1/ para subir un .bin y actualizar el firmware sin
+// cable — sin Bluetooth ni ninguna app, solo aparcar y esperar. El AP se
+// apaga solo a los 10 min sin uso, o de inmediato si la moto se enciende
+// a mitad de la ventana. Si el WiFi de arriba ya está conectado para
+// telemetría, no se interrumpe para levantar el AP.
+//
+// Usa una contraseña propia de al menos 8 caracteres — es un secreto igual
+// que SUPABASE_KEY, no la compartas ni la subas a git.
+
+// #define OTA_AP_PASSWORD "cambia-esto-por-algo-tuyo"
 
 #endif
