@@ -630,7 +630,7 @@
         <li><b>Handles unstable roaming</b> — retries with backoff between failures and a full network reconnect after consecutive failures, instead of hammering the carrier's network</li>
         <li><b>WiFi preferred over LTE (optional)</b> — if you configure known networks, they're used whenever in range instead of LTE (cheaper and more stable); falls back to LTE on its own once out of range</li>
         <li><b>Two boards supported</b> — LilyGo T-SIM7000G and T-A7670G — with the pins for each already sorted out: just pick which one you have in <code>config.h</code></li>
-        <li><b>Optional OTA update</b> — a few minutes after parking, brings up its own WiFi with a page to upload new firmware, no cable, Arduino IDE, Bluetooth, or app required</li>
+        <li><b>Optional OTA update</b> — the moment you switch off, brings up its own WiFi with a captive portal (the page opens itself when you connect) to upload new firmware or reboot the ESP32, no cable, Arduino IDE, Bluetooth, or app required</li>
       </ul>
     </section>
 

@@ -182,14 +182,16 @@
 // Sin rellenar (por defecto), esta función no existe: el firmware no
 // levanta ningún AP WiFi.
 //
-// Si defines una contraseña aquí: unos minutos después de que el bus CAN
-// se quede en silencio (moto apagada), se levanta solo un AP WiFi
-// "CanRiderTwo" con esta contraseña y sirve una página en
-// http://192.168.4.1/ para subir un .bin y actualizar el firmware sin
-// cable — sin Bluetooth ni ninguna app, solo aparcar y esperar. El AP se
-// apaga solo a los 10 min sin uso, o de inmediato si la moto se enciende
-// a mitad de la ventana. Si el WiFi de arriba ya está conectado para
-// telemetría, no se interrumpe para levantar el AP.
+// Si defines una contraseña aquí: en cuanto el bus CAN se queda en
+// silencio (moto apagada), se levanta un AP WiFi "CanRiderTwo" con esta
+// contraseña — portal cautivo incluido: al conectarte, el propio móvil
+// abre la página de actualización solo, como en un WiFi público (o entra
+// a mano en http://192.168.4.1/) — con un botón para subir un .bin y otro
+// para reiniciar el ESP32 en remoto. Sin Bluetooth ni ninguna app. El AP
+// se apaga solo a los 4 min sin ninguna petición, o a los 2 min de que el
+// último cliente conectado se vaya (lo que llegue antes), o de inmediato
+// si la moto se enciende a mitad de la ventana. Si el WiFi de arriba ya
+// está conectado para telemetría, no se interrumpe para levantar el AP.
 //
 // Usa una contraseña propia de al menos 8 caracteres — es un secreto igual
 // que SUPABASE_KEY, no la compartas ni la subas a git.

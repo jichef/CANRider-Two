@@ -829,7 +829,13 @@ static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
 // hacer state = HTTP_SETUP para restaurar la sesión de telemetría).
 bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
                 bool hasPos, const TimeRef& t) {
-    if (!tripState.active && busAlive) {
+    // t.valid además de busAlive: si el CAN se enciende antes de que el
+    // módem tenga la hora de red sincronizada (típico justo tras arrancar
+    // o reconectar), tripState.sy/sm/... se capturarían en 0 y el viaje se
+    // guardaría con start_time "0000-00-00T00:00:00Z". Se espera un ciclo
+    // más a que la hora sea válida — igual que ya se hace para no emitir
+    // la hora por CAN hasta que es válida.
+    if (!tripState.active && busAlive && t.valid) {
         tripState.active     = true;
         tripState.startMs    = millis();
         tripState.startSoc   = soc;
@@ -923,29 +929,37 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 // Bluetooth periféricos que anuncian servicios estándar reconocidos, un ESP32
 // con un servicio propio no aparece nunca ahí, así que "tócalo en Ajustes,
 // sin ninguna app" no era viable de verdad). Ahora es automático por tiempo:
-// unos minutos después de que el bus CAN se quede en silencio (moto apagada,
-// mismo criterio que el fin de viaje) se levanta solo un AP WiFi
-// "CanRiderTwo" con la contraseña de config.h y un servidor mínimo para
-// subir un .bin y actualizar el firmware — sin Bluetooth, sin ninguna app,
-// solo aparcar y esperar. El AP se apaga solo pasado OTA_AP_TIMEOUT_MS sin
-// actividad, o de inmediato si la moto se enciende a mitad de la ventana —
-// nunca se actualiza el firmware con la moto en marcha. Si el WiFi de
-// telemetría (ver más abajo) ya está conectado, no se interrumpe para
-// levantar el AP — ambos usan el radio WiFi y no pueden convivir.
+// en cuanto el bus CAN se queda en silencio (moto apagada, mismo criterio
+// que el fin de viaje) se levanta un AP WiFi "CanRiderTwo" con la
+// contraseña de config.h — sin esperar ningún margen — y un servidor
+// mínimo con portal cautivo (al conectarte, el propio móvil abre la
+// página solo, como en un WiFi público) para subir un .bin y actualizar
+// el firmware, o para reiniciar el ESP32 en remoto — sin Bluetooth, sin
+// ninguna app. El AP se apaga solo a los OTA_AP_TIMEOUT_MS (4 min) sin
+// ninguna petición HTTP, o a los OTA_CLIENT_GRACE_MS (2 min) de que el
+// último cliente conectado se vaya — lo que llegue antes —, o de
+// inmediato si la moto se enciende a mitad de la ventana: nunca se
+// actualiza el firmware con la moto en marcha. Si el WiFi de telemetría
+// (ver más abajo) ya está conectado, no se interrumpe para levantar el
+// AP — ambos usan el radio WiFi y no pueden convivir.
 #if defined(OTA_AP_PASSWORD)
 
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
 #include <Update.h>
 
-#define OTA_AP_SSID       "CanRiderTwo"
-#define OTA_PARK_DELAY_MS 120000UL   // 2 min aparcada antes de levantar el AP
-#define OTA_AP_TIMEOUT_MS 600000UL   // 10 min sin actividad → se apaga solo
+#define OTA_AP_SSID            "CanRiderTwo"
+#define OTA_AP_TIMEOUT_MS      240000UL   // 4 min sin actividad HTTP → se apaga
+#define OTA_CLIENT_GRACE_MS    120000UL   // 2 min tras irse el último cliente WiFi → se apaga
+#define OTA_DNS_PORT           53
 
-static WebServer otaServer(80);
-static bool      otaApActive     = false;
-static uint32_t  otaLastActivity = 0;
-static uint32_t  otaParkedSince  = 0;
+static WebServer  otaServer(80);
+static DNSServer  otaDns;
+static bool       otaApActive           = false;
+static uint32_t   otaLastActivity       = 0;
+static uint32_t   otaClientDisconnectAt = 0;
+static int        otaLastStationCount   = 0;
 
 const char OTA_PAGE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -971,6 +985,7 @@ button:disabled{opacity:0.5}
   <button id="btn" onclick="up()">Actualizar firmware</button>
   <div id="bar"><div id="barfill"></div></div>
   <div id="status"></div>
+  <button id="rst" onclick="rst()" style="margin-top:10px;background:#3a2119;color:#e07257">Reiniciar ESP32</button>
 </div>
 <script>
 function up(){
@@ -996,17 +1011,39 @@ function up(){
   var fd=new FormData();fd.append('firmware',f);
   xhr.send(fd);
 }
+function rst(){
+  if(!confirm('¿Reiniciar el ESP32 ahora?'))return;
+  document.getElementById('rst').disabled=true;
+  document.getElementById('status').textContent='Reiniciando...';
+  fetch('/reset',{method:'POST'});
+}
 </script></body></html>
 )HTML";
 
 static void otaStartAP() {
     if (otaApActive) return;
-    Serial.println("[OTA] Moto aparcada un rato -> levantando AP");
+    Serial.println("[OTA] Moto apagada -> levantando AP");
     WiFi.mode(WIFI_AP);
     WiFi.softAP(OTA_AP_SSID, OTA_AP_PASSWORD);
 
+    // Portal cautivo: todas las consultas DNS resuelven a la IP del propio
+    // AP, y cualquier ruta no reconocida sirve la misma página — así el
+    // aviso de "Iniciar sesión en la red" que ya muestran iOS/Android solo
+    // con conectarse abre la página de actualización directamente, sin
+    // tener que teclear la IP a mano.
+    otaDns.start(OTA_DNS_PORT, "*", WiFi.softAPIP());
+
     otaServer.on("/", HTTP_GET, []() {
         otaServer.send_P(200, "text/html", OTA_PAGE);
+    });
+    otaServer.onNotFound([]() {
+        otaServer.send_P(200, "text/html", OTA_PAGE);
+    });
+
+    otaServer.on("/reset", HTTP_POST, []() {
+        otaServer.send(200, "text/plain", "OK");
+        delay(300);
+        ESP.restart();
     });
 
     otaServer.on("/update", HTTP_POST, []() {
@@ -1030,13 +1067,16 @@ static void otaStartAP() {
     });
 
     otaServer.begin();
-    otaApActive     = true;
-    otaLastActivity = millis();
+    otaApActive           = true;
+    otaLastActivity       = millis();
+    otaClientDisconnectAt = 0;
+    otaLastStationCount   = 0;
 }
 
 static void otaStopAP() {
     if (!otaApActive) return;
     Serial.println("[OTA] Apagando AP");
+    otaDns.stop();
     otaServer.stop();
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_OFF);
@@ -1049,25 +1089,45 @@ static void setupOTA() {
 
 static void otaLoop() {
     if (otaApActive) {
+        otaDns.processNextRequest();
         otaServer.handleClient();
+
         if (canBusAlive()) {
             Serial.println("[OTA] Moto encendida a mitad de ventana OTA -> cerrando AP");
             otaStopAP();
-            otaParkedSince = 0;
+            return;
+        }
+
+        // Cuenta atrás corta tras irse el último cliente conectado —
+        // separada de la cuenta general de inactividad: si alguien ya
+        // estuvo aquí y se fue, no hace falta esperar los 4 min enteros.
+        int stations = WiFi.softAPgetStationNum();
+        if (otaLastStationCount > 0 && stations == 0) {
+            otaClientDisconnectAt = millis();
+            Serial.println("[OTA] Cliente desconectado, se apaga en 2 min si no vuelve nadie");
+        } else if (stations > 0) {
+            otaClientDisconnectAt = 0;
+        }
+        otaLastStationCount = stations;
+
+        if (otaClientDisconnectAt != 0 && millis() - otaClientDisconnectAt > OTA_CLIENT_GRACE_MS) {
+            Serial.println("[OTA] 2 min sin nadie conectado, cerrando AP");
+            otaStopAP();
             return;
         }
         if (millis() - otaLastActivity > OTA_AP_TIMEOUT_MS) {
-            Serial.println("[OTA] Sin actividad, cerrando AP");
+            Serial.println("[OTA] 4 min sin actividad, cerrando AP");
             otaStopAP();
         }
         return;
     }
 
-    // AP no activo: contar cuánto lleva la moto aparcada (CAN en silencio).
-    if (canBusAlive()) { otaParkedSince = 0; return; }
-    if (otaParkedSince == 0) { otaParkedSince = millis(); return; }
-    if (wifiConnected()) return;  // no interrumpir una sesión de telemetría por WiFi
-    if (millis() - otaParkedSince >= OTA_PARK_DELAY_MS) otaStartAP();
+    // AP no activo: se levanta en cuanto el bus CAN se queda en silencio
+    // (moto apagada), sin esperar ningún margen — salvo que el WiFi de
+    // telemetría ya esté conectado, para no interrumpirlo.
+    if (canBusAlive()) return;
+    if (wifiConnected()) return;
+    otaStartAP();
 }
 
 static bool otaActive() { return otaApActive; }
@@ -1211,11 +1271,13 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
 // si tampoco hay red al alcance en ese momento, se sigue con LTE como
 // siempre.
 //
-// Solo manda telemetría (posición/batería/CAN) por este camino — el inicio
-// y cierre de viajes se sigue gestionando por LTE; si un viaje termina
-// justo mientras se está usando WiFi, se queda en pendingTripBody y se
-// reintenta en cuanto la LTE esté disponible (ver flushPendingTrip()), no
-// se pierde.
+// El inicio/fin de viaje (updateTrip()) se evalúa igual aquí que en el
+// camino LTE — depende de si hay tramas CAN, no de qué camino mande la
+// telemetría. Lo único que sigue siendo específico de LTE es el propio
+// POST de cierre de viaje (httpPostTo(), vía módem); si falla porque la
+// LTE no tiene sesión lista en ese momento, se queda en pendingTripBody y
+// se reintenta (aquí y desde el camino LTE) hasta que se guarde, no se
+// pierde.
 #if defined(WIFI_FALLBACK_SSID_1)
 
 #include <WiFi.h>
@@ -1324,6 +1386,15 @@ static void wifiFallbackLoop() {
                 Serial.println("[OK] Telemetría enviada por WiFi");
             else
                 Serial.println("[ERROR] Fallo POST por WiFi");
+
+            // El inicio/fin de viaje depende de esto y no de qué camino
+            // mande la telemetría — sin esto, un viaje entero que
+            // transcurriera todo por WiFi nunca llegaría ni a empezar.
+            // El cierre de viaje en sí sigue usando httpPostTo() (LTE): si
+            // la LTE tiene sesión lista en paralelo puede que ya funcione,
+            // y si no, se queda en pendingTripBody como siempre.
+            updateTrip(snap.busAlive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t);
+            flushPendingTrip();
         }
         break;
     }
