@@ -1263,6 +1263,10 @@ static bool wifiHttpPostTo(const String& tablePath, const String& body) {
     http.addHeader("Authorization", "Bearer " SUPABASE_KEY);
     int code = http.POST(body);
     Serial.printf("[WIFI] HTTPClient código: %d (%s)\n", code, http.errorToString(code).c_str());
+    if (code > 0 && code != 200 && code != 201) {
+        Serial.print("[WIFI] Respuesta del servidor: ");
+        Serial.println(http.getString());
+    }
     http.end();
     return (code == 200 || code == 201);
 }
