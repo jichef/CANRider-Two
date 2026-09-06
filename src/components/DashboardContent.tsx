@@ -69,7 +69,15 @@ const Map = dynamic(() => import('@/components/Map'), {
 });
 
 export default function DashboardContent() {
-  const supabase = createClient();
+  // OJO: createClient() en sí es barato pero devuelve una instancia NUEVA
+  // cada vez que se llama — si se llamara directo en el cuerpo del
+  // componente, cada re-render (cada telemetría nueva, cada 15s) generaría
+  // un "supabase" distinto, y todo efecto con [supabase] en dependencias
+  // se desmontaría y volvería a montar en cada render: reconexión constante
+  // del canal realtime y refetch constante del historial de viajes. useState
+  // con inicializador perezoso crea el cliente una sola vez por instancia
+  // del componente y mantiene la misma referencia mientras esté montado.
+  const [supabase] = useState(() => createClient());
   const [telemetry, setTelemetry] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
   const TRIPS_PER_PAGE = 5;
@@ -149,6 +157,32 @@ export default function DashboardContent() {
           }
         }
 
+        // Mismo caso que la posición: si moto_battery/moto_battery_b llevan
+        // más de la ventana de 50 filas sin un valor real (señal CAN caída
+        // un buen rato), se busca el último dato real conocido de cada una
+        // en vez de dejarlas en null — BATERÍA A/B no deben volver a "---"
+        // mientras exista algún valor real en el historial.
+        let batA = telData.moto_battery;
+        let batB = telData.moto_battery_b;
+        if (batA == null) {
+          const { data: rows } = await supabase
+            .from('telemetry')
+            .select('moto_battery')
+            .not('moto_battery', 'is', null)
+            .order('timestamp', { ascending: false })
+            .limit(1);
+          if (rows?.[0]) batA = rows[0].moto_battery;
+        }
+        if (batB == null) {
+          const { data: rows } = await supabase
+            .from('telemetry')
+            .select('moto_battery_b')
+            .not('moto_battery_b', 'is', null)
+            .order('timestamp', { ascending: false })
+            .limit(1);
+          if (rows?.[0]) batB = rows[0].moto_battery_b;
+        }
+
         setTelemetry((prev: any) => {
           const merged = mergeTelemetry(prev, telData);
           if (posLat != null && posLon != null) {
@@ -157,6 +191,8 @@ export default function DashboardContent() {
             merged.position_source = posSource;
             merged._positionAt = posAt;
           }
+          if (batA != null) merged.moto_battery = batA;
+          if (batB != null) merged.moto_battery_b = batB;
           return merged;
         });
         if (posLat != null && posLon != null) {
