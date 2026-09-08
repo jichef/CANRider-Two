@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CanRider Telemetry",
+        "description": "Datos de conexión a Supabase de tu moto (los mismos que usa el dashboard web).",
+        "data": {
+          "supabase_url": "URL del proyecto Supabase",
+          "supabase_key": "Clave anon/publishable de Supabase",
+          "vehicle_id": "ID del vehículo (UUID)",
+          "board_model": "Placa del módem"
+        },
+        "data_description": {
+          "supabase_url": "Ej: https://xxxx.supabase.co (sin /rest/v1 al final)",
+          "supabase_key": "La clave anon o publishable del proyecto (NEXT_PUBLIC_SUPABASE_ANON_KEY en el .env del dashboard web). No uses la service_role key aquí.",
+          "vehicle_id": "El UUID exacto de la moto, el mismo valor que NEXT_PUBLIC_VEHICLE_ID en el dashboard web. No es un nombre libre."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con Supabase. Revisa la URL y que el equipo donde corre Home Assistant tenga salida a Internet.",
+      "invalid_auth": "La clave de Supabase no es válida (error 401).",
+      "invalid_vehicle_id": "El ID del vehículo no es un UUID válido. Usa el mismo UUID que el dashboard web (NEXT_PUBLIC_VEHICLE_ID), no un nombre como \"test01\"."
+    },
+    "abort": {
+      "already_configured": "Este dispositivo ya está configurado"
+    }
+  }
+}
