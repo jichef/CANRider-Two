@@ -298,10 +298,13 @@ export default function DashboardContent() {
   const avgTemp = temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : undefined;
 
   // Traza del viaje seleccionado (solo existe en viajes guardados con el
-  // firmware que ya registra [lat,lon,velocidad] por punto — los viajes
-  // antiguos no tienen "track" y el mapa cae a mostrar solo un aviso).
+  // firmware que ya registra puntos — los viajes antiguos no tienen
+  // "track" y el mapa cae a mostrar solo un aviso). Los dos últimos campos
+  // (segundos desde el inicio, batería) son más recientes que "track" en
+  // sí — viajes guardados justo tras añadirlo pueden no tenerlos, y el
+  // mapa se queda sin waypoints intermedios para esos en vez de romper.
   const selectedTripData = trips.find((t) => t.id === selectedTrip);
-  const track: [number, number, number][] | undefined = selectedTripData?.track;
+  const track: [number, number, number, number?, number?][] | undefined = selectedTripData?.track;
   const trackSpeeds = track?.map(([, , v]) => v) ?? [];
   const avgSpeed = trackSpeeds.length > 0
     ? trackSpeeds.reduce((a, b) => a + b, 0) / trackSpeeds.length
@@ -639,6 +642,7 @@ export default function DashboardContent() {
                 <Map
                   center={currentPosition}
                   track={selectedTrip ? track : undefined}
+                  tripStartTime={selectedTrip ? selectedTripData?.start_time : undefined}
                 />
               ) : (
                 <div className="h-full w-full bg-zinc-900 flex items-center justify-center">

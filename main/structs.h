@@ -74,5 +74,7 @@ struct TripState {
     float    trackLat[MAX_TRIP_POINTS];
     float    trackLon[MAX_TRIP_POINTS];
     float    trackSpeed[MAX_TRIP_POINTS];
+    uint32_t trackOffsetSec[MAX_TRIP_POINTS];  // segundos desde el inicio del viaje — para poder mostrar la hora real de cada punto sin guardar un timestamp completo por punto
+    float    trackBattery[MAX_TRIP_POINTS];    // SoC en ese punto — para el popup del waypoint en el mapa
     int      trackCount  = 0;
 };

@@ -886,10 +886,12 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         tripState.sh = t.hour; tripState.smin = t.min; tripState.ss = t.sec;
         tripState.trackCount = 0;
         if (hasPos) {
-            tripState.trackLat[0]   = lat;
-            tripState.trackLon[0]   = lon;
-            tripState.trackSpeed[0] = speed;
-            tripState.trackCount    = 1;
+            tripState.trackLat[0]       = lat;
+            tripState.trackLon[0]       = lon;
+            tripState.trackSpeed[0]     = speed;
+            tripState.trackOffsetSec[0] = 0;
+            tripState.trackBattery[0]   = soc;
+            tripState.trackCount        = 1;
         }
         Serial.println("[TRIP] Inicio de viaje (CAN activo)");
         return false;
@@ -905,9 +907,11 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 
     if (hasPos && tripState.trackCount < MAX_TRIP_POINTS) {
         int i = tripState.trackCount;
-        tripState.trackLat[i]   = lat;
-        tripState.trackLon[i]   = lon;
-        tripState.trackSpeed[i] = speed;
+        tripState.trackLat[i]       = lat;
+        tripState.trackLon[i]       = lon;
+        tripState.trackSpeed[i]     = speed;
+        tripState.trackOffsetSec[i] = (millis() - tripState.startMs) / 1000UL;
+        tripState.trackBattery[i]   = soc;
         tripState.trackCount++;
     }
 
@@ -934,15 +938,19 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         body += ",\"end_battery_level\":"     + String(soc, 1);
         body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
 
-        // Traza real del recorrido (lat/lon/velocidad por punto) para
-        // dibujar la ruta coloreada por velocidad en el mapa, en vez de
-        // solo una línea recta entre inicio y fin.
+        // Traza real del recorrido: [lat, lon, velocidad, segundos desde el
+        // inicio, batería en ese punto] — el offset en segundos (no un
+        // timestamp completo) basta para reconstruir la hora real de cada
+        // punto en el frontend (start_time + offset) sin engordar el JSON,
+        // y la batería permite mostrarla en el popup de cada waypoint.
         body += ",\"track\":[";
         for (int i = 0; i < tripState.trackCount; i++) {
             if (i > 0) body += ",";
             body += "[" + String(tripState.trackLat[i],   5) + ","
                         + String(tripState.trackLon[i],   5) + ","
-                        + String(tripState.trackSpeed[i], 1) + "]";
+                        + String(tripState.trackSpeed[i], 1) + ","
+                        + String(tripState.trackOffsetSec[i])  + ","
+                        + String(tripState.trackBattery[i], 1) + "]";
         }
         body += "]";
 

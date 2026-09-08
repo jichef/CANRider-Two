@@ -1,6 +1,6 @@
 'use client';
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useEffect, useState } from 'react';
@@ -67,14 +67,28 @@ function speedColor(ratio: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
+// [lat, lon, velocidad_kmh, segundos desde el inicio del viaje, batería%].
+// Los dos últimos son opcionales — los viajes guardados antes de este
+// cambio solo tienen los 3 primeros, y el mapa cae a no mostrar waypoints
+// intermedios para esos en vez de romper.
+type TrackPoint = [number, number, number, number?, number?];
+
+function formatWaypointTime(tripStartIso: string | undefined, offsetSec: number | undefined): string | null {
+  if (!tripStartIso || offsetSec == null) return null;
+  const d = new Date(new Date(tripStartIso).getTime() + offsetSec * 1000);
+  return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 interface MapProps {
   center: [number, number];
   zoom?: number;
-  /** Traza real del viaje: [lat, lon, velocidad_kmh] por punto */
-  track?: [number, number, number][];
+  /** Traza real del viaje */
+  track?: TrackPoint[];
+  /** ISO del inicio del viaje — para poder mostrar la hora real de cada waypoint */
+  tripStartTime?: string;
 }
 
-export default function Map({ center, zoom = 15, track }: MapProps) {
+export default function Map({ center, zoom = 15, track, tripStartTime }: MapProps) {
   const [icons, setIcons] = useState<{ start: L.Icon, end: L.Icon } | null>(null);
 
   useEffect(() => {
@@ -110,6 +124,26 @@ export default function Map({ center, zoom = 15, track }: MapProps) {
   const positions: [number, number][] = hasTrack ? track!.map(([lat, lon]) => [lat, lon]) : [];
   const bounds = hasTrack ? L.latLngBounds(positions) : undefined;
   const maxSpeed = hasTrack ? Math.max(1, ...track!.map(([, , v]) => v)) : 1;
+
+  // Waypoints intermedios: un marcador cada ~2 min de viaje (no uno por
+  // cada punto de los ~300 posibles, para no saturar el mapa) — se salta
+  // el primero y el último punto, que ya tienen su propio marcador de
+  // inicio/fin. Solo aparecen en viajes con offset guardado; los antiguos
+  // (solo [lat,lon,velocidad]) se quedan sin ellos.
+  const waypoints: { idx: number; point: TrackPoint }[] = [];
+  if (hasTrack) {
+    let lastBucket = -1;
+    track!.forEach((point, i) => {
+      const offsetSec = point[3];
+      if (offsetSec == null) return;
+      if (i === 0 || i === track!.length - 1) return;
+      const bucket = Math.floor(offsetSec / 120);
+      if (bucket !== lastBucket) {
+        waypoints.push({ idx: i, point });
+        lastBucket = bucket;
+      }
+    });
+  }
 
   return (
     <MapContainer
@@ -162,6 +196,31 @@ export default function Map({ center, zoom = 15, track }: MapProps) {
                   lineCap: 'round',
                 }}
               />
+            );
+          })}
+
+          {/* Waypoints intermedios: uno cada ~2 min de viaje */}
+          {waypoints.map(({ idx, point }) => {
+            const [lat, lon, v, offsetSec, battery] = point;
+            const time = formatWaypointTime(tripStartTime, offsetSec);
+            return (
+              <CircleMarker
+                key={`wp-${idx}`}
+                center={[lat, lon]}
+                radius={5}
+                pathOptions={{
+                  color: '#fff',
+                  weight: 1.5,
+                  fillColor: speedColor(v / maxSpeed),
+                  fillOpacity: 1,
+                }}
+              >
+                <Popup>
+                  {time && <div><b>Hora:</b> {time}</div>}
+                  <div><b>Velocidad:</b> {v.toFixed(0)} km/h</div>
+                  {battery != null && <div><b>Batería:</b> {battery.toFixed(0)}%</div>}
+                </Popup>
+              </CircleMarker>
             );
           })}
           <MapResizer bounds={bounds} />
