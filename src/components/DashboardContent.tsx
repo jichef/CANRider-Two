@@ -404,16 +404,6 @@ export default function DashboardContent() {
       border: 'border-cyan-500/20'
     },
     {
-      label: 'TENSIÓN',
-      value: telemetry?.pack_voltage != null ? telemetry.pack_voltage.toFixed(1) : '---',
-      unit: telemetry?.pack_voltage != null ? 'V' : '',
-      pct: null,
-      icon: Zap,
-      color: 'text-amber-400',
-      glow: 'shadow-[0_0_15px_rgba(251,191,36,0.3)]',
-      border: 'border-amber-500/20'
-    },
-    {
       label: 'SISTEMA',
       value: telemetry ? (isCharging ? 'CHARGING' : 'READY') : '---',
       unit: '',
