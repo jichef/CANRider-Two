@@ -541,8 +541,34 @@ export default function DashboardContent() {
             </div>
           )}
 
-          {/* Batería interna ESP32 (AT+CBC) */}
-          {telemetry?.battery_level != null && (
+          {/* Batería interna del dispositivo — board_battery_* (ADC propio del
+              ESP32) en vez de battery_level/is_charging (AT+CBC del módem):
+              el módem reporta "no cargando" incluso claramente en USB, así
+              que ese dato no es de fiar para saber el estado real. Ver
+              readBoardBatteryVoltage() en main.ino. board_on_usb=true viene
+              del propio diseño de la placa (el circuito de detección se
+              desconecta al conectar USB) — en ese caso no hay voltaje real
+              que mostrar, así que se indica "USB" en vez de un % inventado. */}
+          {telemetry?.board_on_usb === true ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all text-amber-400 border-amber-500/20 bg-amber-500/10">
+              <BatteryCharging size={14} />
+              <span className="text-xs font-bold font-mono">USB</span>
+            </div>
+          ) : telemetry?.board_battery_level != null ? (
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
+              telemetry.board_battery_level < 20
+                ? 'text-red-400 border-red-500/20 bg-red-500/10'
+                : 'text-zinc-400 border-white/10'
+            }`}>
+              <Battery size={14} />
+              <span className="text-xs font-bold font-mono">{telemetry.board_battery_level}%</span>
+              {telemetry.board_battery_voltage != null && (
+                <span className="text-[10px] font-mono text-zinc-500">{telemetry.board_battery_voltage.toFixed(2)}V</span>
+              )}
+            </div>
+          ) : telemetry?.battery_level != null && (
+            // Filas antiguas, de antes de este arreglo — dato del módem
+            // (AT+CBC), se mantiene solo como último recurso.
             <div className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
               telemetry.is_charging
                 ? 'text-amber-400 border-amber-500/20 bg-amber-500/10'

@@ -2,6 +2,7 @@
 #include "AT/utilities.h"  // usa el define de placa de config.h
 #include "driver/twai.h"
 #include "structs.h"
+#include <esp_adc_cal.h>
 
 #if defined(MODEM_SIM7000G)
 // El motor AT+SH de esta revisión de firmware SIM7000G es poco fiable
@@ -661,6 +662,64 @@ static BatReading readBattery() {
     b.pct      = d.substring(c1 + 1, c2).toInt();
     b.volts    = d.substring(c2 + 1).toFloat() / 1000.0f;
     b.valid    = true; return b;
+}
+
+// Voltaje real de la LiPo/18650 por el ADC propio del ESP32
+// (BOARD_BAT_ADC_PIN), independiente del AT+CBC del módem. Se comprobó en
+// campo que el módem reporta bcs=0 ("no cargando") incluso con el
+// dispositivo claramente en USB, y battery_level/voltage se quedan
+// pegados en un valor que no refleja carga/descarga real.
+//
+// Fórmula y calibración oficial de LilyGo (examples/readBattery/
+// readBattery.ino del repo LilyGO-T-SIM7000G): divisor resistivo 1:1
+// antes del ADC (de ahí el ×2) y esp_adc_cal_characterize() para
+// compensar la tolerancia de fábrica del ADC del ESP32 (que sin esto
+// puede desviarse bastante del 3.3V nominal). g_adcVref se calcula una
+// vez en setupBoardBatteryADC() (setup()).
+//
+// El propio ejemplo oficial documenta algo importante que explica por
+// qué se veía 0.000V constante en el banco: "When connecting USB, the
+// battery detection will return 0, because the adc detection circuit is
+// disconnected when connecting USB" — es decir, esto NO es un fallo,
+// es el comportamiento esperado de la placa. Y de paso nos da gratis la
+// señal de "está en USB" que buscábamos: voltaje ≈0 = en USB, sin
+// batería real que leer.
+static int g_adcVref = 1100;  // mV, valor por defecto hasta calibrar en setup()
+
+static void setupBoardBatteryADC() {
+    esp_adc_cal_characteristics_t adcChars;
+    esp_adc_cal_value_t valType = esp_adc_cal_characterize(
+        ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adcChars);
+    if (valType == ESP_ADC_CAL_VAL_EFUSE_VREF) {
+        g_adcVref = adcChars.vref;
+        Serial.printf("[BAT] ADC calibrado por eFuse Vref: %d mV\n", g_adcVref);
+    } else {
+        Serial.println("[BAT] Sin calibración eFuse, usando Vref por defecto (1100mV)");
+    }
+}
+
+#define BOARD_BAT_USB_THRESHOLD_V 0.5f  // por debajo de esto, se interpreta como "en USB" (ver comentario arriba)
+
+static float readBoardBatteryVoltage() {
+    uint16_t raw = analogRead(BOARD_BAT_ADC_PIN);
+    return ((float)raw / 4095.0f) * 2.0f * 3.3f * (g_adcVref / 1000.0f);
+}
+
+// Estimación de SoC a partir del voltaje real (curva aproximada de una
+// LiPo 1S) — no depende del bcl del módem, que viene del mismo AT+CBC
+// que ya se ha visto que no refleja bien el estado de carga.
+static int boardBatteryVoltageToPercent(float v) {
+    static const float vPts[] = {3.30f, 3.50f, 3.60f, 3.70f, 3.80f, 3.90f, 4.00f, 4.10f, 4.20f};
+    static const int   pPts[] = {0,     10,    20,    40,    55,    70,    80,    90,    100};
+    if (v <= vPts[0]) return 0;
+    if (v >= vPts[8]) return 100;
+    for (int i = 0; i < 8; i++) {
+        if (v <= vPts[i + 1]) {
+            float frac = (v - vPts[i]) / (vPts[i + 1] - vPts[i]);
+            return pPts[i] + (int)(frac * (pPts[i + 1] - pPts[i]));
+        }
+    }
+    return 100;
 }
 
 // AT+CSQ → RSSI 0-31 (99=desconocido) → dBm = –113 + 2×rssi
@@ -1457,6 +1516,27 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
         body += ",\"battery_voltage\":" + String(bat.volts, 3);
         body += ",\"is_charging\":"     + String(bat.charging ? "true" : "false");
     }
+    // Voltaje/SoC real de la LiPo/18650 por el ADC del ESP32 — ver
+    // readBoardBatteryVoltage(): independiente del AT+CBC del módem, que
+    // no refleja bien el estado de carga real (visto en campo: bcs=0 con
+    // el dispositivo claramente en USB). Se manda siempre, no solo si
+    // bat.valid, porque no depende de que el módem responda.
+    //
+    // board_on_usb: por diseño de esta placa, el propio circuito de
+    // detección se desconecta al conectar USB (confirmado en el ejemplo
+    // oficial de LilyGo) — un voltaje ~0 no es un fallo de lectura, es la
+    // señal de que está en USB. Se manda ese estado explícito y se omite
+    // el voltaje/porcentaje en ese caso, en vez de mandar un "0%" que
+    // parecería (incorrectamente) batería agotada.
+    {
+        float boardVolts = readBoardBatteryVoltage();
+        bool  onUsb       = boardVolts < BOARD_BAT_USB_THRESHOLD_V;
+        body += ",\"board_on_usb\":" + String(onUsb ? "true" : "false");
+        if (!onUsb) {
+            body += ",\"board_battery_voltage\":" + String(boardVolts, 3);
+            body += ",\"board_battery_level\":"   + String(boardBatteryVoltageToPercent(boardVolts));
+        }
+    }
     if (rssi != INT16_MIN) {
         body += ",\"signal_strength\":" + String(rssi);
     }
@@ -1686,6 +1766,8 @@ static bool postTripUpdate(const String& body) { return httpPostTo("/rest/v1/tri
 void setup() {
     Serial.begin(115200); delay(1000);
     Serial.println("[BOOT] CanRider v2");
+
+    setupBoardBatteryADC();
 
     timeMux = xSemaphoreCreateMutex();
     canMux  = xSemaphoreCreateMutex();

@@ -83,13 +83,25 @@ CREATE POLICY "lectura autenticada"
 --
 -- Columnas del módem/GPS (AT+CBC, AT+CSQ):
 --   motorcycle_id, latitude, longitude, speed, battery_level,
---   battery_voltage (tensión del ESP32/LiPo, NO la de la moto), is_charging,
---   signal_strength, position_source ('gps' o 'lbs' — de dónde viene la
---   posición cuando no hay cobertura GPS), timestamp
+--   battery_voltage (tensión del ESP32/LiPo según el MÓDEM, NO la de la
+--   moto), is_charging, signal_strength, position_source ('gps' o 'lbs' —
+--   de dónde viene la posición cuando no hay cobertura GPS), timestamp
 --   moving_without_can → true si el GPS mide movimiento real mientras el
 --   bus CAN lleva 8s+ en silencio (moto apagada) — la moto no se mueve
 --   sola apagada, así que esto es indicio de sustracción/transporte sin
 --   llave. Ver CAN_ALIVE_TIMEOUT_MS/THEFT_SPEED_KMH en main/main.ino.
+--   board_battery_voltage / board_battery_level → LiPo/18650 por el ADC
+--   propio del ESP32 (BOARD_BAT_ADC_PIN), NO por AT+CBC — se añadió
+--   porque el módem reporta bcs=0 ("no cargando") incluso con el
+--   dispositivo claramente en USB, y battery_level/battery_voltage no
+--   reflejan bien el estado real de carga. Ver readBoardBatteryVoltage()
+--   en main.ino.
+--   board_on_usb → por diseño de esta placa (confirmado en el ejemplo
+--   oficial de LilyGo), el circuito de detección de batería se
+--   desconecta físicamente al conectar USB — voltaje ~0 no es un fallo
+--   de lectura, es la señal de "está en USB". Cuando es true,
+--   board_battery_voltage/level vienen NULL a propósito (no se manda un
+--   "0%" que parecería, incorrectamente, batería agotada).
 --
 -- Columnas CAN (pack de la moto, ver supabase/seed_cpx.sql si lo tienes):
 --   soc             → State of Charge del pack EV (%)
@@ -117,10 +129,15 @@ CREATE TABLE IF NOT EXISTS telemetry (
     position_source     text,
     moving_without_can  boolean,        -- GPS en movimiento con el bus CAN en silencio: posible sustracción
 
-    -- Batería del módulo (AT+CBC — ESP32/LiPo)
+    -- Batería del módulo (AT+CBC — ESP32/LiPo, según el módem)
     battery_level       int,
     battery_voltage     float,
     is_charging          boolean,
+
+    -- Batería del módulo (ADC propio del ESP32 — ver comentario arriba)
+    board_on_usb           boolean,      -- true = circuito de detección desconectado (en USB) — voltage/level se omiten en ese caso
+    board_battery_voltage  float,
+    board_battery_level    int,
 
     -- Señal de red (AT+CSQ → dBm)
     signal_strength     smallint,
@@ -170,7 +187,10 @@ ALTER TABLE telemetry
   ADD COLUMN IF NOT EXISTS temp3               float,
   ADD COLUMN IF NOT EXISTS temp4               float,
   ADD COLUMN IF NOT EXISTS max_voltage         float,
-  ADD COLUMN IF NOT EXISTS max_charge_current  float;
+  ADD COLUMN IF NOT EXISTS max_charge_current  float,
+  ADD COLUMN IF NOT EXISTS board_battery_voltage float,
+  ADD COLUMN IF NOT EXISTS board_battery_level   int,
+  ADD COLUMN IF NOT EXISTS board_on_usb          boolean;
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_motorcycle_ts
     ON telemetry (motorcycle_id, timestamp DESC);
