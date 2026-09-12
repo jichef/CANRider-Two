@@ -724,8 +724,16 @@ export default function DashboardContent() {
                   center={currentPosition}
                   track={selectedTrip ? track : undefined}
                   tripStartTime={selectedTrip ? selectedTripData?.start_time : undefined}
+                  // ×1.5 de margen de seguridad: en una comparativa real contra
+                  // la última posición GPS conocida, el error real fue de ~832m
+                  // frente a los 550m que decía AT+CLBS — el <acc> del LBS es una
+                  // estimación estadística del servidor, no una garantía dura.
+                  // Es solo orientativo, así que se prefiere pecar de círculo
+                  // grande a dar una falsa sensación de precisión.
                   accuracyRadius={
-                    !selectedTrip && telemetry?.position_source === 'lbs' ? telemetry?.position_accuracy : undefined
+                    !selectedTrip && telemetry?.position_source === 'lbs' && telemetry?.position_accuracy != null
+                      ? telemetry.position_accuracy * 1.5
+                      : undefined
                   }
                 />
               ) : (
