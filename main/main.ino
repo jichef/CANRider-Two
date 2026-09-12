@@ -9,9 +9,20 @@
 // TinyGsmClientSecure (AT+CAOPEN/CASEND/CARECV) en su lugar, como hace
 // el ejemplo oficial de LilyGo HttpsBuiltlnPostSupabase.ino.
 #include <TinyGsmClient.h>
-#include "StreamDebugger.h"  // PRUEBA TEMPORAL: ver los AT reales de TinyGsm
+// DUMP_AT_COMMANDS (config.h, opcional): sin definir, TinyGsm habla
+// directo con SerialAT. Con StreamDebugger siempre activo (como estaba
+// antes), CADA byte que TinyGsm lee del módem —incluida la respuesta
+// entera de AT+CARECV, hasta MAX_HTTP_BODY bytes— se reenvía también por
+// Serial (USB) de forma síncrona byte a byte, duplicando el coste de
+// vaciar cada respuesta HTTPS y contaminando cualquier medición de
+// rendimiento. Se deja disponible solo para depuración puntual.
+#if defined(DUMP_AT_COMMANDS)
+#include "StreamDebugger.h"
 StreamDebugger debugger(SerialAT, Serial);
 TinyGsm modem(debugger);
+#else
+TinyGsm modem(SerialAT);
+#endif
 #endif
 
 // ── Timing ────────────────────────────────────────────────────────────────────
@@ -28,6 +39,20 @@ TinyGsm modem(debugger);
 
 static TimeRef          lastTime = {};
 static SemaphoreHandle_t timeMux = NULL;
+
+// t.valid (TimeRef) significa "tengo hora", pero esa hora puede venir del
+// GPS (AT+CGPSINFO/AT+CGNSINF, siempre en UTC puro, sin zona horaria) o de
+// la red (AT+CCLK/NITZ, la ÚNICA fuente de utcOffsetMin). Antes se usaba
+// "!snapshotTime().valid" para decidir si merecía la pena reintentar
+// readNetworkTime() — pero si el GPS conseguía fix antes de que AT+CCLK
+// hubiera tenido éxito ni una vez (plausible con efemérides "calientes" de
+// un reinicio reciente), t.valid ya quedaba en true por el GPS y
+// readNetworkTime() no se volvía a llamar nunca más: utcOffsetMin se
+// quedaba clavado en su 0 inicial para siempre, y la trama de reloj salía
+// en UTC puro en vez de hora local (visto en campo: exactamente 2h menos
+// en septiembre, que es el offset CEST de España). g_tzKnown separa
+// "tengo zona horaria" de "tengo hora", para no confundir ambas cosas.
+static bool g_tzKnown = false;
 
 static TimeRef snapshotTime() {
     TimeRef t = {};
@@ -149,6 +174,26 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     TinyGsmClientSecure sslClient(modem);
     if (!sslClient.connect(host.c_str(), 443, 15)) {
         Serial.println("[HTTPS] connect() falló");
+        // Visto en varios tests de estabilidad de horas: cuando nosotros
+        // nos rendimos con AT+CAOPEN, el módem puede seguir resolviéndolo
+        // por su cuenta y mandar la respuesta ("+CAOPEN: 0,2"/"0,27" o
+        // similar) bastante más tarde — un drenaje a ciegas de 4s (primer
+        // intento) no bastaba ni de lejos, y ni siquiera AT+CACLOSE=0 con
+        // solo 5s de margen (segundo intento) conseguía sincronizarse
+        // siempre: en ese caso el propio CACLOSE se quedaba esperando
+        // porque el módem seguía "ocupado" con el CAOPEN abandonado, y el
+        // ATE0 siguiente aún se llevaba un timeout de propina. Con 15s de
+        // margen aquí, sendAT() ya reconoce el "OK"/"ERROR" real en cuanto
+        // llega (no espera los 15s enteros si contesta antes) — así se
+        // absorbe la respuesta tardía en su sitio en vez de dejarla
+        // colarse en el primer comando del siguiente intento de conexión.
+        sendAT("AT+CACLOSE=0", "OK", 15000);
+        // Por si aun así queda algo suelto en el buffer.
+        uint32_t drainStart = millis(), lastDrainByte = millis();
+        while (millis() - drainStart < 2000 && millis() - lastDrainByte < 500) {
+            while (SerialAT.available()) { SerialAT.read(); lastDrainByte = millis(); }
+            delay(20);
+        }
         return false;
     }
 
@@ -174,17 +219,35 @@ static bool sim7000Request(const String& method, const String& path, const Strin
         // Que devuelva el registro creado da contenido real que detectar.
         sslClient.print("Content-Length: "); sslClient.print(body.length()); sslClient.print("\r\n");
     }
-    sslClient.print("Connection: close\r\n\r\n");
+    // "Connection: close" (como estaba antes) le pide al servidor que
+    // cierre la conexión nada más responder — visto en el diálogo AT en
+    // crudo (DUMP_AT_COMMANDS): Cloudflare cumple tan al pie de la letra
+    // que el aviso "hay datos" (+CADATAIND) y el de "socket cerrado"
+    // (+CASTATE: 0,0 / +CACLOSE) llegan casi a la vez, y TinyGsm nunca
+    // llega a pedir esos datos con AT+CARECV antes de dar el socket por
+    // muerto. Resultado: la petición SÍ llega y se guarda en Supabase
+    // (comprobado comparando timestamps), pero aquí se contaba como fallo
+    // porque nunca se leía la respuesta — de ahí las reconexiones
+    // constantes sin necesidad. Con keep-alive el servidor no cierra de
+    // inmediato, dando margen real a leer la respuesta antes del cierre.
+    sslClient.print("Connection: keep-alive\r\n\r\n");
     if (body.length() > 0) sslClient.print(body);
 
-    // En roaming, una conexión que se va a cortar sin datos puede quedarse
-    // "abierta" muchos segundos sin dar señales de vida antes de que el
-    // módem la dé por muerta. Las respuestas que sí llegan lo hacen en
-    // pocos segundos, así que un techo corto no penaliza el caso bueno y
-    // evita que uno malo bloquee el resto (p.ej. el envío de telemetría).
+    // Visto en campo (SIM7000G camping en 2G/GSM, sin Cat-M1 disponible):
+    // con 10s de techo total / 4s de inactividad, el POST llegaba a
+    // Supabase de verdad (confirmado comparando timestamps del propio
+    // Supabase con el log serie) pero este bucle daba el intento por
+    // fallido de todos modos — la respuesta tarda más en volver por 2G/
+    // GPRS de lo que estos plazos permitían, así que se abandonaba antes
+    // de leer el "HTTP/1.1 201" que ya venía de camino. Eso disparaba una
+    // reconexión completa (NET_SETUP) en cada ciclo sin necesidad, dando
+    // la falsa impresión de que la LTE no funcionaba en absoluto. Subir
+    // ambos plazos es la parte segura de arreglar esto: para una conexión
+    // realmente muerta solo cuesta esperar más antes de saberlo, y ese
+    // tiempo no bloquea nada más (CAN sigue en su propio task de Core 0).
     String raw; raw.reserve(2048);
     uint32_t rStart = millis(), lastByte = millis();
-    while (millis() - rStart < 10000) {
+    while (millis() - rStart < 20000) {
         while (sslClient.available()) {
             // Con la conexión cortada a medias, available() puede seguir
             // devolviendo un conteo obsoleto (>0) mientras read() ya
@@ -203,9 +266,9 @@ static bool sim7000Request(const String& method, const String& path, const Strin
         // Sin el "raw.length() > 0" de antes: si la conexión nunca entrega
         // ni un solo byte (available() sigue en true de forma obsoleta,
         // read() siempre falla), lastByte se queda clavado en rStart y este
-        // corte actúa igual como un tope de ~4s en vez de agotar los 10s
+        // corte actúa igual como un tope de ~8s en vez de agotar los 20s
         // enteros machacando AT+CARECV contra un socket ya muerto.
-        if (millis() - lastByte > 4000) break;
+        if (millis() - lastByte > 8000) break;
         delay(10);
     }
     // sslClient.stop() sin argumento (TinyGsmClientSIM7000SSL.h) equivale a
@@ -430,6 +493,16 @@ bool readNetworkTime() {
     t.min   =        dt.substring(12, 14).toInt();
     t.sec   =        dt.substring(15, 17).toInt();
 
+    // Visto en campo con este mismo SIM7000G: antes de que llegue NITZ real,
+    // AT+CCLK? responde con el reloj de fábrica del módem sin resetear
+    // ("80/01/06,00:08:24+08" → año 2080 con el "2000+YY" de abajo) — un
+    // "+08" de zona con pinta perfectamente válida, así que sin este filtro
+    // se aceptaba como hora real y marcaba g_tzKnown=true a partir de un
+    // valor centinela, bloqueando el reintento igual que el bug original de
+    // GPS-vs-red que motivó g_tzKnown. Cualquier año pasado (a fecha de este
+    // firmware) es ese centinela, no una hora real.
+    if (t.year < 2024) return false;
+
     // Convertir a UTC para uso interno (trips/telemetría en Supabase usan
     // UTC), pero guardando el offset ("+08" = +2h) para poder volver a
     // hora local al construir la trama del reloj — el panel de la moto
@@ -443,6 +516,7 @@ bool readNetworkTime() {
         t.hour = ((totalMin / 60) % 24 + 24) % 24;
         t.min  = ((totalMin % 60)      + 60) % 60;
         t.utcOffsetMin = offsetMin;
+        g_tzKnown      = true;
     }
     t.capturedAt = millis();
     t.valid      = true;
@@ -608,6 +682,15 @@ int16_t readSignalStrength() {
 void setupCAN() {
     twai_general_config_t gcfg = TWAI_GENERAL_CONFIG_DEFAULT(
         (gpio_num_t)CAN_TX_PIN, (gpio_num_t)CAN_RX_PIN, TWAI_MODE_NORMAL);
+    // TWAI_GENERAL_CONFIG_DEFAULT deja rx_queue_len en 5 (verificado en
+    // driver/twai.h del propio toolchain). Con TWAI_FILTER_CONFIG_ACCEPT_ALL
+    // de abajo, esa cola la comparten TODAS las tramas del bus, no solo las
+    // 3-5 que procesamos — en un bus con varias ECUs, 5 plazas se llenan en
+    // pocos ms y el driver descarta tramas antes de que canTask() las vea,
+    // incluidas potencialmente clock_*/moto_battery*. 64 cuesta ~1 KB extra
+    // de RAM, irrelevante en este ESP32, y da margen de sobra frente al
+    // intervalo de vaciado de canTask() (ver comentario en canTask()).
+    gcfg.rx_queue_len = 64;
     twai_timing_config_t  tcfg = CAN_SPEED;
     twai_filter_config_t  fcfg = TWAI_FILTER_CONFIG_ACCEPT_ALL();
     if (twai_driver_install(&gcfg, &tcfg, &fcfg) != ESP_OK || twai_start() != ESP_OK)
@@ -699,36 +782,76 @@ void canTask(void*) {
             xSemaphoreGive(canMux);
         }
 
-        // — Recepción (no bloqueante: lee todo lo que haya en la cola) —
+        // — Recepción —
+        // Antes: twai_receive(&rx, 0) (no bloqueante) + vTaskDelay(200) fijo
+        // al final del bucle. Con rx_queue_len=5 (ver setupCAN()) y un bus
+        // con tráfico de otras ECUs además de las señales que procesamos,
+        // esos 200ms de poleo eran tiempo de sobra para llenar la cola del
+        // driver y perder tramas ANTES de que este bucle llegara a leerlas
+        // — pérdida silenciosa, sin contador ni aviso.
+        //
+        // Ahora: se bloquea hasta 20ms esperando una primera trama (cede
+        // CPU igual que el vTaskDelay de antes, pero reacciona en cuanto
+        // llega algo en vez de esperar el tick completo) y, en cuanto llega
+        // una, se vacía el resto de la ráfaga ya pendiente sin bloquear.
+        // El TX de arriba se sigue comprobando en cada vuelta del bucle, que
+        // ahora ocurre como mínimo cada 20ms en vez de cada 200ms fijos, así
+        // que la cadencia de emisión no solo no empeora, mejora (menos
+        // jitter en la trama del reloj).
         twai_message_t rx;
-        while (twai_receive(&rx, 0) == ESP_OK) {
+        if (twai_receive(&rx, pdMS_TO_TICKS(20)) == ESP_OK) {
             lastCanFrameMs = millis();   // cualquier trama cuenta, conocida o no
             if (xSemaphoreTake(canMux, pdMS_TO_TICKS(5)) == pdTRUE) {
                 parseCANFrame(rx);
                 xSemaphoreGive(canMux);
             }
+            while (twai_receive(&rx, 0) == ESP_OK) {   // drena la ráfaga restante
+                lastCanFrameMs = millis();
+                if (xSemaphoreTake(canMux, pdMS_TO_TICKS(5)) == pdTRUE) {
+                    parseCANFrame(rx);
+                    xSemaphoreGive(canMux);
+                }
+            }
         }
-
-        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
 
 // ── HTTP POST ─────────────────────────────────────────────────────────────────
 #if defined(MODEM_A7670G)
 
+// Sesión HTTP persistente compartida entre telemetría y viajes: solo se
+// reconfigura el parámetro URL/USERDATA (comandos locales al módem, sin
+// red) antes de cada AT+HTTPACTION — nunca se hace HTTPTERM/HTTPINIT salvo
+// una vez, en setupHTTP(). Antes, httpPostTo() (la de los viajes) hacía un
+// ciclo completo de HTTPTERM+HTTPINIT en CADA llamada — el mismo coste de
+// reconexión que se identificó como cuello de botella dominante en el
+// SIM7000G, solo que con otro comando AT. Con un checkpoint de viaje cada
+// ~15s eso habría multiplicado esa reconexión durante todo el trayecto.
+static bool httpSetTarget(const String& tablePath, bool preferMerge) {
+    String urlCmd = String("AT+HTTPPARA=\"URL\",\"")
+                    + SUPABASE_URL + tablePath + "?apikey=" + SUPABASE_KEY + "\"";
+    if (!sendAT(urlCmd.c_str())) return false;
+    // Con Prefer: resolution=merge-duplicates, reenviar el mismo POST de
+    // cierre/checkpoint de viaje (mismo "id", ver generateUUID()) tras un
+    // fallo de red que en realidad SÍ había llegado al servidor ya no crea
+    // un viaje duplicado: Postgres hace upsert sobre la primary key en vez
+    // de insertar de nuevo.
+    String ud = String("AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer ") + SUPABASE_KEY;
+    if (preferMerge) ud += "\r\nPrefer: resolution=merge-duplicates";
+    ud += "\"";
+    return sendAT(ud.c_str());
+}
+
 bool setupHTTP() {
     sendAT("AT+HTTPTERM");
     if (!sendAT("AT+HTTPINIT"))               return false;
     if (!sendAT("AT+HTTPPARA=\"SSLCFG\",0")) return false;
-    String urlCmd = String("AT+HTTPPARA=\"URL\",\"")
-                    + SUPABASE_URL + "/rest/v1/telemetry?apikey=" + SUPABASE_KEY + "\"";
-    if (!sendAT(urlCmd.c_str())) return false;
     if (!sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"")) return false;
-    String ud = String("AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer ") + SUPABASE_KEY + "\"";
-    return sendAT(ud.c_str());
+    return httpSetTarget("/rest/v1/telemetry", false);
 }
 
 bool httpPost(const String& body) {
+    if (!httpSetTarget("/rest/v1/telemetry", false)) return false;
     String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
     if (!sendAT(dcmd.c_str(), "DOWNLOAD", 6000)) return false;
     SerialAT.print(body); delay(200);
@@ -736,33 +859,12 @@ bool httpPost(const String& body) {
 }
 
 bool httpPostTo(const String& tablePath, const String& body) {
-    bool ok = false;
-    // Con Prefer: resolution=merge-duplicates, reenviar el mismo POST de
-    // cierre de viaje (mismo "id", ver generateUUID()) tras un fallo de red
-    // que en realidad SÍ había llegado al servidor ya no crea un viaje
-    // duplicado: Postgres hace upsert sobre la primary key en vez de
-    // insertar de nuevo.
     bool preferMerge = (tablePath == "/rest/v1/trips");
-    sendAT("AT+HTTPTERM");
-    do {
-        if (!sendAT("AT+HTTPINIT"))               break;
-        if (!sendAT("AT+HTTPPARA=\"SSLCFG\",0")) break;
-        String urlCmd = String("AT+HTTPPARA=\"URL\",\"")
-                        + SUPABASE_URL + tablePath + "?apikey=" + SUPABASE_KEY + "\"";
-        if (!sendAT(urlCmd.c_str()))               break;
-        if (!sendAT("AT+HTTPPARA=\"CONTENT\",\"application/json\"")) break;
-        String ud = String("AT+HTTPPARA=\"USERDATA\",\"Authorization: Bearer ")
-                    + SUPABASE_KEY;
-        if (preferMerge) ud += "\r\nPrefer: resolution=merge-duplicates";
-        ud += "\"";
-        if (!sendAT(ud.c_str()))                   break;
-        String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
-        if (!sendAT(dcmd.c_str(), "DOWNLOAD", 6000)) break;
-        SerialAT.print(body); delay(200);
-        ok = sendAT("AT+HTTPACTION=1", "+HTTPACTION:", 15000);
-    } while (false);
-    sendAT("AT+HTTPTERM");
-    return ok;
+    if (!httpSetTarget(tablePath, preferMerge)) return false;
+    String dcmd = "AT+HTTPDATA=" + String(body.length()) + ",5000";
+    if (!sendAT(dcmd.c_str(), "DOWNLOAD", 6000)) return false;
+    SerialAT.print(body); delay(200);
+    return sendAT("AT+HTTPACTION=1", "+HTTPACTION:", 15000);
 }
 
 #else // SIM7000G — TinyGsmClientSecure (AT+CAOPEN), ver sim7000Request() arriba
@@ -816,7 +918,7 @@ static String pendingTripBody = "";
 
 static bool flushPendingTrip() {
     if (pendingTripBody.length() == 0) return false;
-    if (httpPostTo("/rest/v1/trips", pendingTripBody)) {
+    if (postTripUpdate(pendingTripBody)) {
         Serial.println("[TRIP] Viaje pendiente enviado correctamente");
         pendingTripBody = "";
         return true;
@@ -863,8 +965,68 @@ static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
     return R * 2.0f * atan2f(sqrtf(a), sqrtf(1.0f - a));
 }
 
-// Devuelve true si el viaje acaba de terminar (se usó httpPostTo → caller debe
-// hacer state = HTTP_SETUP para restaurar la sesión de telemetría).
+// Construye el JSON del viaje EN CURSO o recién cerrado, con "end_time" =
+// el instante actual t. Se usa tanto para los checkpoints intermedios como
+// para el cierre final — la única diferencia entre ambos es si busAlive
+// sigue activo o no al llamar a esto, no el formato del cuerpo.
+static String buildTripBody(const TimeRef& t, float soc) {
+    uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
+
+    char startISO[21], endISO[21], durStr[12];
+    snprintf(startISO, sizeof(startISO), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+             tripState.sy, tripState.sm, tripState.sd,
+             tripState.sh, tripState.smin, tripState.ss);
+    snprintf(endISO,   sizeof(endISO),   "%04d-%02d-%02dT%02d:%02d:%02dZ",
+             t.year, t.month, t.day, t.hour, t.min, t.sec);
+    snprintf(durStr,   sizeof(durStr),   "%uh %02umin",
+             (unsigned)(durMin / 60), (unsigned)(durMin % 60));
+
+    String body = "{\"id\":\"" + tripState.tripId + "\",\"motorcycle_id\":\"" VEHICLE_ID "\"";
+    body += ",\"start_time\":\""         + String(startISO)                    + "\"";
+    body += ",\"end_time\":\""            + String(endISO)                     + "\"";
+    body += ",\"distance\":"              + String(tripState.distanceKm, 2);
+    body += ",\"duration\":\""            + String(durStr)                     + "\"";
+    body += ",\"max_speed\":"             + String(tripState.maxSpeed, 1);
+    body += ",\"start_battery_level\":"   + String(tripState.startSoc, 1);
+    body += ",\"end_battery_level\":"     + String(soc, 1);
+    body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
+
+    // Traza real del recorrido: [lat, lon, velocidad, segundos desde el
+    // inicio, batería en ese punto] — el offset en segundos (no un
+    // timestamp completo) basta para reconstruir la hora real de cada
+    // punto en el frontend (start_time + offset) sin engordar el JSON,
+    // y la batería permite mostrarla en el popup de cada waypoint.
+    body += ",\"track\":[";
+    for (int i = 0; i < tripState.trackCount; i++) {
+        if (i > 0) body += ",";
+        body += "[" + String(tripState.trackLat[i],   5) + ","
+                    + String(tripState.trackLon[i],   5) + ","
+                    + String(tripState.trackSpeed[i], 1) + ","
+                    + String(tripState.trackOffsetSec[i])  + ","
+                    + String(tripState.trackBattery[i], 1) + "]";
+    }
+    body += "]";
+    body += "}";
+    return body;
+}
+
+// A7670G: la sesión HTTP ahora es persistente de verdad (httpSetTarget()
+// solo cambia parámetros locales entre llamadas, sin HTTPTERM/HTTPINIT —
+// ver la sección HTTP POST más arriba), así que un checkpoint de viaje
+// cada ~15s no paga una reconexión completa: se manda también por LTE, no
+// solo por WiFi. SIM7000G: cada llamada SÍ abre una conexión TLS desde
+// cero (sim7000Request()), así que ahí los checkpoints intermedios se
+// limitan a WiFi para no multiplicar ese coste durante todo el viaje — el
+// cierre final se sigue intentando por cualquiera de los dos, como pediste.
+#if defined(MODEM_A7670G)
+static bool shouldSendTripCheckpoint() { return true; }
+#else
+static bool shouldSendTripCheckpoint() { return wifiConnected(); }
+#endif
+
+// Devuelve true si el viaje acaba de terminar (se usó postTripUpdate() por
+// LTE → caller debe hacer state = HTTP_SETUP para restaurar la sesión de
+// telemetría; si fue por WiFi no hace falta, esa ruta no toca el módem).
 bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
                 bool hasPos, const TimeRef& t) {
     // t.valid además de busAlive: si el CAN se enciende antes de que el
@@ -875,6 +1037,7 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     // la hora por CAN hasta que es válida.
     if (!tripState.active && busAlive && t.valid) {
         tripState.active     = true;
+        tripState.tripId     = generateUUID();
         tripState.startMs    = millis();
         tripState.startSoc   = soc;
         tripState.distanceKm = 0;
@@ -894,6 +1057,14 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
             tripState.trackCount        = 1;
         }
         Serial.println("[TRIP] Inicio de viaje (CAN activo)");
+        // Checkpoint inicial: crea la fila ya desde el principio, no solo
+        // al cerrar — así, si el viaje termina sin cobertura (p.ej. al
+        // entrar en la cochera justo cuando se corta la conexión), Supabase
+        // ya tiene el viaje con los puntos que sí llegaron a salir, en vez
+        // de no tener nada hasta un cierre final que a lo mejor no llega
+        // nunca. Ver shouldSendTripCheckpoint(): en A7670G esto va también
+        // por LTE (sesión persistente, barato); en SIM7000G solo por WiFi.
+        if (shouldSendTripCheckpoint()) postTripUpdate(buildTripBody(t, soc));
         return false;
     }
 
@@ -916,55 +1087,25 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     }
 
     if (!busAlive) {
-        uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
-
-        char startISO[21], endISO[21], durStr[12];
-        snprintf(startISO, sizeof(startISO), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                 tripState.sy, tripState.sm, tripState.sd,
-                 tripState.sh, tripState.smin, tripState.ss);
-        snprintf(endISO,   sizeof(endISO),   "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                 t.year, t.month, t.day, t.hour, t.min, t.sec);
-        snprintf(durStr,   sizeof(durStr),   "%uh %02umin",
-                 (unsigned)(durMin / 60), (unsigned)(durMin % 60));
-
-        String tripId = generateUUID();
-        String body = "{\"id\":\"" + tripId + "\",\"motorcycle_id\":\"" VEHICLE_ID "\"";
-        body += ",\"start_time\":\""         + String(startISO)                    + "\"";
-        body += ",\"end_time\":\""            + String(endISO)                     + "\"";
-        body += ",\"distance\":"              + String(tripState.distanceKm, 2);
-        body += ",\"duration\":\""            + String(durStr)                     + "\"";
-        body += ",\"max_speed\":"             + String(tripState.maxSpeed, 1);
-        body += ",\"start_battery_level\":"   + String(tripState.startSoc, 1);
-        body += ",\"end_battery_level\":"     + String(soc, 1);
-        body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
-
-        // Traza real del recorrido: [lat, lon, velocidad, segundos desde el
-        // inicio, batería en ese punto] — el offset en segundos (no un
-        // timestamp completo) basta para reconstruir la hora real de cada
-        // punto en el frontend (start_time + offset) sin engordar el JSON,
-        // y la batería permite mostrarla en el popup de cada waypoint.
-        body += ",\"track\":[";
-        for (int i = 0; i < tripState.trackCount; i++) {
-            if (i > 0) body += ",";
-            body += "[" + String(tripState.trackLat[i],   5) + ","
-                        + String(tripState.trackLon[i],   5) + ","
-                        + String(tripState.trackSpeed[i], 1) + ","
-                        + String(tripState.trackOffsetSec[i])  + ","
-                        + String(tripState.trackBattery[i], 1) + "]";
-        }
-        body += "]";
-
-        body += "}";
-
+        String body = buildTripBody(t, soc);
         Serial.print("[TRIP] Fin (CAN en silencio): "); Serial.println(body);
-        if (!httpPostTo("/rest/v1/trips", body)) {
+        if (!postTripUpdate(body)) {
             Serial.println("[TRIP] Error al guardar viaje, se reintentará");
             pendingTripBody = body;
         }
-
         tripState.active = false;
-        return true;   // sesión HTTP consumida → caller debe re-inicializar
+        return true;   // sesión HTTP consumida (si fue por LTE) → caller debe re-inicializar
     }
+
+    // Checkpoint intermedio (mismo tripId → upsert sobre la misma fila),
+    // igual que el inicial: ver shouldSendTripCheckpoint(). Si falla, no
+    // se reintenta aparte — el siguiente checkpoint, ~15s después y con
+    // más track acumulado, lo sustituye sin más.
+    if (shouldSendTripCheckpoint()) {
+        if (!postTripUpdate(buildTripBody(t, soc)))
+            Serial.println("[TRIP] Checkpoint intermedio no enviado, se reintenta en el siguiente ciclo");
+    }
+
     return false;
 }
 
@@ -1059,10 +1200,25 @@ function up(){
   xhr.send(fd);
 }
 function rst(){
-  if(!confirm('¿Reiniciar el ESP32 ahora?'))return;
-  document.getElementById('rst').disabled=true;
+  // Sin confirm() nativo a propósito: el mini-navegador cautivo que iOS/
+  // Android abren solo al saltar el aviso de "Iniciar sesión en la red"
+  // bloquea o no implementa confirm()/alert() — la llamada devuelve false
+  // sin mostrar ningún diálogo, así que el botón parecía no hacer nada.
+  // Doble toque con DOM puro en su lugar: funciona igual dentro y fuera
+  // de ese navegador cautivo.
+  var btn=document.getElementById('rst');
+  if(btn.dataset.armed!=='1'){
+    btn.dataset.armed='1';
+    btn.textContent='¿Seguro? Toca otra vez';
+    setTimeout(function(){btn.dataset.armed='';btn.textContent='Reiniciar ESP32';},4000);
+    return;
+  }
+  btn.disabled=true;
   document.getElementById('status').textContent='Reiniciando...';
-  fetch('/reset',{method:'POST'});
+  fetch('/reset',{method:'POST'}).catch(function(){
+    document.getElementById('status').textContent='No se pudo contactar con el ESP32';
+    btn.disabled=false;btn.dataset.armed='';btn.textContent='Reiniciar ESP32';
+  });
 }
 </script></body></html>
 )HTML";
@@ -1211,6 +1367,19 @@ bool networkSetup() {
 bool networkSetup() {
     if (!sendAT("ATE0"))              return false;
 
+    // AT+CNMP=2 (automático) explícito, no implícito. Con AT+CNMP=38 (solo
+    // LTE) se comprobó que el módem SÍ registra en Cat-M1 aquí ("+CPSI:
+    // LTE CAT-M1,Online"), pero el 100% de los POST fallaban (0/21 en
+    // banco). Con DUMP_AT_COMMANDS se vio el porqué: el contexto de datos
+    // se activa y se desactiva SOLO justo después ("+APP PDP: ACTIVE"
+    // seguido de "+APP PDP: DEACTIVE" sin que el firmware haga nada), y
+    // AT+CAOPEN falla con "+CAOPEN: 0,1" (red no disponible) — visto en
+    // 2/2 pruebas, no intermitente. Es una incompatibilidad de red/
+    // operador con Cat-M1 en esta APN, no arreglable desde aquí. GSM,
+    // aunque "peor" tecnología, es la única opción que de verdad funciona
+    // en este sitio (~84% de éxito) — automático es lo correcto.
+    sendAT("AT+CNMP=2", "OK", 5000);
+
     // Ciclo de radio (CFUN=0/1) antes de pedir el contexto de datos: en
     // itinerancia (Digi Mobil funciona así en esta zona) el contexto de
     // "aplicación" (CNACT) se quedaba en +APP PDP: DEACTIVE de forma
@@ -1251,6 +1420,14 @@ bool networkSetup() {
 // en structs.h (ver comentario ahí sobre por qué no está inline aquí).
 static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     TelemetrySnapshot snap;
+    // Red de seguridad para el caso descrito arriba (g_tzKnown): si por lo
+    // que sea el GPS ganó la carrera y la red nunca llegó a dar zona
+    // horaria, se reintenta aquí en cada ciclo de telemetría — barato
+    // (una AT+CCLK? de hasta 3s) y se vuelve un no-op en cuanto se
+    // resuelve una vez. Funciona igual vengamos del camino LTE o del WiFi
+    // (esta función se llama desde ambos), a diferencia del intento único
+    // de HTTP_SETUP que con WiFi conectado casi no se vuelve a ejecutar.
+    if (!g_tzKnown) readNetworkTime();
     readGPS();
     BatReading bat = readBattery();
     int16_t    rssi = readSignalStrength();
@@ -1289,18 +1466,37 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     // en la práctica solo uno de los dos trae datos reales a la vez,
     // así que se usa el que no esté a cero.
     float socA = 0, socB = 0;
+
+    // La concatenación de String de más abajo (con sus reallocs de heap)
+    // se hace DESPUÉS de soltar canMux, no mientras se tiene tomado. Antes
+    // se formateaba el JSON de cada señal dentro del lock: canTask() (Core
+    // 0) toma este mismo mutex con solo 5 ticks de margen para volcar una
+    // trama RX recién sacada de la cola del driver, y si esa toma fallaba
+    // la trama se perdía sin más (no se reencola). Copiar aquí solo los
+    // datos crudos (sin heap) reduce la sección crítica a algo determinista
+    // y muy corto, en vez de una serie de allocs de tamaño variable.
+    struct SignalSnap { char name[20]; float value; uint8_t byteLen; };
+    static SignalSnap snapBuf[MAX_SIGNALS];
+    int snapCount = 0;
     if (xSemaphoreTake(canMux, pdMS_TO_TICKS(10)) == pdTRUE) {
         for (int i = 0; i < canSignalCount; i++) {
             if (canSignals[i].direction == 't') continue;  // TX no va a telemetría
             if (strcmp(canSignals[i].name, "moto_battery")   == 0) socA = canSignals[i].value;
             if (strcmp(canSignals[i].name, "moto_battery_b") == 0) socB = canSignals[i].value;
             if (canSignals[i].updated) {
-                body += ",\"" + String(canSignals[i].name) + "\":"
-                      + String(canSignals[i].value, canSignals[i].byteLen == 1 ? 0 : 2);
+                strncpy(snapBuf[snapCount].name, canSignals[i].name, sizeof(snapBuf[snapCount].name) - 1);
+                snapBuf[snapCount].name[sizeof(snapBuf[snapCount].name) - 1] = '\0';
+                snapBuf[snapCount].value   = canSignals[i].value;
+                snapBuf[snapCount].byteLen = canSignals[i].byteLen;
+                snapCount++;
                 canSignals[i].updated = false;
             }
         }
         xSemaphoreGive(canMux);
+    }
+    for (int i = 0; i < snapCount; i++) {
+        body += ",\"" + String(snapBuf[i].name) + "\":"
+              + String(snapBuf[i].value, snapBuf[i].byteLen == 1 ? 0 : 2);
     }
     snap.currentSoc = (socA > 0) ? socA : socB;
     body += "}";
@@ -1454,6 +1650,18 @@ static void wifiFallbackLoop() {
 static bool wifiFallbackActive() { return wfState != WF_IDLE; }
 static bool wifiConnected()      { return wfState == WF_CONNECTED; }
 
+// Punto único desde el que updateTrip()/flushPendingTrip() mandan el
+// cuerpo de un viaje (checkpoint intermedio o cierre): por WiFi si está
+// conectado, si no por LTE (httpPostTo(), la ruta de siempre). Antes el
+// cierre de viaje SOLO sabía hablar por LTE aunque toda la telemetría del
+// viaje hubiera ido por WiFi — si justo al aparcar la LTE no tenía
+// cobertura (habitual si dependes del WiFi para eso mismo), el viaje se
+// quedaba en pendingTripBody sin nadie capaz de reintentarlo.
+static bool postTripUpdate(const String& body) {
+    if (wifiConnected()) return wifiHttpPostTo("/rest/v1/trips", body);
+    return httpPostTo("/rest/v1/trips", body);
+}
+
 // El OTA tiene prioridad sobre este WiFi de telemetría al aparcar (no
 // pueden convivir en el mismo radio) — esto corta cualquier conexión o
 // intento en curso y vuelve a WF_IDLE, para que se retome sola en cuanto
@@ -1471,6 +1679,7 @@ static void wifiFallbackLoop()     {}
 static bool wifiFallbackActive()   { return false; }
 static bool wifiConnected()        { return false; }
 static void wifiForceDisconnect()  {}
+static bool postTripUpdate(const String& body) { return httpPostTo("/rest/v1/trips", body); }
 #endif
 
 // ── Arranque ──────────────────────────────────────────────────────────────────
@@ -1551,7 +1760,7 @@ void loop() {
         // (TinyGsmGPS.tpp) manda ambas cosas en el orden correcto.
         modem.enableGPS(MODEM_GPS_ENABLE_GPIO, MODEM_GPS_ENABLE_LEVEL);
 #endif
-        if (!snapshotTime().valid) readNetworkTime();
+        if (!g_tzKnown) readNetworkTime();
         if (setupHTTP()) {
             Serial.println("[STATE] RUNNING");
             httpFails = 0; state = RUNNING; nextPost = millis();

@@ -64,6 +64,7 @@ struct TelemetrySnapshot {
 
 struct TripState {
     bool     active      = false;
+    String   tripId;                    // generado al EMPEZAR el viaje (no al cerrarlo) — así los checkpoints intermedios hacen upsert sobre la misma fila
     uint32_t startMs     = 0;
     float    startSoc    = 0;
     float    distanceKm  = 0;

@@ -95,6 +95,23 @@
 #endif
 
 // ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> OPCIONAL — Depuración AT en bruto (solo SIM7000G)                 │
+// └──────────────────────────────────────────────────────────────────────┘
+// Sin definir (por defecto): TinyGsm habla directo con el módem, sin
+// pasos intermedios.
+//
+// Si la defines: cada byte AT real hacia/desde el módem se vuelca también
+// por Serial (USB) vía StreamDebugger, para depurar en el banco qué está
+// mandando/recibiendo TinyGsm de verdad. Cuesta caro en tiempo: la
+// respuesta de una petición HTTPS (hasta MAX_HTTP_BODY bytes) se reenvía
+// entera por USB de forma síncrona, byte a byte, duplicando el tiempo de
+// lectura de cada POST y falseando cualquier medición de rendimiento que
+// hagas con ella activa. Déjala comentada salvo que estés depurando el
+// diálogo AT en el banco.
+
+// #define DUMP_AT_COMMANDS
+
+// ┌──────────────────────────────────────────────────────────────────────┐
 // │ >>> CAMBIA ESTO 5/5 (solo si tu moto usa otras tramas) — Señales CAN  │
 // └──────────────────────────────────────────────────────────────────────┘
 // Frame ID (hexadecimal) y byte (0-7 dentro de la trama de 8 bytes) de
