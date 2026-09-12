@@ -609,11 +609,27 @@ void readGPS() {
 // menos precisión que el GPS (de cientos de metros a varios km según la
 // zona), pero mejor que no tener nada mientras se consigue un fix real —
 // típicamente los primeros minutos tras arrancar, o en interior/garaje.
+// AT+CLBS necesita su propio contexto de datos (AT+SAPBR) — una vía interna
+// más antigua del módem (stack GPRS clásico), separada del AT+CNACT/AT+CAOPEN
+// que ya usamos para HTTPS. Sin este bearer activo, AT+CLBS devuelve siempre
+// "+CLBS: 3" (NET Error) aunque el resto de la conectividad funcione bien —
+// confirmado en campo: decenas de intentos, siempre error 3, hasta añadir
+// esto (SIM7000 Series_LBS_Application Note_V1.01, secciones 4 y 5.1). Se
+// intenta activar en cada intento de LBS (ya limitado a 1/60s más abajo):
+// si ya estaba activo, AT+SAPBR=1,1 falla con un error inofensivo que se
+// ignora, y se continúa igualmente con AT+CLBS.
+static void ensureLbsBearer() {
+    sendAT("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 3000);
+    sendAT("AT+SAPBR=3,1,\"APN\",\"" APN "\"",   "OK", 3000);
+    sendAT("AT+SAPBR=1,1", "OK", 15000);
+}
+
 static void readLBS() {
     static uint32_t lastTry = 0;
     if (millis() - lastTry < 60000) return;
     lastTry = millis();
 
+    ensureLbsBearer();
     String resp = queryAT("AT+CLBS=1,1", "+CLBS:", 10000);
     int colon = resp.indexOf(':');
     if (colon < 0) return;
@@ -623,7 +639,10 @@ static void readLBS() {
     for (int i = 0; i <= (int)d.length() && fi < 4; i++) {
         if (i == (int)d.length() || d[i] == ',') { f[fi++] = d.substring(prev, i); prev = i + 1; }
     }
-    // f[0]=código de resultado (0=OK) f[1]=lat f[2]=lon
+    // f[0]=código de resultado (0=OK) f[1]=longitud f[2]=latitud — ese es el
+    // orden real de +CLBS (Application Note sección 3.1); antes estaba al
+    // revés, sin haberse notado porque CLBS nunca había llegado a tener
+    // éxito para poder comprobarlo.
     if (fi < 3 || f[0] != "0") return;
 
     // Ojo: no se toca t.capturedAt aquí — solo posición, no hora. Si se
@@ -633,8 +652,8 @@ static void readLBS() {
     TimeRef t   = snapshotTime();
     t.hasPos    = true;
     t.posSource = 'l';
-    t.lat       = f[1].toFloat();
-    t.lon       = f[2].toFloat();
+    t.lon       = f[1].toFloat();
+    t.lat       = f[2].toFloat();
     t.speed_kmh = 0;  // LBS no da velocidad; no arrastrar la última del GPS
     storeTime(t);
 }
