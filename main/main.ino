@@ -480,6 +480,30 @@ void parseCANFrame(const twai_message_t& msg) {
 }
 
 // ── Tiempo de red (NITZ/CCLK) ─────────────────────────────────────────────────
+// Desplaza (year,month,day) por deltaDays días completos, respetando meses de
+// distinta longitud y años bisiestos. deltaDays en la práctica es -1, 0 o +1
+// (un solo cruce de medianoche al pasar de hora local a UTC), pero el bucle
+// admite cualquier valor pequeño sin caso especial.
+static void shiftDate(uint16_t &year, uint8_t &month, uint8_t &day, int deltaDays) {
+    auto isLeap = [](int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; };
+    auto daysInMonth = [&](int y, int m) -> int {
+        static const int dim[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        return (m == 2 && isLeap(y)) ? 29 : dim[m - 1];
+    };
+    int y = year, m = month, d = (int)day + deltaDays;
+    while (d < 1) {
+        m--;
+        if (m < 1) { m = 12; y--; }
+        d += daysInMonth(y, m);
+    }
+    while (d > daysInMonth(y, m)) {
+        d -= daysInMonth(y, m);
+        m++;
+        if (m > 12) { m = 1; y++; }
+    }
+    year = y; month = m; day = d;
+}
+
 bool readNetworkTime() {
     String resp = queryAT("AT+CCLK?", "+CCLK:", 3000);
     int q1 = resp.indexOf('"'), q2 = resp.lastIndexOf('"');
@@ -514,8 +538,19 @@ bool readNetworkTime() {
     if (signIdx >= 0) {
         int offsetMin = sign * dt.substring(signIdx + 1).toInt() * 15;
         int totalMin  = (int)t.hour * 60 + t.min - offsetMin;
-        t.hour = ((totalMin / 60) % 24 + 24) % 24;
-        t.min  = ((totalMin % 60)      + 60) % 60;
+        // División entera "floor" (no truncada hacia cero): con totalMin
+        // negativo (p.ej. local 00:03 con offset +2h → -117), el día debe
+        // retroceder uno y la hora caer en las últimas horas de ESE día
+        // anterior. Antes solo se envolvía hour/min con %24/%60 sin tocar
+        // t.day, dejando fecha+hora inconsistentes (visto en campo: local
+        // "26/09/13,00:03" (+08) generaba "UTC: 2026-09-13 23:03", cuando
+        // la UTC real es 2026-09-12 22:03).
+        int dayDelta = totalMin / 1440;
+        int minOfDay = totalMin % 1440;
+        if (minOfDay < 0) { minOfDay += 1440; dayDelta--; }
+        t.hour = minOfDay / 60;
+        t.min  = minOfDay % 60;
+        if (dayDelta != 0) shiftDate(t.year, t.month, t.day, dayDelta);
         t.utcOffsetMin = offsetMin;
         g_tzKnown      = true;
     }
