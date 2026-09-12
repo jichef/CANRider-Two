@@ -158,13 +158,6 @@ export default function Map({ center, zoom = 15, track, tripStartTime, accuracyR
         attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
       />
-      {/* Capa de referencia (carreteras, nombres, límites) transparente
-          encima del satélite — modo híbrido, mismo proveedor Esri gratis
-          que la capa base, sin cuenta ni clave nuevas. */}
-      <TileLayer
-        attribution='Esri Hybrid Reference'
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-      />
       <MapAutoResize />
 
       {!hasTrack && (
