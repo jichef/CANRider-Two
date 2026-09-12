@@ -181,10 +181,13 @@
 // WiFi que ya estaba activa se cae, se reintenta WiFi; si tampoco hay red
 // al alcance en ese momento, se sigue con LTE.
 //
-// Mientras se usa WiFi solo se manda telemetría (posición, batería,
-// señales CAN) — el guardado de inicio/fin de viaje sigue dependiendo de
-// la LTE; si un viaje termina justo mientras se usa WiFi, se reintenta en
-// cuanto la LTE esté disponible (no se pierde, ver pendingTripBody).
+// El guardado de viajes (inicio, checkpoints intermedios y cierre) también
+// va por WiFi cuando está conectado, no solo la telemetría — postTripUpdate()
+// intenta WiFi primero y solo cae a LTE si no hay WiFi conectado en ese
+// momento. Si ninguno de los dos consigue mandarlo (p.ej. un viaje termina
+// justo al perderse el WiFi y la LTE tampoco responde todavía), se guarda
+// en pendingTripBody y se reintenta en el siguiente ciclo, por cualquiera
+// de las dos vías — no se pierde.
 
 // #define WIFI_FALLBACK_SSID_1 "tu-red-1"
 // #define WIFI_FALLBACK_PASS_1 "contraseña-red-1"
