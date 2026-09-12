@@ -43,10 +43,7 @@ function positionTimestamp(obj: any): string | undefined {
 function mergeTelemetry(prev: any, next: any) {
   if (!next) return prev;
   if (!prev) {
-    return {
-      ...next,
-      _positionAt: (next.latitude != null && next.longitude != null) ? next.timestamp : undefined,
-    };
+    return { ...next, _positionAt: positionTimestamp(next) };
   }
   const merged: any = { ...next };
   for (const key of Object.keys(next)) {
@@ -58,12 +55,17 @@ function mergeTelemetry(prev: any, next: any) {
   // conocido), pero además se guarda CUÁNDO fue esa última lectura real —
   // telemetry.timestamp por sí solo no sirve para esto, porque puede ser
   // más reciente que la posición si esa fila concreta trajo otros datos
-  // pero no GPS. positionTimestamp(prev) resuelve esto también cuando prev
-  // es una fila cruda sin _positionAt propio (p.ej. al plegar el histórico
-  // de las últimas 50 filas en fetchData).
-  merged._positionAt = (next.latitude != null && next.longitude != null)
-    ? next.timestamp
-    : positionTimestamp(prev);
+  // pero no GPS. OJO: usar positionTimestamp(next) en vez de comprobar
+  // "next.latitude != null" directamente — en el pliegue de fetchData(),
+  // en cuanto next.latitude queda relleno por backfill (viniendo de una
+  // fila antigua), TODOS los pasos siguientes verían next.latitude no-null
+  // y confundirían "sigue habiendo una posición conocida" con "esta fila
+  // trae un fix fresco ahora", pisando el _positionAt correcto con
+  // next.timestamp (el ping más reciente, no el del fix real).
+  // positionTimestamp(next) evita esto: si next ya trae su propio
+  // _positionAt resuelto (típico en el pliegue, donde next es el
+  // acumulador de pasos previos), se respeta tal cual.
+  merged._positionAt = positionTimestamp(next) ?? positionTimestamp(prev);
   return merged;
 }
 
@@ -180,7 +182,7 @@ export default function DashboardContent() {
         let posLat = telData.latitude;
         let posLon = telData.longitude;
         let posSource = telData.position_source;
-        let posAt = (posLat != null && posLon != null) ? telData.timestamp : undefined;
+        let posAt = telData._positionAt;
 
         if (posLat == null || posLon == null) {
           const { data: lastPosRows } = await supabase
