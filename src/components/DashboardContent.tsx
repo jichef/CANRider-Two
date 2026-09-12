@@ -30,6 +30,16 @@ import { createClient } from '@/lib/supabase';
 // null en una fila cuando esa lectura concreta no se completó a tiempo del
 // envío — no significa que el dato ya no exista, así que en vez de pisar el
 // estado con ese null, se conserva el último valor no-null que se vio.
+// Timestamp real de la posición de un objeto (fila cruda de Supabase o ya
+// fusionada por mergeTelemetry): si trae _positionAt ya calculado se usa
+// ese; si no, es una fila cruda y su propio timestamp sirve como tal solo
+// si esa fila concreta trae coordenadas.
+function positionTimestamp(obj: any): string | undefined {
+  if (!obj) return undefined;
+  if (obj._positionAt !== undefined) return obj._positionAt;
+  return (obj.latitude != null && obj.longitude != null) ? obj.timestamp : undefined;
+}
+
 function mergeTelemetry(prev: any, next: any) {
   if (!next) return prev;
   if (!prev) {
@@ -48,10 +58,12 @@ function mergeTelemetry(prev: any, next: any) {
   // conocido), pero además se guarda CUÁNDO fue esa última lectura real —
   // telemetry.timestamp por sí solo no sirve para esto, porque puede ser
   // más reciente que la posición si esa fila concreta trajo otros datos
-  // pero no GPS.
+  // pero no GPS. positionTimestamp(prev) resuelve esto también cuando prev
+  // es una fila cruda sin _positionAt propio (p.ej. al plegar el histórico
+  // de las últimas 50 filas en fetchData).
   merged._positionAt = (next.latitude != null && next.longitude != null)
     ? next.timestamp
-    : prev._positionAt;
+    : positionTimestamp(prev);
   return merged;
 }
 
@@ -527,12 +539,17 @@ export default function DashboardContent() {
             </span>
           </div>
 
-          {/* Por qué camino se mandó la última telemetría — ver connection_type en main.ino */}
+          {/* Por qué camino se mandó la última telemetría — ver connection_type en main.ino.
+              En gris cuando isStale: el dato sigue siendo el último conocido,
+              pero no hay que darle pinta de "en vivo" si el dispositivo lleva
+              más de 2 min sin reportar (ver Online/Offline arriba). */}
           {telemetry?.connection_type && (
             <div className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
-              telemetry.connection_type === 'wifi'
-                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
-                : 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+              isStale
+                ? 'bg-white/5 text-zinc-500 border-white/10'
+                : telemetry.connection_type === 'wifi'
+                  ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                  : 'bg-violet-500/10 text-violet-400 border-violet-500/20'
             }`}>
               <SignalIcon connectionType={telemetry.connection_type} dbm={telemetry.signal_strength} />
               <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
@@ -550,13 +567,15 @@ export default function DashboardContent() {
               desconecta al conectar USB) — en ese caso no hay voltaje real
               que mostrar, así que se indica "USB" en vez de un % inventado. */}
           {telemetry?.board_on_usb === true ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all text-amber-400 border-amber-500/20 bg-amber-500/10">
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
+              isStale ? 'text-zinc-500 border-white/10 bg-white/5' : 'text-amber-400 border-amber-500/20 bg-amber-500/10'
+            }`}>
               <BatteryCharging size={14} />
               <span className="text-xs font-bold font-mono">USB</span>
             </div>
           ) : telemetry?.board_battery_level != null ? (
             <div className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
-              telemetry.board_battery_level < 20
+              !isStale && telemetry.board_battery_level < 20
                 ? 'text-red-400 border-red-500/20 bg-red-500/10'
                 : 'text-zinc-400 border-white/10'
             }`}>
@@ -570,11 +589,13 @@ export default function DashboardContent() {
             // Filas antiguas, de antes de este arreglo — dato del módem
             // (AT+CBC), se mantiene solo como último recurso.
             <div className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
-              telemetry.is_charging
-                ? 'text-amber-400 border-amber-500/20 bg-amber-500/10'
-                : (telemetry.battery_level < 20
-                    ? 'text-red-400 border-red-500/20 bg-red-500/10'
-                    : 'text-zinc-400 border-white/10')
+              isStale
+                ? 'text-zinc-500 border-white/10 bg-white/5'
+                : telemetry.is_charging
+                  ? 'text-amber-400 border-amber-500/20 bg-amber-500/10'
+                  : (telemetry.battery_level < 20
+                      ? 'text-red-400 border-red-500/20 bg-red-500/10'
+                      : 'text-zinc-400 border-white/10')
             }`}>
               {telemetry.is_charging
                 ? <BatteryCharging size={14} />
