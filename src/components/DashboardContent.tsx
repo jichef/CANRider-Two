@@ -12,7 +12,14 @@ import {
   Activity,
   Thermometer,
   Signal,
+  SignalHigh,
+  SignalMedium,
+  SignalLow,
+  SignalZero,
   Wifi,
+  WifiHigh,
+  WifiLow,
+  WifiZero,
   Trash2,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -46,6 +53,28 @@ function mergeTelemetry(prev: any, next: any) {
     ? next.timestamp
     : prev._positionAt;
   return merged;
+}
+
+// Icono de intensidad de señal, graduado según dBm en vez de un simple
+// on/off. signal_strength viene siempre de AT+CSQ en el módem celular
+// (main.ino, readSignalStrength(): -113 a -51 dBm) — el firmware lo manda
+// así incluso cuando el envío se hizo por WiFi (todavía no hay lectura de
+// RSSI de WiFi guardada en Supabase), así que por ahora las barras de WiFi
+// reflejan la cobertura celular del módem, no la del propio WiFi.
+function SignalIcon({ connectionType, dbm, size = 12 }: { connectionType?: string; dbm?: number | null; size?: number }) {
+  if (connectionType === 'wifi') {
+    if (dbm == null) return <WifiZero size={size} />;
+    if (dbm >= -60) return <Wifi size={size} />;
+    if (dbm >= -75) return <WifiHigh size={size} />;
+    if (dbm >= -90) return <WifiLow size={size} />;
+    return <WifiZero size={size} />;
+  }
+  if (dbm == null) return <SignalZero size={size} />;
+  if (dbm >= -65) return <Signal size={size} />;
+  if (dbm >= -75) return <SignalHigh size={size} />;
+  if (dbm >= -85) return <SignalMedium size={size} />;
+  if (dbm >= -95) return <SignalLow size={size} />;
+  return <SignalZero size={size} />;
 }
 
 function timeAgo(isoString?: string | null) {
@@ -505,7 +534,7 @@ export default function DashboardContent() {
                 ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
                 : 'bg-violet-500/10 text-violet-400 border-violet-500/20'
             }`}>
-              {telemetry.connection_type === 'wifi' ? <Wifi size={12} /> : <Signal size={12} />}
+              <SignalIcon connectionType={telemetry.connection_type} dbm={telemetry.signal_strength} />
               <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
                 {telemetry.connection_type === 'wifi' ? 'WiFi' : 'LTE'}
               </span>
