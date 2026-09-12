@@ -358,6 +358,14 @@ export default function DashboardContent() {
   const movingSpeeds = trackSpeeds.filter((v) => v > 2); // excluye paradas/ruido en reposo
   const minSpeed = movingSpeeds.length > 0 ? Math.min(...movingSpeeds) : null;
 
+  // ×1.5 de margen de seguridad sobre el <acc> que da AT+CLBS — ver el
+  // círculo de precisión en el mapa (Map.tsx / accuracyRadius más abajo):
+  // en una comparativa real contra la última posición GPS conocida, el
+  // error real fue ~1.5x el valor que reportaba el propio módem.
+  const lbsAccuracyM = telemetry?.position_accuracy != null
+    ? Math.round(telemetry.position_accuracy * 1.5)
+    : null;
+
   const hasCAN = telemetry?.pack_voltage != null
     || telemetry?.battery_current != null
     || avgTemp != null
@@ -665,7 +673,7 @@ export default function DashboardContent() {
                           className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20"
                           title="Posición aproximada por triangulación de celda — sin fix GPS"
                         >
-                          LBS · APROX.
+                          LBS · APROX. {lbsAccuracyM != null && `±${lbsAccuracyM}m`}
                         </span>
                       ) : (
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -724,16 +732,8 @@ export default function DashboardContent() {
                   center={currentPosition}
                   track={selectedTrip ? track : undefined}
                   tripStartTime={selectedTrip ? selectedTripData?.start_time : undefined}
-                  // ×1.5 de margen de seguridad: en una comparativa real contra
-                  // la última posición GPS conocida, el error real fue de ~832m
-                  // frente a los 550m que decía AT+CLBS — el <acc> del LBS es una
-                  // estimación estadística del servidor, no una garantía dura.
-                  // Es solo orientativo, así que se prefiere pecar de círculo
-                  // grande a dar una falsa sensación de precisión.
                   accuracyRadius={
-                    !selectedTrip && telemetry?.position_source === 'lbs' && telemetry?.position_accuracy != null
-                      ? telemetry.position_accuracy * 1.5
-                      : undefined
+                    !selectedTrip && telemetry?.position_source === 'lbs' ? lbsAccuracyM : undefined
                   }
                 />
               ) : (
