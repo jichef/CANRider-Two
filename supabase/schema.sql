@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
     longitude           float,
     speed               float,
     position_source     text,
+    position_accuracy   float,          -- radio de precisión en metros — solo LBS (AT+CLBS), GPS no lo manda
     moving_without_can  boolean,        -- GPS en movimiento con el bus CAN en silencio: posible sustracción
 
     -- Batería del módulo (AT+CBC — ESP32/LiPo, según el módem)
@@ -171,6 +172,7 @@ CREATE TABLE IF NOT EXISTS telemetry (
 ALTER TABLE telemetry
   ADD COLUMN IF NOT EXISTS connection_type     text,
   ADD COLUMN IF NOT EXISTS position_source     text,
+  ADD COLUMN IF NOT EXISTS position_accuracy   float,
   ADD COLUMN IF NOT EXISTS moving_without_can  boolean,
   ADD COLUMN IF NOT EXISTS moto_battery        int,
   ADD COLUMN IF NOT EXISTS moto_battery_b      int,

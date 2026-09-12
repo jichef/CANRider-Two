@@ -1,6 +1,6 @@
 'use client';
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useEffect, useState } from 'react';
@@ -86,9 +86,11 @@ interface MapProps {
   track?: TrackPoint[];
   /** ISO del inicio del viaje — para poder mostrar la hora real de cada waypoint */
   tripStartTime?: string;
+  /** Radio de precisión en metros (solo LBS — AT+CLBS) para dibujar el círculo de incertidumbre alrededor de `center` */
+  accuracyRadius?: number | null;
 }
 
-export default function Map({ center, zoom = 15, track, tripStartTime }: MapProps) {
+export default function Map({ center, zoom = 15, track, tripStartTime, accuracyRadius }: MapProps) {
   const [icons, setIcons] = useState<{ start: L.Icon, end: L.Icon } | null>(null);
 
   useEffect(() => {
@@ -163,6 +165,17 @@ export default function Map({ center, zoom = 15, track, tripStartTime }: MapProp
           <Marker position={center} icon={icons.start}>
             <Popup>Ubicación actual</Popup>
           </Marker>
+          {/* LBS (triangulación de celda) da un centro aproximado, no un
+              punto exacto como el GPS — el círculo de incertidumbre deja
+              claro que la posición real está en algún lugar de esa zona,
+              no exactamente donde cae el marcador. */}
+          {accuracyRadius != null && accuracyRadius > 0 && (
+            <Circle
+              center={center}
+              radius={accuracyRadius}
+              pathOptions={{ color: '#f59e0b', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 0.12 }}
+            />
+          )}
           <LiveFollower center={center} />
         </>
       )}

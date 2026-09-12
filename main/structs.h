@@ -9,6 +9,7 @@ struct TimeRef {
     bool     hasPos;
     char     posSource;  // 'g'=GPS real, 'l'=aproximada por LBS (celda)
     float    lat, lon, speed_kmh;
+    float    posAccuracyM;  // radio de precisión en metros, solo para LBS (-1 = desconocido/GPS)
     uint8_t  hour, min, sec;   // siempre en UTC (hour/min/sec + utcOffsetMin = hora local)
     uint8_t  day, month;
     uint16_t year;

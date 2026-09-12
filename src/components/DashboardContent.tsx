@@ -182,12 +182,13 @@ export default function DashboardContent() {
         let posLat = telData.latitude;
         let posLon = telData.longitude;
         let posSource = telData.position_source;
+        let posAcc = telData.position_accuracy;
         let posAt = telData._positionAt;
 
         if (posLat == null || posLon == null) {
           const { data: lastPosRows } = await supabase
             .from('telemetry')
-            .select('latitude,longitude,position_source,timestamp')
+            .select('latitude,longitude,position_source,position_accuracy,timestamp')
             .not('latitude', 'is', null)
             .order('timestamp', { ascending: false })
             .limit(1);
@@ -196,6 +197,7 @@ export default function DashboardContent() {
             posLat = fb.latitude;
             posLon = fb.longitude;
             posSource = fb.position_source;
+            posAcc = fb.position_accuracy;
             posAt = fb.timestamp;
           }
         }
@@ -232,6 +234,7 @@ export default function DashboardContent() {
             merged.latitude = posLat;
             merged.longitude = posLon;
             merged.position_source = posSource;
+            merged.position_accuracy = posAcc;
             merged._positionAt = posAt;
           }
           if (batA != null) merged.moto_battery = batA;
@@ -721,6 +724,9 @@ export default function DashboardContent() {
                   center={currentPosition}
                   track={selectedTrip ? track : undefined}
                   tripStartTime={selectedTrip ? selectedTripData?.start_time : undefined}
+                  accuracyRadius={
+                    !selectedTrip && telemetry?.position_source === 'lbs' ? telemetry?.position_accuracy : undefined
+                  }
                 />
               ) : (
                 <div className="h-full w-full bg-zinc-900 flex items-center justify-center">

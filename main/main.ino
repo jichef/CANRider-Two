@@ -586,8 +586,9 @@ void readGPS() {
     if (fi < 6 || f[0].length() == 0) return;
 
     TimeRef t   = snapshotTime();
-    t.hasPos    = true;
-    t.posSource = 'g';
+    t.hasPos      = true;
+    t.posSource   = 'g';
+    t.posAccuracyM = -1;  // GPS real, sin radio de incertidumbre que mostrar
     t.lat       = nmeaToDeg(f[0].toFloat(), f[1].length() ? f[1][0] : 'N');
     t.lon       = nmeaToDeg(f[2].toFloat(), f[3].length() ? f[3][0] : 'E');
     t.speed_kmh = (fi >= 8) ? f[7].toFloat() : 0.0f;
@@ -639,10 +640,11 @@ static void readLBS() {
     for (int i = 0; i <= (int)d.length() && fi < 4; i++) {
         if (i == (int)d.length() || d[i] == ',') { f[fi++] = d.substring(prev, i); prev = i + 1; }
     }
-    // f[0]=código de resultado (0=OK) f[1]=longitud f[2]=latitud — ese es el
-    // orden real de +CLBS (Application Note sección 3.1); antes estaba al
-    // revés, sin haberse notado porque CLBS nunca había llegado a tener
-    // éxito para poder comprobarlo.
+    // f[0]=código de resultado (0=OK) f[1]=longitud f[2]=latitud f[3]=acc
+    // (radio de precisión en metros) — ese es el orden real de +CLBS
+    // (Application Note sección 3.1); antes lat/lon estaban al revés, sin
+    // haberse notado porque CLBS nunca había llegado a tener éxito para
+    // poder comprobarlo.
     if (fi < 3 || f[0] != "0") return;
 
     // Ojo: no se toca t.capturedAt aquí — solo posición, no hora. Si se
@@ -650,8 +652,9 @@ static void readLBS() {
     // cálculo de segundos transcurridos de txSignalByte() se resetearía a
     // 0 con una hora ya vieja, y el reloj de la moto saltaría hacia atrás.
     TimeRef t   = snapshotTime();
-    t.hasPos    = true;
-    t.posSource = 'l';
+    t.hasPos       = true;
+    t.posSource    = 'l';
+    t.posAccuracyM = (fi >= 4) ? f[3].toFloat() : -1;
     t.lon       = f[1].toFloat();
     t.lat       = f[2].toFloat();
     t.speed_kmh = 0;  // LBS no da velocidad; no arrastrar la última del GPS
@@ -687,8 +690,9 @@ void readGPS() {
     if (fi < 7 || f[1] != "1" || f[2].length() < 14) { readLBS(); return; }
 
     TimeRef t   = snapshotTime();
-    t.hasPos    = true;
-    t.posSource = 'g';
+    t.hasPos       = true;
+    t.posSource    = 'g';
+    t.posAccuracyM = -1;  // GPS real, sin radio de incertidumbre que mostrar
     t.lat       = f[3].toFloat();
     t.lon       = f[4].toFloat();
     t.speed_kmh = f[6].toFloat();
@@ -1547,6 +1551,12 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
         body += ",\"position_source\":\"";
         body += (snap.t.posSource == 'l') ? "lbs" : "gps";
         body += "\"";
+        // Radio de precisión (metros) que devuelve AT+CLBS — solo tiene
+        // sentido para LBS (triangulación de celda, cientos de metros a
+        // varios km de margen); GPS no lo lleva (posAccuracyM=-1).
+        if (snap.t.posAccuracyM >= 0) {
+            body += ",\"position_accuracy\":" + String(snap.t.posAccuracyM, 0);
+        }
     } else {
         body += ",\"speed\":0";
     }
