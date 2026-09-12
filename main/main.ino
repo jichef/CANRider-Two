@@ -686,19 +686,6 @@ void readGPS() {
 #endif
 
 // ── Batería ───────────────────────────────────────────────────────────────────
-static BatReading readBattery() {
-    BatReading b = {};
-    String resp = queryAT("AT+CBC", "+CBC:", 3000);
-    int colon = resp.indexOf(':'); if (colon < 0) return b;
-    String d = resp.substring(colon + 2);
-    int c1 = d.indexOf(','), c2 = d.indexOf(',', c1 + 1);
-    if (c1 < 0 || c2 < 0) return b;
-    b.charging = (d.substring(0, c1).toInt() == 1);
-    b.pct      = d.substring(c1 + 1, c2).toInt();
-    b.volts    = d.substring(c2 + 1).toFloat() / 1000.0f;
-    b.valid    = true; return b;
-}
-
 // Voltaje real de la LiPo/18650 por el ADC propio del ESP32
 // (BOARD_BAT_ADC_PIN), independiente del AT+CBC del módem. Se comprobó en
 // campo que el módem reporta bcs=0 ("no cargando") incluso con el
@@ -1523,8 +1510,7 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     // de HTTP_SETUP que con WiFi conectado casi no se vuelve a ejecutar.
     if (!g_tzKnown) readNetworkTime();
     readGPS();
-    BatReading bat = readBattery();
-    int16_t    rssi = readSignalStrength();
+    int16_t rssi = readSignalStrength();
     snap.t        = snapshotTime();
     snap.busAlive = canBusAlive();
 
@@ -1546,16 +1532,12 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
         body += ",\"speed\":0";
     }
     body += ",\"moving_without_can\":" + String(movingWithoutCan ? "true" : "false");
-    if (bat.valid) {
-        body += ",\"battery_level\":"   + String(bat.pct);
-        body += ",\"battery_voltage\":" + String(bat.volts, 3);
-        body += ",\"is_charging\":"     + String(bat.charging ? "true" : "false");
-    }
     // Voltaje/SoC real de la LiPo/18650 por el ADC del ESP32 — ver
-    // readBoardBatteryVoltage(): independiente del AT+CBC del módem, que
-    // no refleja bien el estado de carga real (visto en campo: bcs=0 con
-    // el dispositivo claramente en USB). Se manda siempre, no solo si
-    // bat.valid, porque no depende de que el módem responda.
+    // readBoardBatteryVoltage(). Sustituye por completo al antiguo
+    // AT+CBC del módem (battery_level/battery_voltage/is_charging):
+    // se comprobó en campo que ese dato no reflejaba bien el estado de
+    // carga real (bcs=0 con el dispositivo claramente en USB) y ya no
+    // se usaba para nada más que rellenar el propio POST.
     //
     // board_on_usb: por diseño de esta placa, el propio circuito de
     // detección se desconecta al conectar USB (confirmado en el ejemplo

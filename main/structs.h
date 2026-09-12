@@ -39,8 +39,6 @@ struct TxFrame {
     uint32_t lastSentMs;
 };
 
-struct BatReading { bool valid; int pct; float volts; bool charging; };
-
 // Cuerpo de telemetría ya construido + los datos que necesita updateTrip()
 // después de mandarlo — definido aquí (no inline en main.ino) porque el
 // generador automático de prototipos de Arduino inserta el prototipo de
