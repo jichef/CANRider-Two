@@ -197,6 +197,11 @@ export default function DashboardContent() {
 
       if (activeChart === 'battery') {
         query = query.or('moto_battery.not.is.null,moto_battery_b.not.is.null');
+      } else if (activeChart === 'signal') {
+        // dBm de LTE (AT+CSQ) y de WiFi (RSSI) no son comparables en la
+        // misma escala/línea — se acotan a LTE, la vía real y casi única
+        // (el WiFi de rescate está deshabilitado casi siempre).
+        query = query.eq('connection_type', 'lte');
       }
 
       const { data } = await query.order('timestamp', { ascending: false }).limit(1000);
@@ -676,22 +681,23 @@ export default function DashboardContent() {
         {/* Pestaña LIVE (móvil: solo esta sección; escritorio: siempre visible) */}
         <div className={`md:shrink-0 ${mobileTab === 'live' ? '' : 'hidden md:block'}`}>
           {/* Stats principales */}
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-2.5 md:gap-4 mb-3 md:mb-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 md:gap-4 mb-3 md:mb-4">
             {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
           </div>
 
         </div>
 
-        {/* Mismas 6 columnas y el mismo gap que el grid de stats de arriba
-            (grid-cols-2 lg:grid-cols-6, gap-2.5 md:gap-4) a propósito: con
-            un gap distinto (antes gap-8 aquí vs gap-4 allí), el borde del
-            mapa/historial no coincide con el de SEÑAL aunque la proporción
-            2/3-1/3 sea la misma — el gap no escala igual que las columnas.
-            Compartir ambos valores garantiza que el borde izquierdo de
-            HISTORIAL caiga exactamente donde empieza SEÑAL. */}
-        <div className="grid lg:grid-cols-6 gap-2.5 md:gap-4 md:flex-1 md:min-h-0">
+        {/* Mismas 5 columnas y el mismo gap que el grid de stats de arriba
+            (grid-cols-2 lg:grid-cols-5, gap-2.5 md:gap-4) a propósito: los
+            paneles de arriba son 5 (BATERÍA A/B, VELOCIDAD, SISTEMA,
+            SEÑAL), así que con 6 columnas sobraba una — esa columna vacía
+            hacía que esta fila (mapa+historial, que sí llega hasta el
+            borde real del contenedor) pareciera "sobresalir" más ancha que
+            la de arriba. Con las mismas 5 columnas y el mismo gap, ambas
+            filas ocupan exactamente el mismo ancho total. */}
+        <div className="grid lg:grid-cols-5 gap-2.5 md:gap-4 md:flex-1 md:min-h-0">
           {/* Mapa — pestaña MAP en móvil */}
-          <div className={`lg:col-span-4 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-full ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
+          <div className={`lg:col-span-3 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-full ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
             <div className="p-5 border-b border-white/5 flex items-center justify-between bg-zinc-950/20">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-red-500/10 text-red-500">
@@ -893,14 +899,20 @@ export default function DashboardContent() {
         </div>
 
         {/* Panel de histórico — se despliega al pulsar BATERÍA A/B, VELOCIDAD
-            o SEÑAL en el grid de stats de arriba (activeChart). md:shrink-0
-            a propósito: al ser hermana de un grid md:flex-1, desplegar este
-            panel hace que el grid (y con él, el mapa) se encoja un poco
-            para dejarle sitio, en vez de desbordar la pantalla — el
-            contenedor de más arriba ya tiene overflow-y para cuando aun así
-            no quepa todo. */}
+            o SEÑAL en el grid de stats de arriba (activeChart). Modal fijo
+            encima de todo (fixed inset-0, backdrop oscuro) en vez de una
+            sección más del layout: no empuja ni encoge el mapa/historial de
+            debajo, que se quedan tal cual detrás. Clic en el fondo (no en
+            la tarjeta) o el botón ✕ lo cierran. */}
         {activeChart && (
-          <div className="mt-6 md:shrink-0 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-5 md:p-6 shadow-2xl">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setActiveChart(null)}
+          >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-3xl p-5 md:p-6 shadow-2xl"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${
@@ -915,7 +927,7 @@ export default function DashboardContent() {
                     {activeChart === 'battery' ? 'Histórico de baterías' : activeChart === 'speed' ? 'Histórico de velocidad' : 'Histórico de señal'}
                   </h2>
                   <p className="text-[10px] text-zinc-500 font-mono uppercase">
-                    {activeChart === 'battery' ? 'Evolución de batería A/B' : activeChart === 'speed' ? 'Evolución de la velocidad (km/h)' : 'Evolución de la señal LTE/WiFi (dBm)'}
+                    {activeChart === 'battery' ? 'Evolución de batería A/B' : activeChart === 'speed' ? 'Evolución de la velocidad (km/h)' : 'Evolución de la señal LTE (dBm)'}
                   </p>
                 </div>
               </div>
@@ -1023,6 +1035,7 @@ export default function DashboardContent() {
                 )
               )}
             </div>
+          </div>
           </div>
         )}
       </div>
