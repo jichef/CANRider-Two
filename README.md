@@ -2,7 +2,7 @@
 
 Sistema de telemetría en tiempo real para vehículos eléctricos con bus CAN. Lee los datos del BMS a través del bus CAN, los transmite a una base de datos en la nube (por LTE siempre disponible, o por WiFi cuando hay una red conocida al alcance) y los muestra en un portal web accesible desde cualquier dispositivo.
 
-> **¿Primera vez con esto?** Hay una guía paso a paso pensada para gente sin experiencia previa: [`docs/index.html`](docs/index.html). Ábrela en el navegador y sigue los pasos en orden.
+> **¿Primera vez con esto?** Hay una guía paso a paso pensada para gente sin experiencia previa: [jichef.github.io/CANRider-Two](https://jichef.github.io/CANRider-Two/). Ábrela en el navegador y sigue los pasos en orden.
 
 ---
 
@@ -77,7 +77,6 @@ Estos pines ya vienen puestos automáticamente en `config.h.example` según la p
 ## Requisitos de software
 
 - [Arduino IDE 2.x](https://www.arduino.cc/en/software) con soporte para ESP32
-- [Node.js 18+](https://nodejs.org/) y npm (solo si vas a ejecutar el portal web en local)
 - Cuenta gratuita en [Supabase](https://supabase.com/)
 - Cuenta gratuita en [Vercel](https://vercel.com/) (para publicar el portal sin servidor propio)
 
@@ -96,7 +95,7 @@ Estos pines ya vienen puestos automáticamente en `config.h.example` según la p
 
 ## Instalación paso a paso
 
-Para una guía visual y muy detallada, usa [`docs/index.html`](docs/index.html). Resumen rápido aquí:
+Para una guía visual y muy detallada, usa [jichef.github.io/CANRider-Two](https://jichef.github.io/CANRider-Two/). Resumen rápido aquí:
 
 ### 1. Clonar el repositorio
 
@@ -135,26 +134,6 @@ Más abajo en el mismo archivo hay dos bloques marcados `>>> OPCIONAL <<<`, ning
 
 Abre el **Serial Monitor** (115200 baud) para ver los logs de arranque.
 
-### 5. Instalar el portal web (opcional, en local)
-
-```bash
-npm install
-```
-
-Crea `.env.local` en la raíz del proyecto:
-
-```
-NEXT_PUBLIC_SUPABASE_URL=https://XXXX.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-NEXT_PUBLIC_VEHICLE_ID=tu-uuid-de-vehiculo-aqui
-```
-
-```bash
-npm run dev
-```
-
-Abre [http://localhost:3000](http://localhost:3000).
-
 ---
 
 ## Despliegue en producción (Vercel)
@@ -181,7 +160,7 @@ Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red,
 
 ## Actualización OTA (opcional)
 
-Si configuraste `OTA_AP_PASSWORD` en el paso 3, no hace falta abrir la moto ni un cable cada vez que actualices el firmware. Guía completa paso a paso con capturas en [`docs/index.html`](docs/index.html#ota) — resumen aquí:
+Si configuraste `OTA_AP_PASSWORD` en el paso 3, no hace falta abrir la moto ni un cable cada vez que actualices el firmware. Guía completa paso a paso con capturas en [jichef.github.io/CANRider-Two](https://jichef.github.io/CANRider-Two/#ota) — resumen aquí:
 
 1. Apaga la moto. En cuanto el bus CAN lleva unos segundos en silencio, el ESP32 levanta el WiFi **`CanRiderTwo`** (portal cautivo, IP `192.168.4.1`).
 2. Conéctate a esa red con la contraseña de `OTA_AP_PASSWORD`. La página de actualización se abre sola en la mayoría de móviles/portátiles; si no, entra a mano en `http://192.168.4.1/`.
@@ -302,7 +281,7 @@ CanRider/
 - En itinerancia (roaming), algunos operadores necesitan un ciclo de radio (`AT+CFUN=0`/`1`) antes de activar datos — el firmware ya lo hace automáticamente para SIM7000G
 
 ### No aparecen datos en el panel web
-- Comprueba que `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` y `NEXT_PUBLIC_VEHICLE_ID` están correctos (en `.env.local` o en las variables de entorno de Vercel)
+- Comprueba que `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` y `NEXT_PUBLIC_VEHICLE_ID` están correctos en las variables de entorno de Vercel
 - Verifica que las tablas se han creado en Supabase (SQL Editor → Table Editor)
 - Confirma que el `VEHICLE_ID` en `config.h` es el mismo UUID que usas para filtrar en el portal
 - En Vercel, un cambio de variables de entorno necesita un **Redeploy** manual para aplicarse
