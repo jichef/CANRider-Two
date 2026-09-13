@@ -1055,6 +1055,98 @@ bool httpPostTo(const String& tablePath, const String& body) {
     return (status == 200 || status == 201);
 }
 
+// ── Comandos remotos desde el portal (Vercel) ──────────────────────────────────
+// El ESP32 nunca acepta conexiones entrantes (solo hace POST/GET salientes),
+// así que el portal no puede "llamarlo" directamente como sí hace el portal
+// OTA local. En su lugar, el portal deja un comando pendiente en la tabla
+// device_commands de Supabase, y aquí se recoge en el siguiente ciclo
+// de telemetría (máx. ~15s de retraso) — mismo patrón de sondeo que ya usa
+// todo lo demás, sin abrir ninguna conexión nueva ni mantener un socket vivo.
+// Solo tiene sentido en el camino LTE (usa sim7000Request()); si el WiFi
+// opcional está conectado, este ciclo no llega a ejecutarse (ver "case
+// RUNNING" — se salta entero cuando wifiConnected()).
+static bool extractJsonInt(const String& json, const char* key, long& out) {
+    String pat = String("\"") + key + "\":";
+    int idx = json.indexOf(pat);
+    if (idx < 0) return false;
+    idx += pat.length();
+    int end = idx;
+    while (end < (int)json.length() && (isDigit(json[end]) || json[end] == '-')) end++;
+    if (end == idx) return false;
+    out = json.substring(idx, end).toInt();
+    return true;
+}
+static bool extractJsonString(const String& json, const char* key, String& out) {
+    String pat = String("\"") + key + "\":\"";
+    int idx = json.indexOf(pat);
+    if (idx < 0) return false;
+    idx += pat.length();
+    int end = json.indexOf('"', idx);
+    if (end < 0) return false;
+    out = json.substring(idx, end);
+    return true;
+}
+
+static void checkRemoteCommand() {
+    // Cada 60s en vez de cada ciclo de 15s: esto añade una conexión HTTPS
+    // entera de más (CAOPEN/TLS) cada vez que se llama, y no hace falta
+    // tanta prisa para un comando manual que se pulsa alguna vez — con la
+    // batería de la moto de por medio (ver conversación sobre consumo en
+    // reposo), no compensa duplicar el tráfico de red en cada ciclo normal.
+    static uint32_t lastCheck = 0;
+    if (millis() - lastCheck < 60000) return;
+    lastCheck = millis();
+
+    int status; String respBody;
+    bool ok = sim7000Request("GET",
+            "/rest/v1/device_commands?motorcycle_id=eq." VEHICLE_ID
+            "&done=eq.false&order=created_at.asc&limit=1&select=id,command",
+            "", status, respBody);
+    if (!ok) {
+        logLine("[CMD] GET fallo de conexion");
+        return;
+    }
+    if (status != 200) {
+        logLine("[CMD] GET status=%d body=%s", status, respBody.substring(0, 60).c_str());
+        return;
+    }
+
+    long id;
+    String command;
+    if (!extractJsonInt(respBody, "id", id) || !extractJsonString(respBody, "command", command)) {
+        logLine("[CMD] sin comando pendiente");
+        return;  // "[]" — no hay comando pendiente
+    }
+    logLine("[CMD] pendiente id=%ld comando=%s", id, command.c_str());
+
+    String result;
+    if (command == "lbs_check") {
+        result = doLbsAttempt();
+    } else if (command == "gps_reset") {
+        modem.enableGPS(MODEM_GPS_ENABLE_GPIO, MODEM_GPS_ENABLE_LEVEL);
+        result = "GPS reiniciado";
+    } else {
+        result = "Comando desconocido: " + command;
+    }
+    logLine("[CMD] %s -> %s", command.c_str(), result.c_str());
+
+    // Sin backslashes en el cuerpo a propósito — no un escapado JSON normal
+    // (\", \\, \n): se comprobó en campo que un body con un "\n" escapado
+    // (backslash + n) hace que Supabase responda 400 "Empty or invalid
+    // json" viniendo de este módem, aunque el mismísimo JSON funciona bien
+    // mandado por curl desde fuera — algo en el camino AT+CASEND del
+    // SIM7000G corrompe la barra invertida al transmitir. Sustituir en vez
+    // de escapar evita el problema de raíz sin depender de entender su
+    // causa exacta dentro del módem.
+    String sanitized = result;
+    sanitized.replace("\\", "/");
+    sanitized.replace("\"", "'");
+    sanitized.replace("\n", " | ");
+    String patchBody = "{\"done\":true,\"result\":\"" + sanitized + "\"}";
+    String patchPath = "/rest/v1/device_commands?id=eq." + String(id);
+    sim7000Request("PATCH", patchPath, patchBody, status, respBody);
+}
+
 #endif
 
 // ── Seguimiento de viajes ─────────────────────────────────────────────────────
@@ -1434,6 +1526,7 @@ button:disabled{opacity:0.5}
   <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — autoriza el movimiento para que no salte como posible robo, y se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
   <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
   <button id="logbtn" onclick="viewLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Ver log</button>
+  <button id="savelogbtn" onclick="saveLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Guardar log</button>
   <button id="lbsbtn" onclick="checkLbs()" style="margin-top:10px;background:#1f2937;color:#fbbf24">Comprobar LBS ahora</button>
 </div>
 <script>
@@ -1455,15 +1548,40 @@ function tripToggle(){
     btn.disabled=false;
   });
 }
-function viewLog(){
-  var btn=document.getElementById('logbtn');
-  btn.disabled=true;
+var logLiveTimer=null;
+function logPoll(){
   fetch('/log/view').then(function(r){return r.text();}).then(function(t){
     document.getElementById('status').textContent=t;
-    btn.disabled=false;
   }).catch(function(){
     document.getElementById('status').textContent='No se pudo contactar con el ESP32';
-    btn.disabled=false;
+  });
+}
+function viewLog(){
+  var btn=document.getElementById('logbtn');
+  if(logLiveTimer){
+    clearInterval(logLiveTimer);
+    logLiveTimer=null;
+    btn.textContent='Ver log';
+    return;
+  }
+  logPoll();
+  logLiveTimer=setInterval(logPoll,2000);
+  btn.textContent='Detener actualizacion en vivo';
+}
+function saveLog(){
+  fetch('/log/view').then(function(r){return r.text();}).then(function(t){
+    var d=new Date();
+    var pad=function(n){return (n<10?'0':'')+n;};
+    var name=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'_'+
+              pad(d.getHours())+'-'+pad(d.getMinutes())+'-'+pad(d.getSeconds())+'.log';
+    var blob=new Blob([t],{type:'text/plain'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }).catch(function(){
+    document.getElementById('status').textContent='No se pudo contactar con el ESP32';
   });
 }
 function checkLbs(){
@@ -2184,6 +2302,10 @@ void loop() {
         manualTripTick(snap.t.hasPos, snap.t.speed_kmh);
         if (updateTrip(snap.busAlive || offCanTripActive || manualTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t))
             state = HTTP_SETUP;
+
+#if defined(MODEM_SIM7000G)
+        checkRemoteCommand();
+#endif
 
         // Si quedó un viaje sin poder guardarse en un ciclo anterior, reintentarlo
         if (flushPendingTrip())
