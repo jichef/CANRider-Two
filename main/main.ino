@@ -3,6 +3,7 @@
 #include "driver/twai.h"
 #include "structs.h"
 #include <esp_adc_cal.h>
+#include <stdarg.h>  // va_list/va_start/va_end, para logLine()
 
 #if defined(MODEM_SIM7000G)
 // El motor AT+SH de esta revisión de firmware SIM7000G es poco fiable
@@ -88,10 +89,56 @@ static uint32_t stateAt   = 0;
 static uint32_t nextPost  = 0;
 static int      httpFails = 0;
 
+// ── Log en RAM (para el botón "Enviar log" del portal OTA) ──────────────────────
+// Buffer circular de líneas de texto — no es un volcado byte a byte del diálogo
+// AT (eso sería tan caro como DUMP_AT_COMMANDS), solo las líneas de estado ya
+// pensadas para Serial (login, resultado de LBS, POST, viajes...). 40 líneas de
+// 110 bytes son ~4.4KB, insignificante frente a la RAM libre. logLine() sigue
+// imprimiendo por Serial igual que antes — es un añadido, no un cambio de
+// comportamiento — así que no hace falta tocar el resto de sitios que llaman a
+// Serial.println() directamente, solo los puntos que de verdad interesa poder
+// revisar por email más tarde.
+#define LOG_BUF_LINES   40
+#define LOG_LINE_MAXLEN 110
+static char logBuf[LOG_BUF_LINES][LOG_LINE_MAXLEN];
+static int  logCount = 0;
+static int  logNext  = 0;
+
+static void logLine(const char* fmt, ...) {
+    char tmp[LOG_LINE_MAXLEN];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(tmp, sizeof(tmp), fmt, args);
+    va_end(args);
+    Serial.println(tmp);
+    strncpy(logBuf[logNext], tmp, LOG_LINE_MAXLEN - 1);
+    logBuf[logNext][LOG_LINE_MAXLEN - 1] = '\0';
+    logNext = (logNext + 1) % LOG_BUF_LINES;
+    if (logCount < LOG_BUF_LINES) logCount++;
+}
+
 // ── Helpers AT ────────────────────────────────────────────────────────────────
 bool sendAT(const char* cmd, const char* expect = "OK", uint32_t timeout = 5000) {
     Serial.print(">> "); Serial.println(cmd);
     SerialAT.println(cmd);
+    String buf;
+    uint32_t t = millis();
+    while (millis() - t < timeout) {
+        while (SerialAT.available()) {
+            char c = SerialAT.read(); Serial.write(c); buf += c;
+        }
+        if (buf.indexOf(expect)  >= 0) return true;
+        if (buf.indexOf("ERROR") >= 0) { Serial.println("[FAIL]"); return false; }
+    }
+    Serial.println("[TIMEOUT]"); return false;
+}
+
+// Como sendAT(), pero sin mandar ningún comando nuevo — solo espera a que
+// aparezca <expect> en lo que ya está llegando por SerialAT. Hace falta para
+// AT+SMTPBODY: tras mandar el comando, el módem responde "DOWNLOAD" y luego
+// hay que escribir el cuerpo en crudo (sin más AT delante) y esperar el "OK"
+// final — dos esperas sin un comando propio en medio.
+static bool waitForAT(const char* expect, uint32_t timeout = 5000) {
     String buf;
     uint32_t t = millis();
     while (millis() - t < timeout) {
@@ -620,9 +667,13 @@ void readGPS() {
 // si ya estaba activo, AT+SAPBR=1,1 falla con un error inofensivo que se
 // ignora, y se continúa igualmente con AT+CLBS.
 static void ensureLbsBearer() {
-    sendAT("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 3000);
-    sendAT("AT+SAPBR=3,1,\"APN\",\"" APN "\"",   "OK", 3000);
-    sendAT("AT+SAPBR=1,1", "OK", 15000);
+    bool ok = sendAT("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 3000);
+    ok = sendAT("AT+SAPBR=3,1,\"APN\",\"" APN "\"", "OK", 3000) && ok;
+    // AT+SAPBR=1,1 falla con un error inofensivo si el bearer ya estaba
+    // activo — no se combina en el && de arriba porque ese fallo concreto
+    // no es indicativo de nada roto, solo se registra el intento en sí.
+    bool opened = sendAT("AT+SAPBR=1,1", "OK", 15000);
+    logLine("[LBS] Bearer SAPBR: config=%s abrir=%s", ok ? "ok" : "FALLO", opened ? "ok" : "ya-activo/fallo");
 }
 
 static void readLBS() {
@@ -633,7 +684,7 @@ static void readLBS() {
     ensureLbsBearer();
     String resp = queryAT("AT+CLBS=1,1", "+CLBS:", 10000);
     int colon = resp.indexOf(':');
-    if (colon < 0) return;
+    if (colon < 0) { logLine("[LBS] Sin respuesta de AT+CLBS"); return; }
     String d = resp.substring(colon + 2); d.trim();
 
     String f[4]; int fi = 0, prev = 0;
@@ -645,7 +696,12 @@ static void readLBS() {
     // (Application Note sección 3.1); antes lat/lon estaban al revés, sin
     // haberse notado porque CLBS nunca había llegado a tener éxito para
     // poder comprobarlo.
-    if (fi < 3 || f[0] != "0") return;
+    if (fi < 3 || f[0] != "0") {
+        logLine("[LBS] +CLBS código %s (0=éxito; ver tabla locationcode del Application Note)",
+                fi > 0 ? f[0].c_str() : "?");
+        return;
+    }
+    logLine("[LBS] OK lon=%s lat=%s acc=%sm", f[1].c_str(), f[2].c_str(), fi >= 4 ? f[3].c_str() : "?");
 
     // Ojo: no se toca t.capturedAt aquí — solo posición, no hora. Si se
     // pisara con millis() actual sin también avanzar hour/min/sec, el
@@ -1191,7 +1247,7 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
             tripState.trackBattery[0]   = soc;
             tripState.trackCount        = 1;
         }
-        Serial.println("[TRIP] Inicio de viaje (CAN activo)");
+        logLine("[TRIP] Inicio de viaje");
         // Checkpoint inicial: crea la fila ya desde el principio, no solo
         // al cerrar — así, si el viaje termina sin cobertura (p.ej. al
         // entrar en la cochera justo cuando se corta la conexión), Supabase
@@ -1223,7 +1279,8 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 
     if (!busAlive) {
         String body = buildTripBody(t, soc);
-        Serial.print("[TRIP] Fin (CAN en silencio): "); Serial.println(body);
+        Serial.print("[TRIP] Fin: "); Serial.println(body);
+        logLine("[TRIP] Fin, dist=%.2fkm maxV=%.0f", tripState.distanceKm, tripState.maxSpeed);
         if (!postTripUpdate(body)) {
             Serial.println("[TRIP] Error al guardar viaje, se reintentará");
             pendingTripBody = body;
@@ -1277,6 +1334,64 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 #define OTA_CLIENT_GRACE_MS    120000UL   // 2 min tras irse el último cliente WiFi → se apaga
 #define OTA_DNS_PORT           53
 
+// ── Botón "Enviar log" (opcional, requiere LOG_EMAIL_USER en config.h) ─────────
+// Usa los comandos AT+SMTP* nativos del módem (SIM7000_Series_Email_
+// Application_Note_V1.01) en vez de una librería SMTP — reutiliza el mismo
+// bearer AT+SAPBR que ya abre ensureLbsBearer() para LBS (mismo <cid>=1).
+// Puerto 465 sin confirmar aún en campo con Gmail: la propia documentación
+// de SIMCom lo marca como "el puerto SSL" de AT+SMTPSRV, pero no hay un
+// comando AT+SMTPSSL explícito en este set — si Gmail lo rechaza, lo
+// primero a probar es el puerto 587.
+#if defined(LOG_EMAIL_USER) && defined(OTA_AP_PASSWORD)
+#ifndef LOG_SMTP_SERVER
+#define LOG_SMTP_SERVER "smtp.gmail.com"
+#endif
+#ifndef LOG_SMTP_PORT
+#define LOG_SMTP_PORT 465
+#endif
+// Convierte el LOG_SMTP_PORT numérico a literal de texto en tiempo de
+// compilación, para poder concatenarlo con "" en AT+SMTPSRV=...,<puerto>.
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
+// Devuelve true si +SMTPSEND informa código 1 (enviado con éxito) — ver la
+// tabla de códigos en el Application Note (61-68 = distintos fallos de red/
+// autenticación/destinatario).
+static bool sendLogEmail() {
+    ensureLbsBearer();  // mismo AT+SAPBR=1,1 (cid 1) que ya usa el LBS
+    sendAT("AT+EMAILCID=1", "OK", 5000);
+    sendAT("AT+EMAILTO=60", "OK", 5000);
+    sendAT("AT+SMTPSRV=\"" LOG_SMTP_SERVER "\"," STR(LOG_SMTP_PORT), "OK", 5000);
+    sendAT("AT+SMTPAUTH=1,\"" LOG_EMAIL_USER "\",\"" LOG_EMAIL_APP_PASSWORD "\"", "OK", 5000);
+    sendAT("AT+SMTPFROM=\"" LOG_EMAIL_USER "\",\"CanRider\"", "OK", 5000);
+    if (!sendAT("AT+SMTPRCPT=0,0,\"" LOG_EMAIL_TO "\"", "OK", 5000)) return false;
+    sendAT("AT+SMTPSUB=\"CanRider - log\"", "OK", 5000);
+
+    // Cuerpo: las últimas logCount líneas del ring buffer, en orden
+    // cronológico (logNext es la siguiente a escribir = la más antigua
+    // cuando el buffer ya dio la vuelta).
+    String body;
+    int startIdx = (logCount < LOG_BUF_LINES) ? 0 : logNext;
+    for (int i = 0; i < logCount; i++) {
+        body += logBuf[(startIdx + i) % LOG_BUF_LINES];
+        body += "\r\n";
+    }
+    if (body.length() == 0) body = "(sin lineas registradas todavia)\r\n";
+
+    char cmd[24];
+    snprintf(cmd, sizeof(cmd), "AT+SMTPBODY=%d", body.length());
+    Serial.print(">> "); Serial.println(cmd);
+    SerialAT.println(cmd);
+    if (!waitForAT("DOWNLOAD", 5000)) return false;
+    SerialAT.print(body);
+    if (!waitForAT("OK", 8000)) return false;
+
+    String resp = queryAT("AT+SMTPSEND", "+SMTPSEND:", 30000);
+    logLine("[EMAIL] %s", resp.length() ? resp.c_str() : "sin respuesta de +SMTPSEND");
+    return resp.indexOf("+SMTPSEND: 1") >= 0;
+}
+#endif
+
 static WebServer  otaServer(80);
 static DNSServer  otaDns;
 static bool       otaApActive           = false;
@@ -1312,6 +1427,9 @@ button:disabled{opacity:0.5}
   <hr style="border:0;border-top:1px solid #2b3532;margin:18px 0">
   <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
   <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
+#if defined(LOG_EMAIL_USER)
+  <button id="logbtn" onclick="sendLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Enviar log por email</button>
+#endif
 </div>
 <script>
 function tripPaint(active){
@@ -1332,6 +1450,21 @@ function tripToggle(){
     btn.disabled=false;
   });
 }
+#if defined(LOG_EMAIL_USER)
+function sendLog(){
+  var btn=document.getElementById('logbtn');
+  btn.disabled=true;
+  var prev=btn.textContent;
+  btn.textContent='Enviando... (puede tardar ~1 min)';
+  fetch('/log/send',{method:'POST'}).then(function(r){return r.text();}).then(function(t){
+    document.getElementById('status').textContent=t;
+    btn.disabled=false;btn.textContent=prev;
+  }).catch(function(){
+    document.getElementById('status').textContent='No se pudo contactar con el ESP32';
+    btn.disabled=false;btn.textContent=prev;
+  });
+}
+#endif
 function up(){
   var f=document.getElementById('f').files[0];
   if(!f){document.getElementById('status').textContent='Elige un archivo .bin primero';return;}
@@ -1425,6 +1558,19 @@ static void otaStartAP() {
         otaServer.send(200, "application/json",
                         manualTripActive ? "{\"active\":true}" : "{\"active\":false}");
     });
+
+#if defined(LOG_EMAIL_USER)
+    // Bloqueante (varios AT+SMTP* seguidos, hasta ~1 min) — el propio botón
+    // se deshabilita en el JS mientras espera, y no afecta al resto del
+    // firmware: solo se llama aquí, nunca desde el ciclo normal de
+    // telemetría.
+    otaServer.on("/log/send", HTTP_POST, []() {
+        otaLastActivity = millis();
+        bool ok = sendLogEmail();
+        otaServer.send(ok ? 200 : 500, "text/plain",
+                        ok ? "OK, log enviado" : "Error al enviar el log (ver Monitor Serie)");
+    });
+#endif
 
     otaServer.on("/update", HTTP_POST, []() {
         bool ok = !Update.hasError();
@@ -1943,7 +2089,7 @@ void loop() {
         break;
 
     case NET_SETUP:
-        Serial.println("[STATE] NET_SETUP...");
+        logLine("[STATE] NET_SETUP");
         if (networkSetup()) {
             if (!readNetworkTime()) Serial.println("[WARN] Hora de red no disponible");
             state = HTTP_SETUP;
@@ -1953,7 +2099,7 @@ void loop() {
         break;
 
     case HTTP_SETUP:
-        Serial.println("[STATE] HTTP_SETUP...");
+        logLine("[STATE] HTTP_SETUP");
 #if defined(MODEM_A7670G)
         sendAT("AT+CGPS=1",    "OK", 3000);
 #else
@@ -1968,7 +2114,7 @@ void loop() {
 #endif
         if (!g_tzKnown) readNetworkTime();
         if (setupHTTP()) {
-            Serial.println("[STATE] RUNNING");
+            logLine("[STATE] RUNNING");
             httpFails = 0; state = RUNNING; nextPost = millis();
         } else {
             state = ERROR_WAIT; stateAt = millis();
@@ -1993,10 +2139,10 @@ void loop() {
         Serial.print("[POST] "); Serial.println(snap.body);
         if (httpPost(snap.body)) {
             httpFails = 0;
-            Serial.println("[OK] Telemetría enviada");
+            logLine("[OK] Telemetria enviada");
         } else {
             httpFails++;
-            Serial.printf("[ERROR] Fallo POST %d/%d\n", httpFails, HTTP_FAIL_MAX);
+            logLine("[ERROR] Fallo POST %d/%d", httpFails, HTTP_FAIL_MAX);
             if (httpFails >= HTTP_FAIL_MAX) {
 #if defined(MODEM_A7670G)
                 sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");

@@ -226,4 +226,31 @@
 
 // #define OTA_AP_PASSWORD "cambia-esto-por-algo-tuyo"
 
+// ┌──────────────────────────────────────────────────────────────────────┐
+// │ >>> OPCIONAL — Enviar el log por email (solo si OTA_AP_PASSWORD)      │
+// └──────────────────────────────────────────────────────────────────────┘
+// Sin rellenar (por defecto), esta función no existe: no aparece el botón
+// "Enviar log" en la página OTA. Requiere OTA_AP_PASSWORD definido arriba.
+//
+// El firmware guarda en RAM las últimas 40 líneas de estado (arranque de
+// red, resultado de cada intento de LBS, éxito/fallo de cada POST,
+// inicio/fin de viaje...) — no cada byte AT, eso sería tan caro como
+// DUMP_AT_COMMANDS. El botón "Enviar log" de la página OTA manda esas
+// líneas por email usando los comandos AT+SMTP* nativos del propio módem
+// (no hace falta ninguna librería SMTP ni tocar el diálogo TLS a mano).
+//
+// Con Gmail: activa la verificación en 2 pasos en tu cuenta y genera una
+// "contraseña de aplicación" en myaccount.google.com/apppasswords — no uses
+// tu contraseña normal. Puerto 465 = el puerto SSL de Gmail; no verificado
+// aún en campo con este firmware, pruébalo y ajusta si hace falta.
+//
+// LOG_EMAIL_TO puede ser la misma dirección que LOG_EMAIL_USER (mandarte
+// el log a ti mismo).
+
+// #define LOG_EMAIL_USER         "tu-cuenta@gmail.com"
+// #define LOG_EMAIL_APP_PASSWORD "contraseña de aplicación de 16 caracteres"
+// #define LOG_EMAIL_TO           "a-quien-se-lo-mandas@example.com"
+// #define LOG_SMTP_SERVER        "smtp.gmail.com"
+// #define LOG_SMTP_PORT          465
+
 #endif
