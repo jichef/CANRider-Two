@@ -166,16 +166,25 @@ export default function DashboardContent() {
       else if (historyRange === '7d') startTime.setDate(now.getDate() - 7);
 
       // Supabase/PostgREST corta a un máximo de filas por consulta (1000 por
-      // defecto) — pedir ascendente sin límite en un rango largo (6h+ ya
-      // supera eso a 15s/lectura) corta justo por el extremo MÁS ANTIGUO
-      // de la ventana, no el más reciente: el rango "7D" acababa mostrando
-      // solo el primer rato de hace una semana. Pidiendo descendente con
-      // límite se coge siempre la parte más reciente, y se da la vuelta en
-      // JS para dibujar en orden cronológico.
+      // defecto). Dos problemas distintos si no se filtra por columna:
+      // 1) Pedir ascendente sin límite en un rango largo (6h+ ya supera eso
+      //    a 15s/lectura) corta justo por el extremo MÁS ANTIGUO de la
+      //    ventana — el rango "7D" acababa mostrando solo el primer rato
+      //    de hace una semana.
+      // 2) Pedir descendente con límite soluciona eso, pero moto_battery
+      //    solo tiene dato real mientras el CAN está vivo (moto encendida)
+      //    — con muchas horas de banco sin moto conectada de por medio,
+      //    las 1000 filas más recientes pueden ser todas de hoy con la
+      //    batería a null, sin llegar nunca al último dato real (días
+      //    atrás).
+      // .not(...) filtra en la propia consulta a solo filas que sí traen
+      // algún valor de batería — mucho más escasas que la telemetría total,
+      // así que 1000 de ESAS cubre de sobra cualquiera de los rangos.
       const { data } = await supabase
         .from('telemetry')
         .select('timestamp, moto_battery, moto_battery_b')
         .gte('timestamp', startTime.toISOString())
+        .or('moto_battery.not.is.null,moto_battery_b.not.is.null')
         .order('timestamp', { ascending: false })
         .limit(1000);
 
