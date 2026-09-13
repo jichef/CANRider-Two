@@ -1113,6 +1113,34 @@ static void offCanTripTick(bool busAlive, bool hasPos, float speedKmh) {
     }
 }
 
+// Viaje disparado a mano desde el portal cautivo (botón "Iniciar viaje sin
+// CAN") — a diferencia de offCanTripActive de arriba (que arranca solo al
+// detectar movimiento, y SÍ dispara el aviso de posible sustracción), este
+// se activa desde antes de moverse y sirve para "autorizar" el
+// desplazamiento: mientras esté activo, moving_without_can no salta pese
+// a haber movimiento real sin CAN — pensado para usar el dispositivo a
+// propósito en algo sin CAN (p.ej. una bici de prueba) sin generar una
+// falsa alarma de robo. El recorrido se graba igual en ambos casos.
+static bool     manualTripActive       = false;
+static uint32_t manualTripLastMovingMs = 0;
+
+// Igual que offCanTripTick(): se cierra solo tras MANUAL_TRIP_IDLE_TIMEOUT_MS
+// sin superar THEFT_SPEED_KMH, por si no se vuelve a tener alcance del AP
+// para pulsar "Detener viaje".
+#define MANUAL_TRIP_IDLE_TIMEOUT_MS 300000UL
+static void manualTripTick(bool hasPos, float speedKmh) {
+    if (!manualTripActive) return;
+    if (hasPos && speedKmh >= THEFT_SPEED_KMH) {
+        manualTripLastMovingMs = millis();
+        return;
+    }
+    if (manualTripLastMovingMs == 0) manualTripLastMovingMs = millis();
+    if (millis() - manualTripLastMovingMs > MANUAL_TRIP_IDLE_TIMEOUT_MS) {
+        Serial.println("[TRIP] Viaje manual sin movimiento, se cierra solo");
+        manualTripActive = false;
+    }
+}
+
 // Si el POST de cierre de viaje falla (típicamente por el mismo problema de
 // red que provoca los huecos irregulares en la telemetría), el viaje no se
 // descarta: se guarda aquí para reintentar el envío en los siguientes ciclos
@@ -1403,10 +1431,30 @@ button:disabled{opacity:0.5}
   <div id="status"></div>
   <button id="rst" onclick="rst()" style="margin-top:10px;background:#3a2119;color:#e07257">Reiniciar ESP32</button>
   <hr style="border:0;border-top:1px solid #2b3532;margin:18px 0">
-  <button id="logbtn" onclick="viewLog()" style="background:#1f2937;color:#a7f3d0">Ver log</button>
+  <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — autoriza el movimiento para que no salte como posible robo, y se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
+  <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
+  <button id="logbtn" onclick="viewLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Ver log</button>
   <button id="lbsbtn" onclick="checkLbs()" style="margin-top:10px;background:#1f2937;color:#fbbf24">Comprobar LBS ahora</button>
 </div>
 <script>
+function tripPaint(active){
+  var btn=document.getElementById('trip');
+  btn.dataset.active=active?'1':'';
+  btn.textContent=active?'Detener viaje':'Iniciar viaje (sin CAN)';
+}
+fetch('/trip/status').then(function(r){return r.json();}).then(function(d){tripPaint(d.active);}).catch(function(){});
+function tripToggle(){
+  var btn=document.getElementById('trip');
+  var starting=btn.dataset.active!=='1';
+  btn.disabled=true;
+  fetch(starting?'/trip/start':'/trip/stop',{method:'POST'}).then(function(){
+    tripPaint(starting);
+    btn.disabled=false;
+  }).catch(function(){
+    document.getElementById('status').textContent='No se pudo contactar con el ESP32';
+    btn.disabled=false;
+  });
+}
 function viewLog(){
   var btn=document.getElementById('logbtn');
   btn.disabled=true;
@@ -1502,6 +1550,27 @@ static void otaStartAP() {
         otaServer.send(200, "text/plain", "OK");
         delay(300);
         ESP.restart();
+    });
+
+    // Viaje manual (sin CAN) — ver manualTripActive/manualTripTick() más
+    // arriba. otaLastActivity se toca en los tres para que iniciar/parar/
+    // consultar el viaje cuente como actividad y no cierre el AP a media
+    // marcha si el usuario tarda en volver a mirar el móvil.
+    otaServer.on("/trip/start", HTTP_POST, []() {
+        manualTripActive       = true;
+        manualTripLastMovingMs = millis();
+        otaLastActivity        = millis();
+        otaServer.send(200, "text/plain", "OK");
+    });
+    otaServer.on("/trip/stop", HTTP_POST, []() {
+        manualTripActive = false;
+        otaLastActivity  = millis();
+        otaServer.send(200, "text/plain", "OK");
+    });
+    otaServer.on("/trip/status", HTTP_GET, []() {
+        otaLastActivity = millis();
+        otaServer.send(200, "application/json",
+                        manualTripActive ? "{\"active\":true}" : "{\"active\":false}");
     });
 
     otaServer.on("/log/view", HTTP_GET, []() {
@@ -1702,12 +1771,12 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     snap.t        = snapshotTime();
     snap.busAlive = canBusAlive();
 
-    // GPS moviéndose sin CAN = posible sustracción, ver THEFT_SPEED_KMH — no
-    // hay excepción de "movimiento autorizado" (ver offCanTripActive más
-    // arriba): tanto una sustracción real como un uso a propósito sin CAN
-    // (p.ej. en bici) activan este aviso igual, y ambos casos graban el
-    // recorrido de todas formas.
-    bool movingWithoutCan = snap.t.hasPos && !snap.busAlive
+    // GPS moviéndose sin CAN = posible sustracción, ver THEFT_SPEED_KMH —
+    // salvo que el movimiento sin CAN sea a propósito (viaje manual desde
+    // el portal, ver manualTripActive): mismo movimiento, pero autorizado,
+    // así que no salta la alarma — aun así el recorrido se sigue grabando
+    // igual (ver offCanTripActive/manualTripActive en updateTrip()).
+    bool movingWithoutCan = snap.t.hasPos && !snap.busAlive && !manualTripActive
                             && snap.t.speed_kmh >= THEFT_SPEED_KMH;
     if (movingWithoutCan)
         Serial.println("[ALERTA] Movimiento GPS sin tramas CAN — posible sustracción");
@@ -1938,7 +2007,8 @@ static void wifiFallbackLoop() {
             // WiFi conectado; si falla por los dos caminos, pendingTripBody
             // lo reintenta como siempre.
             offCanTripTick(snap.busAlive, snap.t.hasPos, snap.t.speed_kmh);
-            updateTrip(snap.busAlive || offCanTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t);
+            manualTripTick(snap.t.hasPos, snap.t.speed_kmh);
+            updateTrip(snap.busAlive || offCanTripActive || manualTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t);
             flushPendingTrip();
         }
         break;
@@ -2111,7 +2181,8 @@ void loop() {
 
         // Actualizar viaje; si termina, re-inicializar sesión HTTP
         offCanTripTick(snap.busAlive, snap.t.hasPos, snap.t.speed_kmh);
-        if (updateTrip(snap.busAlive || offCanTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t))
+        manualTripTick(snap.t.hasPos, snap.t.speed_kmh);
+        if (updateTrip(snap.busAlive || offCanTripActive || manualTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t))
             state = HTTP_SETUP;
 
         // Si quedó un viaje sin poder guardarse en un ciclo anterior, reintentarlo
