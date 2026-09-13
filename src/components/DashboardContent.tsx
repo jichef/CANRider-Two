@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Activity,
   Thermometer,
+  ShieldAlert,
   Signal,
   SignalHigh,
   SignalMedium,
@@ -617,6 +618,22 @@ export default function DashboardContent() {
             </div>
           )}
         </header>
+
+        {/* Alerta de posible sustracción — moving_without_can (main.ino:
+            movimiento GPS real con el bus CAN en silencio, algo que la moto
+            no hace sola apagada). Siempre visible, sin importar la pestaña
+            móvil activa ni si el dato está isStale: si la última lectura
+            conocida dice que hubo movimiento sospechoso, mejor avisar de
+            más que quedarse callado por llevar un rato sin reportar. */}
+        {telemetry?.moving_without_can === true && (
+          <div className="mb-3 md:mb-6 flex items-center gap-3 px-4 py-3 rounded-2xl border border-red-500/30 bg-red-500/10 animate-pulse">
+            <ShieldAlert className="text-red-500 shrink-0" size={22} />
+            <div>
+              <p className="text-red-400 font-black text-xs md:text-sm uppercase tracking-wider">Posible sustracción</p>
+              <p className="text-red-400/80 text-[10px] md:text-xs">Movimiento GPS detectado con el bus CAN en silencio — la moto no se mueve sola apagada</p>
+            </div>
+          </div>
+        )}
 
         {/* Pestaña LIVE (móvil: solo esta sección; escritorio: siempre visible) */}
         <div className={`md:shrink-0 ${mobileTab === 'live' ? '' : 'hidden md:block'}`}>
