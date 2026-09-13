@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>CanRiderTwo — flasheo de emergencia</title>
+<style>
+  body{font-family:sans-serif;background:#111;color:#eee;padding:24px;max-width:480px;margin:0 auto}
+  h1{font-size:18px}
+  p{color:#aaa;font-size:14px;line-height:1.5}
+  input,button{width:100%;padding:12px;margin-top:12px;box-sizing:border-box;font-size:15px}
+  button{background:#1f2937;color:#93c5fd;border:1px solid #374151;border-radius:6px}
+</style>
+</head>
+<body>
+<h1>Flasheo de emergencia (sin JS)</h1>
+<p>
+  Usa este archivo SOLO si el botón "Actualizar firmware" del portal cautivo
+  no responde (p.ej. porque un firmware con un bug de JavaScript roto está
+  instalado). Este archivo vive en tu ordenador/móvil, no en el ESP32 — es
+  un formulario HTML plano, sin JavaScript, que envía el .bin directamente
+  a <code>http://192.168.4.1/update</code>. El ESP32 lo acepta igual que si
+  viniera del botón normal, porque el endpoint /update no depende del
+  portal ni de su JS.
+</p>
+<p>
+  Pasos: conéctate al WiFi <b>CanRiderTwo</b> (la red que crea el propio
+  ESP32), abre este archivo con el navegador (doble clic o arrástralo a una
+  pestaña), elige el .bin correcto y pulsa "Actualizar firmware". El ESP32
+  reiniciará solo si todo va bien.
+</p>
+<form method="POST" action="http://192.168.4.1/update" enctype="multipart/form-data">
+  <input type="file" name="firmware" accept=".bin" required>
+  <button type="submit">Actualizar firmware</button>
+</form>
+</body>
+</html>
