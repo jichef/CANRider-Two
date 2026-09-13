@@ -279,6 +279,57 @@ CREATE POLICY "select anon" ON trips FOR SELECT USING (true);
 DROP POLICY IF EXISTS "delete anon" ON trips;
 CREATE POLICY "delete anon" ON trips FOR DELETE USING (true);
 
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Tabla: device_commands
+-- ─────────────────────────────────────────────────────────────────────────
+-- Cola de comandos remotos desde el portal (Vercel) hacia el ESP32. El
+-- dispositivo nunca acepta conexiones entrantes — solo hace peticiones
+-- salientes, cada 15s — así que el portal no puede "llamarlo" directamente
+-- como sí hace el portal OTA local (que está en la misma red WiFi). En vez
+-- de eso, el portal inserta aquí un comando pendiente (done=false), y el
+-- firmware lo recoge solo en su siguiente ciclo por LTE (checkRemoteCommand()
+-- en main.ino, cada ~60s — no en cada ciclo de 15s, para no doblar el
+-- tráfico de red/consumo en cada telemetría normal), lo ejecuta, y escribe
+-- el resultado de vuelta en la misma fila.
+--
+-- command soportados hoy (ver checkRemoteCommand() en main/main.ino):
+--   'lbs_check' — fuerza una lectura de posición aproximada por celda
+--   'gps_reset' — reinicia el receptor GNSS (por si se queda "encendido
+--                 pero sordo", ver comentario de readGPS() en main.ino)
+--
+-- Solo lo procesa el firmware del SIM7000G (checkRemoteCommand() está
+-- dentro del mismo #else SIM7000G que sim7000Request()) — el A7670G no
+-- tiene esta cola todavía.
+
+CREATE TABLE IF NOT EXISTS device_commands (
+    id            bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    motorcycle_id text        NOT NULL,
+    command       text        NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    done          boolean     NOT NULL DEFAULT false,
+    result        text
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_commands_pending
+    ON device_commands (motorcycle_id, created_at)
+    WHERE done = false;
+
+ALTER TABLE device_commands ENABLE ROW LEVEL SECURITY;
+
+-- El portal inserta el comando con la anon key.
+DROP POLICY IF EXISTS "insert anon" ON device_commands;
+CREATE POLICY "insert anon" ON device_commands FOR INSERT WITH CHECK (true);
+
+-- El portal necesita leer el resultado, y el firmware necesita leer qué
+-- comando hay pendiente — mismo acceso público de siempre, sin login.
+DROP POLICY IF EXISTS "select anon" ON device_commands;
+CREATE POLICY "select anon" ON device_commands FOR SELECT USING (true);
+
+-- El firmware marca el comando como hecho (done=true) y deja el resultado.
+DROP POLICY IF EXISTS "update anon" ON device_commands;
+CREATE POLICY "update anon" ON device_commands FOR UPDATE USING (true) WITH CHECK (true);
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Fin. Si el editor de Supabase dice "Success. No rows returned" al final,
 -- todo se ha creado correctamente.
