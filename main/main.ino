@@ -1357,8 +1357,9 @@ button{width:100%;background:#167a70;color:#fff;border:0;border-radius:8px;paddi
 button:disabled{opacity:0.5}
 #status{margin-top:16px;font-size:12px;line-height:1.5;font-family:Menlo,Consolas,'Liberation Mono',monospace;
         color:#8fe3a0;background:#0a0f0d;border:1px solid #2b3532;border-radius:8px;padding:10px 12px;
-        white-space:pre-wrap;word-break:break-word;max-height:220px;overflow-y:auto}
-#status:empty{display:none;border:0;padding:0}
+        white-space:pre-wrap;word-break:break-word;height:220px;overflow-y:scroll;
+        -webkit-overflow-scrolling:touch;box-shadow:inset 0 0 6px rgba(0,0,0,0.6)}
+#status:empty{display:none;border:0;padding:0;box-shadow:none}
 #bar{height:6px;background:#2b3532;border-radius:3px;overflow:hidden;margin-top:12px;display:none}
 #bar div{height:100%;width:0;background:#167a70;transition:width .2s}
 </style></head><body>
