@@ -664,6 +664,14 @@ static void readLBS() {
     lastTry = millis();
 
     ensureLbsBearer();
+    // Se guarda junto al intento de LBS para poder comparar, la próxima vez
+    // que el dispositivo viaje de verdad a otro sitio, si la celda que
+    // reporta el módem cambia aunque la coordenada de +CLBS no lo haga —
+    // eso distinguiría un LBS realmente atascado/cacheado de un módem que
+    // simplemente sigue acampado en la misma celda de siempre (reselección
+    // perezosa), que es indistinguible mirando solo la coordenada.
+    String cpsi = queryAT("AT+CPSI?", "+CPSI:", 5000);
+    logLine("[CELL] %s", cpsi.length() ? cpsi.c_str() : "sin respuesta de AT+CPSI");
     String resp = queryAT("AT+CLBS=1,1", "+CLBS:", 10000);
     int colon = resp.indexOf(':');
     if (colon < 0) { logLine("[LBS] Sin respuesta de AT+CLBS"); return; }
