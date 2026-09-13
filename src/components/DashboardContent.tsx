@@ -42,6 +42,15 @@ function positionTimestamp(obj: any): string | undefined {
   return (obj.latitude != null && obj.longitude != null) ? obj.timestamp : undefined;
 }
 
+// El SoC de moto_battery/moto_battery_b es un byte crudo de CAN (0-255)
+// leído tal cual en el firmware, sin validar rango — un 0xFF de trama
+// corrupta o "sin dato" llega como 255 en vez de descartarse. Un SoC real
+// nunca pasa de 100, así que cualquier valor fuera de 0-100 se trata como
+// no válido aquí (no se toca en la base de datos ni en el firmware).
+function validSoc(v: any): number | null {
+  return typeof v === 'number' && v >= 0 && v <= 100 ? v : null;
+}
+
 function mergeTelemetry(prev: any, next: any) {
   if (!next) return prev;
   if (!prev) {
@@ -156,15 +165,25 @@ export default function DashboardContent() {
       else if (historyRange === '24h') startTime.setHours(now.getHours() - 24);
       else if (historyRange === '7d') startTime.setDate(now.getDate() - 7);
 
+      // Supabase/PostgREST corta a un máximo de filas por consulta (1000 por
+      // defecto) — pedir ascendente sin límite en un rango largo (6h+ ya
+      // supera eso a 15s/lectura) corta justo por el extremo MÁS ANTIGUO
+      // de la ventana, no el más reciente: el rango "7D" acababa mostrando
+      // solo el primer rato de hace una semana. Pidiendo descendente con
+      // límite se coge siempre la parte más reciente, y se da la vuelta en
+      // JS para dibujar en orden cronológico.
       const { data } = await supabase
         .from('telemetry')
         .select('timestamp, moto_battery, moto_battery_b')
         .gte('timestamp', startTime.toISOString())
-        .order('timestamp', { ascending: true });
+        .order('timestamp', { ascending: false })
+        .limit(1000);
 
       setHistoryData(
-        (data ?? []).map((d: any) => ({
+        (data ?? []).slice().reverse().map((d: any) => ({
           ...d,
+          moto_battery: validSoc(d.moto_battery),
+          moto_battery_b: validSoc(d.moto_battery_b),
           time: new Date(d.timestamp).toLocaleTimeString('es-ES', {
             hour: '2-digit',
             minute: '2-digit',
@@ -248,13 +267,19 @@ export default function DashboardContent() {
         // un buen rato), se busca el último dato real conocido de cada una
         // en vez de dejarlas en null — BATERÍA A/B no deben volver a "---"
         // mientras exista algún valor real en el historial.
-        let batA = telData.moto_battery;
-        let batB = telData.moto_battery_b;
+        //
+        // validSoc() (arriba del componente) descarta valores fuera de
+        // 0-100 tanto aquí como en la query de abajo (.gte/.lte) — ver su
+        // comentario para el porqué (byte crudo de CAN sin validar rango).
+        let batA = validSoc(telData.moto_battery);
+        let batB = validSoc(telData.moto_battery_b);
         if (batA == null) {
           const { data: rows } = await supabase
             .from('telemetry')
             .select('moto_battery')
             .not('moto_battery', 'is', null)
+            .gte('moto_battery', 0)
+            .lte('moto_battery', 100)
             .order('timestamp', { ascending: false })
             .limit(1);
           if (rows?.[0]) batA = rows[0].moto_battery;
@@ -264,6 +289,8 @@ export default function DashboardContent() {
             .from('telemetry')
             .select('moto_battery_b')
             .not('moto_battery_b', 'is', null)
+            .gte('moto_battery_b', 0)
+            .lte('moto_battery_b', 100)
             .order('timestamp', { ascending: false })
             .limit(1);
           if (rows?.[0]) batB = rows[0].moto_battery_b;
@@ -374,9 +401,12 @@ export default function DashboardContent() {
 
   // SoC por pack: la moto tiene dos IDs de batería (modo A / modo B, uno
   // activo cada vez según qué pack esté conectado) — se muestran por
-  // separado para saber cuál está puesto sin ambigüedad.
-  const socA = telemetry?.moto_battery;
-  const socB = telemetry?.moto_battery_b;
+  // separado para saber cuál está puesto sin ambigüedad. validSoc() filtra
+  // valores fuera de 0-100 (ver su comentario arriba) — se aplica aquí
+  // porque afecta tanto a la carga inicial como a lo que llegue luego por
+  // la suscripción realtime.
+  const socA = validSoc(telemetry?.moto_battery);
+  const socB = validSoc(telemetry?.moto_battery_b);
   const isCharging = !!telemetry?.bms_charging;
 
   // Traza del viaje seleccionado (solo existe en viajes guardados con el
