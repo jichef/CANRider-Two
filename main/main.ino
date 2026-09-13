@@ -93,23 +93,50 @@ static int      httpFails = 0;
 // Buffer circular de líneas de texto — no es un volcado byte a byte del diálogo
 // AT (eso sería tan caro como DUMP_AT_COMMANDS), solo las líneas de estado ya
 // pensadas para Serial (login, resultado de LBS, POST, viajes...). 40 líneas de
-// 110 bytes son ~4.4KB, insignificante frente a la RAM libre. logLine() sigue
+// 128 bytes son ~5.1KB, insignificante frente a la RAM libre. logLine() sigue
 // imprimiendo por Serial igual que antes — es un añadido, no un cambio de
 // comportamiento — así que no hace falta tocar el resto de sitios que llaman a
 // Serial.println() directamente, solo los puntos que de verdad interesa poder
 // revisar por email más tarde.
 #define LOG_BUF_LINES   40
-#define LOG_LINE_MAXLEN 110
+#define LOG_LINE_MAXLEN 128
 static char logBuf[LOG_BUF_LINES][LOG_LINE_MAXLEN];
 static int  logCount = 0;
 static int  logNext  = 0;
 
+// Definida más abajo (junto al resto de utilidades de hora de red) — se
+// necesita aquí para pasar la fecha del log a hora local cuando el offset
+// (t.utcOffsetMin) empuja al día anterior/siguiente.
+static void shiftDate(uint16_t &year, uint8_t &month, uint8_t &day, int deltaDays);
+
 static void logLine(const char* fmt, ...) {
-    char tmp[LOG_LINE_MAXLEN];
+    char msg[LOG_LINE_MAXLEN];
     va_list args;
     va_start(args, fmt);
-    vsnprintf(tmp, sizeof(tmp), fmt, args);
+    vsnprintf(msg, sizeof(msg), fmt, args);
     va_end(args);
+
+    char tmp[LOG_LINE_MAXLEN];
+    TimeRef t = snapshotTime();
+    if (t.valid) {
+        // Misma conversión UTC->hora local (con el offset de red, incluye
+        // DST) que usa txSignalByte() para la trama de reloj del CAN — aquí
+        // sin la corrección por tiempo transcurrido, de sobra para marcar
+        // una línea de log al segundo.
+        int32_t localSec = (int32_t)t.hour * 3600 + (int32_t)t.min * 60 + t.sec + t.utcOffsetMin * 60;
+        int dayDelta = 0;
+        while (localSec < 0)      { localSec += 86400; dayDelta--; }
+        while (localSec >= 86400) { localSec -= 86400; dayDelta++; }
+        uint16_t y = t.year; uint8_t mo = t.month, d = t.day;
+        if (dayDelta != 0) shiftDate(y, mo, d, dayDelta);
+        snprintf(tmp, sizeof(tmp), "%02d/%02d/%02d %02d:%02d:%02d %s",
+                 d, mo, y % 100,
+                 (int)(localSec / 3600), (int)((localSec / 60) % 60), (int)(localSec % 60),
+                 msg);
+    } else {
+        snprintf(tmp, sizeof(tmp), "%s", msg);
+    }
+
     Serial.println(tmp);
     strncpy(logBuf[logNext], tmp, LOG_LINE_MAXLEN - 1);
     logBuf[logNext][LOG_LINE_MAXLEN - 1] = '\0';
@@ -1513,6 +1540,9 @@ button:disabled{opacity:0.5}
 #status:empty{display:none;border:0;padding:0;box-shadow:none}
 #bar{height:6px;background:#2b3532;border-radius:3px;overflow:hidden;margin-top:12px;display:none}
 #bar div{height:100%;width:0;background:#167a70;transition:width .2s}
+.iconrow{display:flex;gap:8px;margin-top:12px}
+.iconbtn{width:auto;flex:1;background:#1f2937;padding:10px;display:flex;align-items:center;justify-content:center}
+.iconbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 </style></head><body>
 <div class="card">
   <h1>CanRider &mdash; Actualizaci&oacute;n OTA</h1>
@@ -1521,19 +1551,31 @@ button:disabled{opacity:0.5}
   <button id="btn" onclick="up()">Actualizar firmware</button>
   <div id="bar"><div id="barfill"></div></div>
   <div id="status"></div>
-  <button id="rst" onclick="rst()" style="margin-top:10px;background:#3a2119;color:#e07257">Reiniciar ESP32</button>
-  <hr style="border:0;border-top:1px solid #2b3532;margin:18px 0">
-  <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — autoriza el movimiento para que no salte como posible robo, y se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
-  <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
-  <button id="logbtn" onclick="viewLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Ver log</button>
-  <button id="savelogbtn" onclick="saveLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Guardar log</button>
-  <button id="lbsbtn" onclick="checkLbs()" style="margin-top:10px;background:#1f2937;color:#fbbf24">Comprobar LBS ahora</button>
+  <p class="sub" style="margin:14px 0 0">Viaje sin CAN (p.ej. en bici) — autoriza el movimiento para que no salte como posible robo, y se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
+  <div class="iconrow">
+    <button id="rst" class="iconbtn" onclick="rst()" title="Reiniciar ESP32" style="color:#e07257">
+      <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+    </button>
+    <button id="trip" class="iconbtn" onclick="tripToggle()" title="Iniciar viaje (sin CAN)" style="color:#93c5fd">
+      <svg viewBox="0 0 24 24"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+    </button>
+    <button id="logbtn" class="iconbtn" onclick="viewLog()" title="Ver log" style="color:#a7f3d0">
+      <svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+    </button>
+    <button id="savelogbtn" class="iconbtn" onclick="saveLog()" title="Guardar log" style="color:#a7f3d0">
+      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    </button>
+    <button id="lbsbtn" class="iconbtn" onclick="checkLbs()" title="Comprobar LBS ahora" style="color:#fbbf24">
+      <svg viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+    </button>
+  </div>
 </div>
 <script>
 function tripPaint(active){
   var btn=document.getElementById('trip');
   btn.dataset.active=active?'1':'';
-  btn.textContent=active?'Detener viaje':'Iniciar viaje (sin CAN)';
+  btn.style.color=active?'#f87171':'#93c5fd';
+  btn.title=active?'Detener viaje':'Iniciar viaje (sin CAN)';
 }
 fetch('/trip/status').then(function(r){return r.json();}).then(function(d){tripPaint(d.active);}).catch(function(){});
 function tripToggle(){
@@ -1561,12 +1603,14 @@ function viewLog(){
   if(logLiveTimer){
     clearInterval(logLiveTimer);
     logLiveTimer=null;
-    btn.textContent='Ver log';
+    btn.style.color='#a7f3d0';
+    btn.title='Ver log';
     return;
   }
   logPoll();
   logLiveTimer=setInterval(logPoll,2000);
-  btn.textContent='Detener actualizacion en vivo';
+  btn.style.color='#34d399';
+  btn.title='Detener actualizacion en vivo';
 }
 function saveLog(){
   fetch('/log/view').then(function(r){return r.text();}).then(function(t){
@@ -1587,14 +1631,13 @@ function saveLog(){
 function checkLbs(){
   var btn=document.getElementById('lbsbtn');
   btn.disabled=true;
-  var prev=btn.textContent;
-  btn.textContent='Consultando... (puede tardar ~15s)';
+  btn.title='Consultando... (puede tardar ~15s)';
   fetch('/lbs/check',{method:'POST'}).then(function(r){return r.text();}).then(function(t){
     document.getElementById('status').textContent=t;
-    btn.disabled=false;btn.textContent=prev;
+    btn.disabled=false;btn.title='Comprobar LBS ahora';
   }).catch(function(){
     document.getElementById('status').textContent='No se pudo contactar con el ESP32';
-    btn.disabled=false;btn.textContent=prev;
+    btn.disabled=false;btn.title='Comprobar LBS ahora';
   });
 }
 function up(){
@@ -1630,15 +1673,16 @@ function rst(){
   var btn=document.getElementById('rst');
   if(btn.dataset.armed!=='1'){
     btn.dataset.armed='1';
-    btn.textContent='¿Seguro? Toca otra vez';
-    setTimeout(function(){btn.dataset.armed='';btn.textContent='Reiniciar ESP32';},4000);
+    btn.style.color='#f87171';
+    btn.title='¿Seguro? Toca otra vez';
+    setTimeout(function(){btn.dataset.armed='';btn.style.color='#e07257';btn.title='Reiniciar ESP32';},4000);
     return;
   }
   btn.disabled=true;
   document.getElementById('status').textContent='Reiniciando...';
   fetch('/reset',{method:'POST'}).catch(function(){
     document.getElementById('status').textContent='No se pudo contactar con el ESP32';
-    btn.disabled=false;btn.dataset.armed='';btn.textContent='Reiniciar ESP32';
+    btn.disabled=false;btn.dataset.armed='';btn.style.color='#e07257';btn.title='Reiniciar ESP32';
   });
 }
 </script></body></html>
