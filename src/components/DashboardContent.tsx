@@ -22,6 +22,8 @@ import {
   WifiZero,
   Trash2,
   X,
+  RadioTower,
+  RefreshCw,
 } from 'lucide-react';
 
 import dynamic from 'next/dynamic';
@@ -147,6 +149,13 @@ export default function DashboardContent() {
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [hasLiveFix, setHasLiveFix] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
+
+  // Comandos remotos al ESP32 (lbs_check / gps_reset) — el dispositivo nunca
+  // acepta conexiones entrantes, así que esto deja un comando pendiente en
+  // device_commands y lo recoge el firmware en su siguiente ciclo por LTE
+  // (checkRemoteCommand() en main.ino, cada ~60s) — ver supabase/schema.sql.
+  const [cmdBusy, setCmdBusy] = useState<'lbs_check' | 'gps_reset' | null>(null);
+  const [cmdMessage, setCmdMessage] = useState<string | null>(null);
 
   // Qué gráfica de histórico está desplegada — null = ninguna, el panel no
   // se muestra. Se activa pulsando la tarjeta correspondiente (BATERÍA A/B,
@@ -582,6 +591,44 @@ export default function DashboardContent() {
     }
   };
 
+  const sendDeviceCommand = async (command: 'lbs_check' | 'gps_reset') => {
+    if (!supabase || cmdBusy) return;
+    setCmdBusy(command);
+    setCmdMessage(null);
+
+    const { data, error } = await supabase
+      .from('device_commands')
+      .insert({ motorcycle_id: process.env.NEXT_PUBLIC_VEHICLE_ID, command })
+      .select('id')
+      .single();
+
+    if (error || !data) {
+      setCmdMessage('No se pudo enviar el comando');
+      setCmdBusy(null);
+      return;
+    }
+
+    // El ESP32 solo revisa comandos pendientes cada ~60s en su ciclo por
+    // LTE (checkRemoteCommand() en main.ino) — se sondea hasta 90s antes de
+    // darlo por perdido (p.ej. dispositivo sin cobertura en ese momento).
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const { data: row } = await supabase
+        .from('device_commands')
+        .select('done, result')
+        .eq('id', data.id)
+        .single();
+      if (row?.done) {
+        setCmdMessage(row.result || 'Hecho');
+        setCmdBusy(null);
+        return;
+      }
+    }
+    setCmdMessage('Sin respuesta del dispositivo (¿sin cobertura?)');
+    setCmdBusy(null);
+  };
+
   return (
     <div className="min-h-[100dvh] md:h-[100dvh] md:overflow-y-auto bg-black text-zinc-300 font-sans selection:bg-cyan-500/30 pb-24 md:pb-0">
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_-20%,_#1e1b4b_0%,_#000_80%)] pointer-events-none" />
@@ -767,13 +814,47 @@ export default function DashboardContent() {
                   )}
                 </div>
               </div>
-              {selectedTrip && (
+              {selectedTrip ? (
                 <button
                   onClick={() => setSelectedTrip(null)}
                   className="px-3 py-1 rounded-lg bg-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors"
                 >
                   RESET_VIEW
                 </button>
+              ) : (
+                <div className="flex items-center gap-2 shrink-0">
+                  {cmdMessage && (
+                    <span className="text-[9px] font-mono text-zinc-500 max-w-[150px] text-right leading-tight">
+                      {cmdMessage}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => sendDeviceCommand('lbs_check')}
+                    disabled={!!cmdBusy}
+                    title="Forzar una lectura de posición aproximada por celda (LBS) en el dispositivo — tarda hasta ~90s en confirmarse"
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold tracking-wider transition-colors disabled:opacity-40 ${
+                      cmdBusy === 'lbs_check'
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'bg-zinc-800 text-zinc-400 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <RadioTower size={12} className={cmdBusy === 'lbs_check' ? 'animate-pulse' : ''} />
+                    LBS
+                  </button>
+                  <button
+                    onClick={() => sendDeviceCommand('gps_reset')}
+                    disabled={!!cmdBusy}
+                    title="Reiniciar el receptor GPS del dispositivo (por si se queda sin encontrar satélites) — tarda hasta ~90s en confirmarse"
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold tracking-wider transition-colors disabled:opacity-40 ${
+                      cmdBusy === 'gps_reset'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-zinc-800 text-zinc-400 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <RefreshCw size={12} className={cmdBusy === 'gps_reset' ? 'animate-spin' : ''} />
+                    GPS
+                  </button>
+                </div>
               )}
             </div>
             <div className="flex-1 relative md:min-h-[300px]">
