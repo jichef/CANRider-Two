@@ -639,7 +639,7 @@
     <section id="needed" class="lead-box">
       <h3>What you'll need before you start</h3>
       <ul class="checklist">
-        <li><b>LilyGo T-SIM7000G board</b> (<a href="https://lilygo.cc/products/t-sim7000g" target="_blank" rel="noopener">official store</a>, recommended, the most tested one in this project) <b>or T-A7670G</b> (<a href="https://lilygo.cc/products/t-sim-a7670e" target="_blank" rel="noopener">official store</a> — pick the "A7670G" variant in the dropdown, not the E or SA) — both have LTE + GPS built in and the firmware supports both, see step 6. Both are also available on AliExpress, usually cheaper</li>
+        <li><b>LilyGo T-SIM7000G board</b> (<a href="https://lilygo.cc/products/t-sim7000g" target="_blank" rel="noopener">official store</a>, the most tested one in this project, with LTE + GPS built in) <b>or T-A7670G</b> (<a href="https://lilygo.cc/products/t-sim-a7670e" target="_blank" rel="noopener">official store</a> — LTE Cat-1, more compatible with carriers that don't support Cat-M1 well — pick the "A7670G" variant in the dropdown, not the E or SA, <b>and don't forget to select the "with GPS" option</b>) — the firmware supports both, see step 6. Both are also available on AliExpress, usually cheaper</li>
         <li><b>CAN transceiver</b> (SN65HVD230, TJA1050 or similar) at 3.3V — <a href="https://www.amazon.es/dp/B0F9FDK6RJ" target="_blank" rel="noopener">example SN65HVD230 module</a></li>
         <li><b>SIM card with a data plan</b> active, with the PIN disabled</li>
         <li><b>USB cable</b> that carries data (not charge-only) for the board</li>
@@ -696,8 +696,8 @@
 
       <div class="callout tip">
         <span class="k">How do I know it worked?</span>
-        <p>At the very bottom a green message will appear, something like <code>Success. No rows returned</code>. That's good: it means the three tables were created without errors.</p>
-        <p>To check it with your own eyes: in the left menu click the <b>Table Editor</b> icon (looks like a table/spreadsheet). You should see three new tables in the list: <code>can_signals</code>, <code>telemetry</code> and <code>trips</code>.</p>
+        <p>At the very bottom a green message will appear, something like <code>Success. No rows returned</code>. That's good: it means the tables were created without errors.</p>
+        <p>To check it with your own eyes: in the left menu click the <b>Table Editor</b> icon (looks like a table/spreadsheet). You should see two new tables in the list: <code>telemetry</code> and <code>trips</code>.</p>
       </div>
 
       <div class="callout warn">

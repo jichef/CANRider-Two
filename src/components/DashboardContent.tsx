@@ -10,7 +10,6 @@ import {
   Route as RouteIcon,
   ShieldCheck,
   Activity,
-  Thermometer,
   ShieldAlert,
   Signal,
   SignalHigh,
@@ -23,6 +22,7 @@ import {
   WifiZero,
   Trash2,
 } from 'lucide-react';
+
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
@@ -337,12 +337,7 @@ export default function DashboardContent() {
   // separado para saber cuál está puesto sin ambigüedad.
   const socA = telemetry?.moto_battery;
   const socB = telemetry?.moto_battery_b;
-  // Carga: BMS CAN tiene prioridad sobre AT+CBC
-  const isCharging = !!(telemetry?.bms_charging || telemetry?.is_charging);
-  // Temperatura media de celdas disponibles
-  const temps = [telemetry?.temp1, telemetry?.temp2, telemetry?.temp3, telemetry?.temp4]
-    .filter((v): v is number => v != null);
-  const avgTemp = temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : undefined;
+  const isCharging = !!telemetry?.bms_charging;
 
   // Traza del viaje seleccionado (solo existe en viajes guardados con el
   // firmware que ya registra puntos — los viajes antiguos no tienen
@@ -366,12 +361,6 @@ export default function DashboardContent() {
   const lbsAccuracyM = telemetry?.position_accuracy != null
     ? Math.round(telemetry.position_accuracy * 1.5)
     : null;
-
-  const hasCAN = telemetry?.pack_voltage != null
-    || telemetry?.battery_current != null
-    || avgTemp != null
-    || telemetry?.charge_current != null
-    || telemetry?.cell_voltage != null;
 
   const stats = [
     {
@@ -425,47 +414,6 @@ export default function DashboardContent() {
         : 'text-zinc-600',
       glow: 'shadow-[0_0_15px_rgba(232,121,249,0.3)]',
       border: 'border-fuchsia-500/20'
-    },
-  ];
-
-  const canStats = [
-    {
-      label: 'CORRIENTE',
-      value: telemetry?.battery_current != null
-        ? `${telemetry.battery_current > 0 ? '+' : ''}${telemetry.battery_current.toFixed(1)}`
-        : null,
-      unit: 'A',
-      icon: Activity,
-      color: (telemetry?.battery_current ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400',
-      glow: 'shadow-[0_0_15px_rgba(52,211,153,0.2)]',
-      border: 'border-emerald-500/20',
-    },
-    {
-      label: 'TEMP CELDAS',
-      value: avgTemp != null ? avgTemp.toFixed(0) : null,
-      unit: '°C',
-      icon: Thermometer,
-      color: avgTemp != null && avgTemp > 45 ? 'text-red-400' : 'text-sky-400',
-      glow: 'shadow-[0_0_15px_rgba(56,189,248,0.2)]',
-      border: 'border-sky-500/20',
-    },
-    {
-      label: 'I CARGA',
-      value: telemetry?.charge_current != null ? telemetry.charge_current.toFixed(1) : null,
-      unit: 'A',
-      icon: Zap,
-      color: 'text-violet-400',
-      glow: 'shadow-[0_0_15px_rgba(167,139,250,0.2)]',
-      border: 'border-violet-500/20',
-    },
-    {
-      label: 'V CELDA',
-      value: telemetry?.cell_voltage != null ? telemetry.cell_voltage.toFixed(3) : null,
-      unit: 'V',
-      icon: Battery,
-      color: 'text-fuchsia-400',
-      glow: 'shadow-[0_0_15px_rgba(232,121,249,0.2)]',
-      border: 'border-fuchsia-500/20',
     },
   ];
 
@@ -589,27 +537,7 @@ export default function DashboardContent() {
                 <span className="text-[10px] font-mono text-zinc-500">{telemetry.board_battery_voltage.toFixed(2)}V</span>
               )}
             </div>
-          ) : telemetry?.battery_level != null && (
-            // Filas antiguas, de antes de este arreglo — dato del módem
-            // (AT+CBC), se mantiene solo como último recurso.
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-1.5 rounded-xl border transition-all ${
-              isStale
-                ? 'text-zinc-500 border-white/10 bg-white/5'
-                : telemetry.is_charging
-                  ? 'text-amber-400 border-amber-500/20 bg-amber-500/10'
-                  : (telemetry.battery_level < 20
-                      ? 'text-red-400 border-red-500/20 bg-red-500/10'
-                      : 'text-zinc-400 border-white/10')
-            }`}>
-              {telemetry.is_charging
-                ? <BatteryCharging size={14} />
-                : <Battery size={14} />}
-              <span className="text-xs font-bold font-mono">{telemetry.battery_level}%</span>
-              {telemetry.battery_voltage != null && (
-                <span className="text-[10px] font-mono text-zinc-500">{telemetry.battery_voltage.toFixed(2)}V</span>
-              )}
-            </div>
-          )}
+          ) : null}
 
           {telemetry?.timestamp && (
             <div className="flex items-center gap-1.5 text-zinc-500 font-mono text-[10px] ml-auto">
@@ -642,23 +570,6 @@ export default function DashboardContent() {
             {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
           </div>
 
-          {/* Stats CAN — solo visibles cuando el bus ha enviado datos */}
-          {hasCAN && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-3 mb-6 md:mb-4">
-              {canStats.map((stat) => stat.value != null && (
-                <div key={stat.label} className={`bg-zinc-900/30 backdrop-blur-xl border ${stat.border} ${stat.glow} px-3.5 py-3 md:px-4 md:py-2.5 rounded-xl md:rounded-2xl transition-all hover:bg-zinc-900/50`}>
-                  <div className="flex items-center gap-2 mb-1 md:mb-1">
-                    <stat.icon size={14} className={stat.color} />
-                    <p className="text-[9px] font-black tracking-[0.2em] text-zinc-500 uppercase truncate">{stat.label}</p>
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className={`text-lg md:text-xl font-black font-mono ${stat.color}`}>{stat.value}</span>
-                    <span className="text-[10px] font-bold text-zinc-600">{stat.unit}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8 md:flex-1 md:min-h-0">
