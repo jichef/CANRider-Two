@@ -26,6 +26,7 @@ import {
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Algunos campos CAN (moto_battery, moto_battery_b, bms_charging...) llegan
 // null en una fila cuando esa lectura concreta no se completó a tiempo del
@@ -136,6 +137,45 @@ export default function DashboardContent() {
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [hasLiveFix, setHasLiveFix] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
+
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [historyRange, setHistoryRange] = useState<'1h' | '6h' | '24h' | '7d'>('24h');
+
+  // Histórico de baterías (moto_battery/moto_battery_b) para la gráfica de
+  // evolución — independiente del estado "en vivo" de arriba, se recarga
+  // entera cada vez que cambia el rango elegido (no hace falta ir
+  // acumulando en tiempo real, a diferencia de la telemetría live).
+  useEffect(() => {
+    if (!supabase) return;
+
+    const fetchHistory = async () => {
+      const now = new Date();
+      const startTime = new Date();
+      if (historyRange === '1h') startTime.setHours(now.getHours() - 1);
+      else if (historyRange === '6h') startTime.setHours(now.getHours() - 6);
+      else if (historyRange === '24h') startTime.setHours(now.getHours() - 24);
+      else if (historyRange === '7d') startTime.setDate(now.getDate() - 7);
+
+      const { data } = await supabase
+        .from('telemetry')
+        .select('timestamp, moto_battery, moto_battery_b')
+        .gte('timestamp', startTime.toISOString())
+        .order('timestamp', { ascending: true });
+
+      setHistoryData(
+        (data ?? []).map((d: any) => ({
+          ...d,
+          time: new Date(d.timestamp).toLocaleTimeString('es-ES', {
+            hour: '2-digit',
+            minute: '2-digit',
+            ...(historyRange === '7d' ? { day: '2-digit', month: '2-digit' } : {}),
+          }),
+        }))
+      );
+    };
+
+    fetchHistory();
+  }, [supabase, historyRange]);
 
   useEffect(() => {
     const checkStale = () => {
@@ -772,6 +812,70 @@ export default function DashboardContent() {
               </div>
             )}
 
+          </div>
+        </div>
+
+        {/* Histórico de baterías — sección aparte del grid de arriba (map +
+            historial), md:shrink-0 a propósito: al ser hermana de un grid
+            md:flex-1, añadir esta tarjeta hace que el grid (y con él, el
+            mapa) se encoja un poco para dejarle sitio, en vez de desbordar
+            la pantalla — el contenedor de más arriba ya tiene overflow-y
+            para cuando aun así no quepa todo. */}
+        <div className="mt-6 md:mt-6 md:shrink-0 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-5 md:p-6 shadow-2xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500">
+                <Activity size={18} />
+              </div>
+              <div>
+                <h2 className="text-sm md:text-base font-bold text-white uppercase tracking-wider">Histórico de baterías</h2>
+                <p className="text-[10px] text-zinc-500 font-mono uppercase">Evolución de batería A/B (moto_battery)</p>
+              </div>
+            </div>
+            <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5 self-start sm:self-auto">
+              {(['1h', '6h', '24h', '7d'] as const).map((range) => (
+                <button
+                  key={range}
+                  onClick={() => setHistoryRange(range)}
+                  className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-widest transition-all ${
+                    historyRange === range
+                      ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                      : 'text-zinc-500 hover:text-white'
+                  }`}
+                >
+                  {range.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-[200px] md:h-[220px]">
+            {historyData.some((d) => d.moto_battery != null || d.moto_battery_b != null) ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={historyData}>
+                  <defs>
+                    <linearGradient id="colorBatA" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#34d399" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorBatB" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2dd4bf" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
+                  <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis domain={[0, 100]} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={28} />
+                  <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                  <Area type="monotone" dataKey="moto_battery" name="Batería A" stroke="#34d399" fillOpacity={1} fill="url(#colorBatA)" strokeWidth={2} connectNulls />
+                  <Area type="monotone" dataKey="moto_battery_b" name="Batería B" stroke="#2dd4bf" fillOpacity={1} fill="url(#colorBatB)" strokeWidth={2} connectNulls />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-zinc-600 text-[10px] font-mono uppercase tracking-widest text-center px-4">
+                Sin datos de batería en este rango
+              </div>
+            )}
           </div>
         </div>
       </div>
