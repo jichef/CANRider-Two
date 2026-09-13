@@ -31,11 +31,11 @@ class CanRiderChargingSensor(CoordinatorEntity, BinarySensorEntity):
         tel = self.coordinator.data.get("telemetry")
         if not tel:
             return False
-        # bms_charging viene de CAN (float 1.0/0.0); is_charging de AT+CBC (bool)
+        # bms_charging viene de CAN (float 1.0/0.0) — única señal de carga
+        # real desde que se retiró is_charging (AT+CBC del módem, poco
+        # fiable, reportaba "no cargando" incluso con USB conectado).
         bms = tel.get("bms_charging")
-        if bms is not None:
-            return float(bms) > 0
-        return tel.get("is_charging") is True
+        return bms is not None and float(bms) > 0
 
 
 class CanRiderTheftSensor(CoordinatorEntity, BinarySensorEntity):

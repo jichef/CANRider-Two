@@ -81,7 +81,11 @@ class BatteryBSensor(CanRiderSensor):
         return self._tel.get("moto_battery_b") if self._tel else None
 
 
-# ── Batería del propio ESP32 (AT+CBC del módem) ──────────────────────────────────
+# ── Batería del propio ESP32 (ADC propio, ver readBoardBatteryVoltage() en
+#    main.ino) — NULL a propósito mientras el dispositivo está en USB, ver
+#    board_on_usb; unique_id se mantiene igual que cuando esto leía
+#    battery_level/battery_voltage (AT+CBC del módem, ya retirado) para no
+#    perder el historial de la entidad en instalaciones existentes. ─────────
 
 class EspBatterySensor(CanRiderSensor):
     _attr_name = "Batería ESP32"
@@ -95,7 +99,7 @@ class EspBatterySensor(CanRiderSensor):
 
     @property
     def native_value(self):
-        return self._tel.get("battery_level") if self._tel else None
+        return self._tel.get("board_battery_level") if self._tel else None
 
 
 class EspBatteryVoltageSensor(CanRiderSensor):
@@ -110,7 +114,7 @@ class EspBatteryVoltageSensor(CanRiderSensor):
 
     @property
     def native_value(self):
-        return self._tel.get("battery_voltage") if self._tel else None
+        return self._tel.get("board_battery_voltage") if self._tel else None
 
 
 # ── Otros ──────────────────────────────────────────────────────────────────────

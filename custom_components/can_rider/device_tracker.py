@@ -38,7 +38,9 @@ class CanRiderTracker(CoordinatorEntity, TrackerEntity):
 
     @property
     def battery_level(self):
-        return self._tel.get("battery_level") if self._tel else None
+        # board_battery_level (ADC propio del ESP32) — viene NULL a
+        # propósito mientras el dispositivo está en USB, ver board_on_usb.
+        return self._tel.get("board_battery_level") if self._tel else None
 
     @property
     def icon(self):

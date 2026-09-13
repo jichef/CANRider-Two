@@ -21,9 +21,9 @@ Este proyecto se publica **tal cual («as is»), sin garantía de ningún tipo**
 - **Envía telemetría** cada 15 segundos a Supabase, por LTE siempre disponible o por **WiFi preferente** (opcional) cuando hay una red conocida al alcance — más barato y estable; vuelve a LTE solo si el WiFi deja de estar disponible
 - **Posición GPS**, con respaldo automático por triangulación de celda (LBS, vía `AT+CLBS`) si no hay fix GPS — el portal marca esas posiciones como aproximadas y dibuja un círculo con el radio de precisión estimado
 - **Registra viajes** automáticamente: empiezan con la primera trama CAN (moto encendida) y terminan cuando el bus lleva 8s en silencio (moto apagada) — distancia, velocidad máxima, consumo de batería y la traza real del recorrido (para pintarla en el mapa coloreada por velocidad; se guardan hasta 300 puntos por viaje, ~75 min a un punto cada 15s — pasado eso, el resto del viaje sigue contando para distancia/duración pero no se añaden más puntos al dibujo). También se puede guardar un viaje **sin CAN** (p.ej. en bici) a mano desde el portal cautivo de OTA — ver más abajo
-- **Detección de sustracción**: si el GPS mide movimiento real (≥5 km/h) mientras el bus CAN lleva rato en silencio, no hay explicación normal — la moto no se mueve sola apagada. Puede ser indicio de que la están transportando sin la llave (no se activa durante un viaje manual sin CAN, ver arriba: ese movimiento es intencional)
+- **Detección de sustracción**: si el GPS mide movimiento real (≥5 km/h) mientras el bus CAN lleva rato en silencio, no hay explicación normal — la moto no se mueve sola apagada. Puede ser indicio de que la están transportando sin la llave (no se activa durante un viaje manual sin CAN, ver arriba: ese movimiento es intencional). El portal muestra una alerta roja bien visible en cuanto se detecta
 - **Actualización de firmware por WiFi (OTA, opcional)**: al apagar la moto, levanta su propio WiFi con un portal cautivo para subir un nuevo firmware, reiniciar el ESP32, o iniciar/detener un viaje manual sin CAN — sin cable, sin Arduino IDE, sin Bluetooth ni ninguna app
-- **Panel web** en tiempo real con mapa, historial de viajes (con opción de eliminarlos) y estado del sistema
+- **Panel web** en tiempo real con mapa (círculo de precisión cuando la posición es aproximada por LBS), historial de viajes (con opción de eliminarlos), indicadores de conexión y batería en gris cuando el dispositivo lleva más de 2 min sin reportar, y **gráficas de histórico** (batería A/B, velocidad, señal LTE con marcador de tramos WiFi) desplegables en un modal al pulsar la tarjeta correspondiente, con rango seleccionable (1H/6H/24H/7D/1M/1A)
 - **Integración con Home Assistant** opcional (`custom_components/can_rider`)
 
 ---
@@ -110,7 +110,7 @@ cd CANRider-Two
 
 1. Entra en [supabase.com](https://supabase.com/) y crea un proyecto nuevo.
 2. Anota la **URL del proyecto** y la **anon key** (*Project Settings → API*).
-3. En el **SQL Editor**, pega y ejecuta el contenido completo de `supabase/schema.sql` — crea las tres tablas (`can_signals`, `telemetry`, `trips`) de una vez. Es idempotente: se puede volver a ejecutar sin duplicar nada. Si vienes de una versión muy antigua del proyecto (con PostGIS, tablas `motorcycles`/`locations`/etc.), este mismo script también limpia esos restos para que el esquema real coincida con el que usa el firmware actual.
+3. En el **SQL Editor**, pega y ejecuta el contenido completo de `supabase/schema.sql` — crea las dos tablas (`telemetry`, `trips`) de una vez. Es idempotente: se puede volver a ejecutar sin duplicar nada. Si vienes de una versión anterior del proyecto (con PostGIS, tablas `motorcycles`/`locations`/`can_signals`/etc.), este mismo script también limpia esos restos para que el esquema real coincida con el que usa el firmware actual.
 
 ### 3. Configurar el firmware
 
@@ -186,9 +186,11 @@ La misma página de OTA incluye un botón **"Iniciar viaje (sin CAN)"** — pens
 
 Muestra en tiempo real: batería A y B de la moto, velocidad, señal LTE (icono graduado según dBm, no solo on/off), batería del propio ESP32 (o "USB" si está enchufado — el diseño de la placa desconecta la lectura real en ese caso), indicador de si la posición es GPS real o aproximada por LBS (con un "hace X min/h/d" junto a la posición y un círculo en el mapa con el radio de precisión estimado), un indicador **WiFi/LTE** de por cuál de los dos se mandó la última lectura, mapa con la posición actual y el historial de viajes — al seleccionar un viaje se dibuja su recorrido real coloreado por velocidad (no solo una línea recta entre inicio y fin). Cada viaje del historial se puede eliminar con el icono de papelera (pide confirmación, no se puede deshacer). Cuando el dispositivo lleva más de 2 minutos sin reportar, los indicadores de conexión y batería pasan a gris — son el último dato conocido, no algo en vivo.
 
+**Gráficas de histórico**: las tarjetas BATERÍA A, BATERÍA B, VELOCIDAD y SEÑAL son clicables — al pulsarlas se abre un modal con la evolución de esa métrica en el tiempo (rango seleccionable: 1H/6H/24H/7D/1M/1A). La de batería superpone A y B; la de señal dibuja solo dBm de LTE (el de WiFi no es comparable en la misma escala) y marca aparte, con un punto, los tramos en los que la telemetría se mandó por WiFi. SISTEMA no tiene gráfica asociada.
+
 > **Nota:** `moving_without_can` (posible sustracción, ver más abajo) muestra una alerta roja bien visible en la parte superior del panel en cuanto la última lectura la marca — desaparece sola en cuanto una lectura posterior vuelve a false.
 
-> **Seguridad CAN:** el firmware nunca transmite nada que no sea la trama de la hora, definida directamente en el código (`setupCANSignals()` en `main.ino`), nunca configurable de forma remota. La tabla `can_signals` de Supabase no tiene efecto en tiempo de ejecución — se mantiene solo como referencia opcional (ver comentario en `supabase/schema.sql`).
+> **Seguridad CAN:** el firmware nunca transmite nada que no sea la trama de la hora, definida directamente en el código (`setupCANSignals()` en `main.ino`), nunca configurable de forma remota. No hay ninguna tabla en Supabase desde la que el firmware lea qué tramas escuchar o emitir — la configuración CAN vive solo en `config.h`/`main.ino`.
 
 ---
 
@@ -269,7 +271,7 @@ CanRider/
 │   └── index.html          # Guía visual paso a paso (GitHub Pages)
 │
 └── supabase/
-    └── schema.sql          # Esquema completo: can_signals, telemetry, trips
+    └── schema.sql          # Esquema completo: telemetry, trips
 ```
 
 ---
