@@ -133,24 +133,6 @@ bool sendAT(const char* cmd, const char* expect = "OK", uint32_t timeout = 5000)
     Serial.println("[TIMEOUT]"); return false;
 }
 
-// Como sendAT(), pero sin mandar ningún comando nuevo — solo espera a que
-// aparezca <expect> en lo que ya está llegando por SerialAT. Hace falta para
-// AT+SMTPBODY: tras mandar el comando, el módem responde "DOWNLOAD" y luego
-// hay que escribir el cuerpo en crudo (sin más AT delante) y esperar el "OK"
-// final — dos esperas sin un comando propio en medio.
-static bool waitForAT(const char* expect, uint32_t timeout = 5000) {
-    String buf;
-    uint32_t t = millis();
-    while (millis() - t < timeout) {
-        while (SerialAT.available()) {
-            char c = SerialAT.read(); Serial.write(c); buf += c;
-        }
-        if (buf.indexOf(expect)  >= 0) return true;
-        if (buf.indexOf("ERROR") >= 0) { Serial.println("[FAIL]"); return false; }
-    }
-    Serial.println("[TIMEOUT]"); return false;
-}
-
 String queryAT(const char* cmd, const char* prefix, uint32_t timeout = 5000) {
     Serial.print(">> "); Serial.println(cmd);
     SerialAT.println(cmd);
@@ -1334,63 +1316,24 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 #define OTA_CLIENT_GRACE_MS    120000UL   // 2 min tras irse el último cliente WiFi → se apaga
 #define OTA_DNS_PORT           53
 
-// ── Botón "Enviar log" (opcional, requiere LOG_EMAIL_USER en config.h) ─────────
-// Usa los comandos AT+SMTP* nativos del módem (SIM7000_Series_Email_
-// Application_Note_V1.01) en vez de una librería SMTP — reutiliza el mismo
-// bearer AT+SAPBR que ya abre ensureLbsBearer() para LBS (mismo <cid>=1).
-// Puerto 465 sin confirmar aún en campo con Gmail: la propia documentación
-// de SIMCom lo marca como "el puerto SSL" de AT+SMTPSRV, pero no hay un
-// comando AT+SMTPSSL explícito en este set — si Gmail lo rechaza, lo
-// primero a probar es el puerto 587.
-#if defined(LOG_EMAIL_USER) && defined(OTA_AP_PASSWORD)
-#ifndef LOG_SMTP_SERVER
-#define LOG_SMTP_SERVER "smtp.gmail.com"
-#endif
-#ifndef LOG_SMTP_PORT
-#define LOG_SMTP_PORT 465
-#endif
-// Convierte el LOG_SMTP_PORT numérico a literal de texto en tiempo de
-// compilación, para poder concatenarlo con "" en AT+SMTPSRV=...,<puerto>.
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
-
-// Devuelve true si +SMTPSEND informa código 1 (enviado con éxito) — ver la
-// tabla de códigos en el Application Note (61-68 = distintos fallos de red/
-// autenticación/destinatario).
-static bool sendLogEmail() {
-    ensureLbsBearer();  // mismo AT+SAPBR=1,1 (cid 1) que ya usa el LBS
-    sendAT("AT+EMAILCID=1", "OK", 5000);
-    sendAT("AT+EMAILTO=60", "OK", 5000);
-    sendAT("AT+SMTPSRV=\"" LOG_SMTP_SERVER "\"," STR(LOG_SMTP_PORT), "OK", 5000);
-    sendAT("AT+SMTPAUTH=1,\"" LOG_EMAIL_USER "\",\"" LOG_EMAIL_APP_PASSWORD "\"", "OK", 5000);
-    sendAT("AT+SMTPFROM=\"" LOG_EMAIL_USER "\",\"CanRider\"", "OK", 5000);
-    if (!sendAT("AT+SMTPRCPT=0,0,\"" LOG_EMAIL_TO "\"", "OK", 5000)) return false;
-    sendAT("AT+SMTPSUB=\"CanRider - log\"", "OK", 5000);
-
-    // Cuerpo: las últimas logCount líneas del ring buffer, en orden
-    // cronológico (logNext es la siguiente a escribir = la más antigua
-    // cuando el buffer ya dio la vuelta).
+// ── Log en RAM: se sirve por HTTP, no por email ────────────────────────────────
+// Se probó a enviarlo por email con los comandos AT+SMTP* nativos del módem
+// (SIM7000_Series_Email_Application_Note_V1.01), pero ese set no tiene NINGÚN
+// comando SSL/TLS (a diferencia del AT+EMAILSSL de la serie SIM7070/7080/7090)
+// y Gmail exige TLS siempre — la conexión a smtp.gmail.com falla sin remedio
+// desde este chip. En vez de eso, /log/view sirve el buffer tal cual por
+// HTTP: hay que estar conectado al WiFi del ESP32 para leerlo, pero no depende
+// de nada que el módem no pueda hacer ya.
+static String logBufferText() {
     String body;
     int startIdx = (logCount < LOG_BUF_LINES) ? 0 : logNext;
     for (int i = 0; i < logCount; i++) {
         body += logBuf[(startIdx + i) % LOG_BUF_LINES];
-        body += "\r\n";
+        body += "\n";
     }
-    if (body.length() == 0) body = "(sin lineas registradas todavia)\r\n";
-
-    char cmd[24];
-    snprintf(cmd, sizeof(cmd), "AT+SMTPBODY=%d", body.length());
-    Serial.print(">> "); Serial.println(cmd);
-    SerialAT.println(cmd);
-    if (!waitForAT("DOWNLOAD", 5000)) return false;
-    SerialAT.print(body);
-    if (!waitForAT("OK", 8000)) return false;
-
-    String resp = queryAT("AT+SMTPSEND", "+SMTPSEND:", 30000);
-    logLine("[EMAIL] %s", resp.length() ? resp.c_str() : "sin respuesta de +SMTPSEND");
-    return resp.indexOf("+SMTPSEND: 1") >= 0;
+    if (body.length() == 0) body = "(sin lineas registradas todavia)";
+    return body;
 }
-#endif
 
 static WebServer  otaServer(80);
 static DNSServer  otaDns;
@@ -1427,19 +1370,7 @@ button:disabled{opacity:0.5}
   <hr style="border:0;border-top:1px solid #2b3532;margin:18px 0">
   <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
   <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
-)HTML"
-// Los #if/#endif de dentro de un R"HTML(...)" NO los ve el preprocesador —
-// una cadena raw se tokeniza entera de un tirón antes de que el
-// preprocesador mire línea a línea, así que quedarían como texto literal
-// en la página (visto en campo). Hay que cerrar la cadena, poner el bloque
-// condicional como una cadena adyacente aparte (el compilador concatena
-// literales de cadena consecutivos en una sola constante), y reabrir.
-#if defined(LOG_EMAIL_USER)
-R"HTML(
-  <button id="logbtn" onclick="sendLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Enviar log por email</button>
-)HTML"
-#endif
-R"HTML(
+  <button id="logbtn" onclick="viewLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Ver log</button>
 </div>
 <script>
 function tripPaint(active){
@@ -1460,25 +1391,17 @@ function tripToggle(){
     btn.disabled=false;
   });
 }
-)HTML"
-#if defined(LOG_EMAIL_USER)
-R"HTML(
-function sendLog(){
+function viewLog(){
   var btn=document.getElementById('logbtn');
   btn.disabled=true;
-  var prev=btn.textContent;
-  btn.textContent='Enviando... (puede tardar ~1 min)';
-  fetch('/log/send',{method:'POST'}).then(function(r){return r.text();}).then(function(t){
+  fetch('/log/view').then(function(r){return r.text();}).then(function(t){
     document.getElementById('status').textContent=t;
-    btn.disabled=false;btn.textContent=prev;
+    btn.disabled=false;
   }).catch(function(){
     document.getElementById('status').textContent='No se pudo contactar con el ESP32';
-    btn.disabled=false;btn.textContent=prev;
+    btn.disabled=false;
   });
 }
-)HTML"
-#endif
-R"HTML(
 function up(){
   var f=document.getElementById('f').files[0];
   if(!f){document.getElementById('status').textContent='Elige un archivo .bin primero';return;}
@@ -1573,18 +1496,10 @@ static void otaStartAP() {
                         manualTripActive ? "{\"active\":true}" : "{\"active\":false}");
     });
 
-#if defined(LOG_EMAIL_USER)
-    // Bloqueante (varios AT+SMTP* seguidos, hasta ~1 min) — el propio botón
-    // se deshabilita en el JS mientras espera, y no afecta al resto del
-    // firmware: solo se llama aquí, nunca desde el ciclo normal de
-    // telemetría.
-    otaServer.on("/log/send", HTTP_POST, []() {
+    otaServer.on("/log/view", HTTP_GET, []() {
         otaLastActivity = millis();
-        bool ok = sendLogEmail();
-        otaServer.send(ok ? 200 : 500, "text/plain",
-                        ok ? "OK, log enviado" : "Error al enviar el log (ver Monitor Serie)");
+        otaServer.send(200, "text/plain", logBufferText());
     });
-#endif
 
     otaServer.on("/update", HTTP_POST, []() {
         bool ok = !Update.hasError();
