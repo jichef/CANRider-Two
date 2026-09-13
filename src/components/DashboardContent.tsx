@@ -27,7 +27,7 @@ import {
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Algunos campos CAN (moto_battery, moto_battery_b, bms_charging...) llegan
 // null en una fila cuando esa lectura concreta no se completó a tiempo del
@@ -153,7 +153,7 @@ export default function DashboardContent() {
   // VELOCIDAD o SEÑAL) en el grid de stats.
   const [activeChart, setActiveChart] = useState<'battery' | 'speed' | 'signal' | null>(null);
   const [historyData, setHistoryData] = useState<any[]>([]);
-  const [historyRange, setHistoryRange] = useState<'1h' | '6h' | '24h' | '7d'>('24h');
+  const [historyRange, setHistoryRange] = useState<'1h' | '6h' | '24h' | '7d' | '1m' | '1y'>('24h');
 
   // Histórico para la gráfica desplegada — nada que cargar hasta que se
   // pulse una tarjeta (activeChart !== null), y se recarga entera cada vez
@@ -169,6 +169,8 @@ export default function DashboardContent() {
       else if (historyRange === '6h') startTime.setHours(now.getHours() - 6);
       else if (historyRange === '24h') startTime.setHours(now.getHours() - 24);
       else if (historyRange === '7d') startTime.setDate(now.getDate() - 7);
+      else if (historyRange === '1m') startTime.setMonth(now.getMonth() - 1);
+      else if (historyRange === '1y') startTime.setFullYear(now.getFullYear() - 1);
 
       // Supabase/PostgREST corta a un máximo de filas por consulta (1000 por
       // defecto). Dos problemas distintos si no se filtra por columna:
@@ -191,17 +193,12 @@ export default function DashboardContent() {
         .select(
           activeChart === 'battery' ? 'timestamp, moto_battery, moto_battery_b'
           : activeChart === 'speed'  ? 'timestamp, speed'
-          :                            'timestamp, signal_strength'
+          :                            'timestamp, signal_strength, connection_type'
         )
         .gte('timestamp', startTime.toISOString());
 
       if (activeChart === 'battery') {
         query = query.or('moto_battery.not.is.null,moto_battery_b.not.is.null');
-      } else if (activeChart === 'signal') {
-        // dBm de LTE (AT+CSQ) y de WiFi (RSSI) no son comparables en la
-        // misma escala/línea — se acotan a LTE, la vía real y casi única
-        // (el WiFi de rescate está deshabilitado casi siempre).
-        query = query.eq('connection_type', 'lte');
       }
 
       const { data } = await query.order('timestamp', { ascending: false }).limit(1000);
@@ -212,10 +209,22 @@ export default function DashboardContent() {
           ...(activeChart === 'battery'
             ? { moto_battery: validSoc(d.moto_battery), moto_battery_b: validSoc(d.moto_battery_b) }
             : {}),
+          // dBm de LTE (AT+CSQ) y de WiFi (RSSI) no son comparables en la
+          // misma escala — la línea de señal solo dibuja tramos LTE
+          // (connectNulls salta los huecos de WiFi), y wifiMarker marca
+          // aparte, en su propio eje, cuándo hubo un tramo por WiFi.
+          ...(activeChart === 'signal'
+            ? {
+                signal_strength: d.connection_type === 'lte' ? d.signal_strength : null,
+                wifiMarker: d.connection_type === 'wifi' ? 1 : null,
+              }
+            : {}),
           time: new Date(d.timestamp).toLocaleTimeString('es-ES', {
             hour: '2-digit',
             minute: '2-digit',
-            ...(historyRange === '7d' ? { day: '2-digit', month: '2-digit' } : {}),
+            ...(historyRange !== '1h' && historyRange !== '6h' && historyRange !== '24h'
+              ? { day: '2-digit', month: '2-digit' }
+              : {}),
           }),
         }))
       );
@@ -933,7 +942,7 @@ export default function DashboardContent() {
               </div>
               <div className="flex items-center gap-2 self-start sm:self-auto">
                 <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5">
-                  {(['1h', '6h', '24h', '7d'] as const).map((range) => (
+                  {(['1h', '6h', '24h', '7d', '1m', '1y'] as const).map((range) => (
                     <button
                       key={range}
                       onClick={() => setHistoryRange(range)}
@@ -957,10 +966,10 @@ export default function DashboardContent() {
               </div>
             </div>
 
-            <div className="h-[200px] md:h-[220px]">
+            <div className="h-[200px] md:h-[220px] flex flex-col">
               {activeChart === 'battery' && (
                 historyData.some((d) => d.moto_battery != null || d.moto_battery_b != null) ? (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" className="flex-1 min-h-0">
                     <AreaChart data={historyData}>
                       <defs>
                         <linearGradient id="colorBatA" x1="0" y1="0" x2="0" y2="1">
@@ -989,7 +998,7 @@ export default function DashboardContent() {
 
               {activeChart === 'speed' && (
                 historyData.some((d) => d.speed != null) ? (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" className="flex-1 min-h-0">
                     <AreaChart data={historyData}>
                       <defs>
                         <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
@@ -1012,22 +1021,34 @@ export default function DashboardContent() {
               )}
 
               {activeChart === 'signal' && (
-                historyData.some((d) => d.signal_strength != null) ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={historyData}>
-                      <defs>
-                        <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#e879f9" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#e879f9" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
-                      <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                      <YAxis domain={['dataMin - 5', 'dataMax + 5']} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={36} />
-                      <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
-                      <Area type="monotone" dataKey="signal_strength" name="Señal" stroke="#e879f9" fillOpacity={1} fill="url(#colorSignal)" strokeWidth={2} connectNulls />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                historyData.some((d) => d.signal_strength != null || d.wifiMarker != null) ? (
+                  <>
+                    <ResponsiveContainer width="100%" height="100%" className="flex-1 min-h-0">
+                      <ComposedChart data={historyData}>
+                        <defs>
+                          <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#e879f9" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#e879f9" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
+                        <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                        <YAxis domain={['dataMin - 5', 'dataMax + 5']} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={36} />
+                        {/* Eje oculto 0-1 solo para el marcador de WiFi — no
+                            comparte escala con el dBm de LTE, es un simple
+                            "aquí hubo un tramo por WiFi", no un valor. */}
+                        <YAxis yAxisId="wifi" hide domain={[0, 1]} />
+                        <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                        <Area type="monotone" dataKey="signal_strength" name="Señal LTE" stroke="#e879f9" fillOpacity={1} fill="url(#colorSignal)" strokeWidth={2} connectNulls />
+                        <Line yAxisId="wifi" dataKey="wifiMarker" name="Tramo WiFi" stroke="none" dot={{ r: 3, fill: '#60a5fa', strokeWidth: 0 }} isAnimationActive={false} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                    {historyData.some((d) => d.wifiMarker != null) && (
+                      <p className="shrink-0 mt-1 flex items-center gap-1.5 text-[9px] text-zinc-500 font-mono uppercase">
+                        <span className="inline-block w-2 h-2 rounded-full bg-sky-400" /> tramo con WiFi
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <div className="h-full flex items-center justify-center text-zinc-600 text-[10px] font-mono uppercase tracking-widest text-center px-4">
                     Sin datos de señal en este rango
