@@ -832,27 +832,23 @@ export default function DashboardContent() {
                     onClick={() => sendDeviceCommand('lbs_check')}
                     disabled={!!cmdBusy}
                     title="Forzar una lectura de posición aproximada por celda (LBS) en el dispositivo — tarda hasta ~90s en confirmarse"
-                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold tracking-wider transition-colors disabled:opacity-40 ${
-                      cmdBusy === 'lbs_check'
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                        : 'bg-zinc-800 text-zinc-400 hover:text-white border border-transparent'
-                    }`}
+                    className="p-1.5 rounded-lg bg-zinc-800 transition-colors disabled:opacity-40"
                   >
-                    <RadioTower size={12} className={cmdBusy === 'lbs_check' ? 'animate-pulse' : ''} />
-                    LBS
+                    <RadioTower
+                      size={13}
+                      className={cmdBusy === 'lbs_check' ? 'text-amber-400 animate-pulse' : 'text-zinc-400'}
+                    />
                   </button>
                   <button
                     onClick={() => sendDeviceCommand('gps_reset')}
                     disabled={!!cmdBusy}
                     title="Reiniciar el receptor GPS del dispositivo (por si se queda sin encontrar satélites) — tarda hasta ~90s en confirmarse"
-                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold tracking-wider transition-colors disabled:opacity-40 ${
-                      cmdBusy === 'gps_reset'
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-zinc-800 text-zinc-400 hover:text-white border border-transparent'
-                    }`}
+                    className="p-1.5 rounded-lg bg-zinc-800 transition-colors disabled:opacity-40"
                   >
-                    <RefreshCw size={12} className={cmdBusy === 'gps_reset' ? 'animate-spin' : ''} />
-                    GPS
+                    <RefreshCw
+                      size={13}
+                      className={cmdBusy === 'gps_reset' ? 'text-emerald-400 animate-spin' : 'text-zinc-400'}
+                    />
                   </button>
                 </div>
               )}
