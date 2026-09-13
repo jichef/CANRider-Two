@@ -21,6 +21,7 @@ import {
   WifiLow,
   WifiZero,
   Trash2,
+  X,
 } from 'lucide-react';
 
 import dynamic from 'next/dynamic';
@@ -147,15 +148,19 @@ export default function DashboardContent() {
   const [hasLiveFix, setHasLiveFix] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
 
+  // Qué gráfica de histórico está desplegada — null = ninguna, el panel no
+  // se muestra. Se activa pulsando la tarjeta correspondiente (BATERÍA A/B,
+  // VELOCIDAD o SEÑAL) en el grid de stats.
+  const [activeChart, setActiveChart] = useState<'battery' | 'speed' | 'signal' | null>(null);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [historyRange, setHistoryRange] = useState<'1h' | '6h' | '24h' | '7d'>('24h');
 
-  // Histórico de baterías (moto_battery/moto_battery_b) para la gráfica de
-  // evolución — independiente del estado "en vivo" de arriba, se recarga
-  // entera cada vez que cambia el rango elegido (no hace falta ir
-  // acumulando en tiempo real, a diferencia de la telemetría live).
+  // Histórico para la gráfica desplegada — nada que cargar hasta que se
+  // pulse una tarjeta (activeChart !== null), y se recarga entera cada vez
+  // que cambia el rango o la métrica elegida (no hace falta ir acumulando
+  // en tiempo real, a diferencia de la telemetría live).
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !activeChart) return;
 
     const fetchHistory = async () => {
       const now = new Date();
@@ -176,23 +181,32 @@ export default function DashboardContent() {
       //    — con muchas horas de banco sin moto conectada de por medio,
       //    las 1000 filas más recientes pueden ser todas de hoy con la
       //    batería a null, sin llegar nunca al último dato real (días
-      //    atrás).
-      // .not(...) filtra en la propia consulta a solo filas que sí traen
-      // algún valor de batería — mucho más escasas que la telemetría total,
-      // así que 1000 de ESAS cubre de sobra cualquiera de los rangos.
-      const { data } = await supabase
+      //    atrás). speed/signal_strength sí llegan en cada fila (no
+      //    dependen del CAN), así que no necesitan este filtro — para esos
+      //    dos, "las 1000 más recientes" ya son útiles de por sí, aunque en
+      //    rangos largos con telemetría continua (24h/7d) solo lleguen a
+      //    cubrir las últimas horas en vez del rango completo.
+      let query = supabase
         .from('telemetry')
-        .select('timestamp, moto_battery, moto_battery_b')
-        .gte('timestamp', startTime.toISOString())
-        .or('moto_battery.not.is.null,moto_battery_b.not.is.null')
-        .order('timestamp', { ascending: false })
-        .limit(1000);
+        .select(
+          activeChart === 'battery' ? 'timestamp, moto_battery, moto_battery_b'
+          : activeChart === 'speed'  ? 'timestamp, speed'
+          :                            'timestamp, signal_strength'
+        )
+        .gte('timestamp', startTime.toISOString());
+
+      if (activeChart === 'battery') {
+        query = query.or('moto_battery.not.is.null,moto_battery_b.not.is.null');
+      }
+
+      const { data } = await query.order('timestamp', { ascending: false }).limit(1000);
 
       setHistoryData(
         (data ?? []).slice().reverse().map((d: any) => ({
           ...d,
-          moto_battery: validSoc(d.moto_battery),
-          moto_battery_b: validSoc(d.moto_battery_b),
+          ...(activeChart === 'battery'
+            ? { moto_battery: validSoc(d.moto_battery), moto_battery_b: validSoc(d.moto_battery_b) }
+            : {}),
           time: new Date(d.timestamp).toLocaleTimeString('es-ES', {
             hour: '2-digit',
             minute: '2-digit',
@@ -203,7 +217,7 @@ export default function DashboardContent() {
     };
 
     fetchHistory();
-  }, [supabase, historyRange]);
+  }, [supabase, historyRange, activeChart]);
 
   useEffect(() => {
     const checkStale = () => {
@@ -450,7 +464,8 @@ export default function DashboardContent() {
       icon: Battery,
       color: 'text-emerald-400',
       glow: 'shadow-[0_0_15px_rgba(52,211,153,0.3)]',
-      border: 'border-emerald-500/20'
+      border: 'border-emerald-500/20',
+      chartKey: 'battery' as const,
     },
     {
       label: 'BATERÍA B',
@@ -460,7 +475,8 @@ export default function DashboardContent() {
       icon: Battery,
       color: 'text-teal-400',
       glow: 'shadow-[0_0_15px_rgba(45,212,191,0.3)]',
-      border: 'border-teal-500/20'
+      border: 'border-teal-500/20',
+      chartKey: 'battery' as const,
     },
     {
       label: 'VELOCIDAD',
@@ -470,7 +486,8 @@ export default function DashboardContent() {
       icon: Navigation,
       color: 'text-cyan-400',
       glow: 'shadow-[0_0_15px_rgba(34,211,238,0.3)]',
-      border: 'border-cyan-500/20'
+      border: 'border-cyan-500/20',
+      chartKey: 'speed' as const,
     },
     {
       label: 'SISTEMA',
@@ -480,7 +497,8 @@ export default function DashboardContent() {
       icon: ShieldCheck,
       color: isCharging ? 'text-amber-400' : (telemetry ? 'text-indigo-400' : 'text-zinc-600'),
       glow: isCharging ? 'shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'shadow-[0_0_15px_rgba(129,140,248,0.3)]',
-      border: 'border-indigo-500/20'
+      border: 'border-indigo-500/20',
+      chartKey: null,
     },
     {
       label: 'SEÑAL',
@@ -492,29 +510,42 @@ export default function DashboardContent() {
         ? 'text-fuchsia-400'
         : 'text-zinc-600',
       glow: 'shadow-[0_0_15px_rgba(232,121,249,0.3)]',
-      border: 'border-fuchsia-500/20'
+      border: 'border-fuchsia-500/20',
+      chartKey: 'signal' as const,
     },
   ];
 
-  const StatCard = ({ stat }: { stat: (typeof stats)[0] }) => (
-    <div className={`group bg-zinc-900/40 backdrop-blur-xl border ${stat.border} ${stat.glow} p-3.5 md:p-6 rounded-2xl md:rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60`}>
-      <div className="flex items-center justify-between mb-2.5 md:mb-6">
-        <div className={`p-1.5 md:p-3 rounded-lg md:rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
-          <stat.icon className="w-4 h-4 md:w-[22px] md:h-[22px]" />
-        </div>
-        {stat.pct != null && (
-          <div className="h-1 w-8 md:w-12 bg-zinc-800 rounded-full overflow-hidden">
-            <div className={`h-full bg-current ${stat.color} opacity-70`} style={{ width: `${stat.pct}%` }} />
+  // Las tarjetas con chartKey abren/cierran el panel de histórico de abajo
+  // al pulsarlas (toggle: pulsar la misma otra vez lo cierra). SISTEMA no
+  // tiene gráfica asociada, así que no es clicable.
+  const StatCard = ({ stat }: { stat: (typeof stats)[0] }) => {
+    const clickable = stat.chartKey != null;
+    const isActive = clickable && activeChart === stat.chartKey;
+    return (
+      <div
+        onClick={clickable ? () => setActiveChart(isActive ? null : stat.chartKey) : undefined}
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        className={`group bg-zinc-900/40 backdrop-blur-xl border ${isActive ? 'border-white/50' : stat.border} ${stat.glow} p-3.5 md:p-6 rounded-2xl md:rounded-3xl transition-all hover:scale-[1.02] hover:bg-zinc-900/60 ${clickable ? 'cursor-pointer' : ''}`}
+      >
+        <div className="flex items-center justify-between mb-2.5 md:mb-6">
+          <div className={`p-1.5 md:p-3 rounded-lg md:rounded-2xl bg-zinc-950/50 ${stat.color} border border-white/5`}>
+            <stat.icon className="w-4 h-4 md:w-[22px] md:h-[22px]" />
           </div>
-        )}
+          {stat.pct != null && (
+            <div className="h-1 w-8 md:w-12 bg-zinc-800 rounded-full overflow-hidden">
+              <div className={`h-full bg-current ${stat.color} opacity-70`} style={{ width: `${stat.pct}%` }} />
+            </div>
+          )}
+        </div>
+        <p className="text-[9px] md:text-[10px] font-black tracking-[0.15em] md:tracking-[0.2em] text-zinc-500 mb-0.5 md:mb-1 uppercase truncate">{stat.label}</p>
+        <div className="flex items-baseline gap-1">
+          <h3 className="text-xl md:text-3xl font-black text-white font-mono">{stat.value}</h3>
+          {stat.unit && <span className="text-[10px] md:text-xs font-bold text-zinc-600">{stat.unit}</span>}
+        </div>
       </div>
-      <p className="text-[9px] md:text-[10px] font-black tracking-[0.15em] md:tracking-[0.2em] text-zinc-500 mb-0.5 md:mb-1 uppercase truncate">{stat.label}</p>
-      <div className="flex items-baseline gap-1">
-        <h3 className="text-xl md:text-3xl font-black text-white font-mono">{stat.value}</h3>
-        {stat.unit && <span className="text-[10px] md:text-xs font-bold text-zinc-600">{stat.unit}</span>}
-      </div>
-    </div>
-  );
+    );
+  };
 
   void loading; // usado implícitamente via isConfigured + telemetry===null
 
@@ -651,9 +682,16 @@ export default function DashboardContent() {
 
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8 md:flex-1 md:min-h-0">
+        {/* Mismas 6 columnas y el mismo gap que el grid de stats de arriba
+            (grid-cols-2 lg:grid-cols-6, gap-2.5 md:gap-4) a propósito: con
+            un gap distinto (antes gap-8 aquí vs gap-4 allí), el borde del
+            mapa/historial no coincide con el de SEÑAL aunque la proporción
+            2/3-1/3 sea la misma — el gap no escala igual que las columnas.
+            Compartir ambos valores garantiza que el borde izquierdo de
+            HISTORIAL caiga exactamente donde empieza SEÑAL. */}
+        <div className="grid lg:grid-cols-6 gap-2.5 md:gap-4 md:flex-1 md:min-h-0">
           {/* Mapa — pestaña MAP en móvil */}
-          <div className={`lg:col-span-2 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-full ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
+          <div className={`lg:col-span-4 group bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex-col transition-all hover:border-white/20 h-[calc(100dvh-220px)] md:h-full ${mobileTab === 'map' ? 'flex' : 'hidden md:flex'}`}>
             <div className="p-5 border-b border-white/5 flex items-center justify-between bg-zinc-950/20">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-red-500/10 text-red-500">
@@ -743,7 +781,7 @@ export default function DashboardContent() {
           </div>
 
           {/* Historial de viajes — pestaña TRIPS en móvil */}
-          <div className={`bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl md:h-full md:flex md:flex-col md:overflow-hidden ${mobileTab === 'trips' ? 'block' : 'hidden md:block'}`}>
+          <div className={`lg:col-span-2 bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-6 rounded-3xl shadow-2xl md:h-full md:flex md:flex-col md:overflow-hidden ${mobileTab === 'trips' ? 'block' : 'hidden md:block'}`}>
             <div className="flex items-center justify-between mb-8 md:shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
@@ -854,69 +892,139 @@ export default function DashboardContent() {
           </div>
         </div>
 
-        {/* Histórico de baterías — sección aparte del grid de arriba (map +
-            historial), md:shrink-0 a propósito: al ser hermana de un grid
-            md:flex-1, añadir esta tarjeta hace que el grid (y con él, el
-            mapa) se encoja un poco para dejarle sitio, en vez de desbordar
-            la pantalla — el contenedor de más arriba ya tiene overflow-y
-            para cuando aun así no quepa todo. */}
-        <div className="mt-6 md:mt-6 md:shrink-0 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-5 md:p-6 shadow-2xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500">
-                <Activity size={18} />
+        {/* Panel de histórico — se despliega al pulsar BATERÍA A/B, VELOCIDAD
+            o SEÑAL en el grid de stats de arriba (activeChart). md:shrink-0
+            a propósito: al ser hermana de un grid md:flex-1, desplegar este
+            panel hace que el grid (y con él, el mapa) se encoja un poco
+            para dejarle sitio, en vez de desbordar la pantalla — el
+            contenedor de más arriba ya tiene overflow-y para cuando aun así
+            no quepa todo. */}
+        {activeChart && (
+          <div className="mt-6 md:shrink-0 bg-zinc-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-5 md:p-6 shadow-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${
+                  activeChart === 'battery' ? 'bg-emerald-500/10 text-emerald-400'
+                  : activeChart === 'speed' ? 'bg-cyan-500/10 text-cyan-400'
+                  : 'bg-fuchsia-500/10 text-fuchsia-400'
+                }`}>
+                  {activeChart === 'battery' ? <Battery size={18} /> : activeChart === 'speed' ? <Navigation size={18} /> : <Signal size={18} />}
+                </div>
+                <div>
+                  <h2 className="text-sm md:text-base font-bold text-white uppercase tracking-wider">
+                    {activeChart === 'battery' ? 'Histórico de baterías' : activeChart === 'speed' ? 'Histórico de velocidad' : 'Histórico de señal'}
+                  </h2>
+                  <p className="text-[10px] text-zinc-500 font-mono uppercase">
+                    {activeChart === 'battery' ? 'Evolución de batería A/B' : activeChart === 'speed' ? 'Evolución de la velocidad (km/h)' : 'Evolución de la señal LTE/WiFi (dBm)'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-sm md:text-base font-bold text-white uppercase tracking-wider">Histórico de baterías</h2>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase">Evolución de batería A/B (moto_battery)</p>
-              </div>
-            </div>
-            <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5 self-start sm:self-auto">
-              {(['1h', '6h', '24h', '7d'] as const).map((range) => (
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <div className="flex bg-zinc-950/50 p-1 rounded-xl border border-white/5">
+                  {(['1h', '6h', '24h', '7d'] as const).map((range) => (
+                    <button
+                      key={range}
+                      onClick={() => setHistoryRange(range)}
+                      className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-widest transition-all ${
+                        historyRange === range
+                          ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                          : 'text-zinc-500 hover:text-white'
+                      }`}
+                    >
+                      {range.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={range}
-                  onClick={() => setHistoryRange(range)}
-                  className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-widest transition-all ${
-                    historyRange === range
-                      ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                      : 'text-zinc-500 hover:text-white'
-                  }`}
+                  onClick={() => setActiveChart(null)}
+                  className="p-2 rounded-xl bg-zinc-950/50 border border-white/5 text-zinc-500 hover:text-white transition-colors"
+                  aria-label="Cerrar histórico"
                 >
-                  {range.toUpperCase()}
+                  <X size={14} />
                 </button>
-              ))}
+              </div>
+            </div>
+
+            <div className="h-[200px] md:h-[220px]">
+              {activeChart === 'battery' && (
+                historyData.some((d) => d.moto_battery != null || d.moto_battery_b != null) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={historyData}>
+                      <defs>
+                        <linearGradient id="colorBatA" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#34d399" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="colorBatB" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#2dd4bf" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
+                      <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis domain={[0, 100]} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={28} />
+                      <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                      <Area type="monotone" dataKey="moto_battery" name="Batería A" stroke="#34d399" fillOpacity={1} fill="url(#colorBatA)" strokeWidth={2} connectNulls />
+                      <Area type="monotone" dataKey="moto_battery_b" name="Batería B" stroke="#2dd4bf" fillOpacity={1} fill="url(#colorBatB)" strokeWidth={2} connectNulls />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-zinc-600 text-[10px] font-mono uppercase tracking-widest text-center px-4">
+                    Sin datos de batería en este rango
+                  </div>
+                )
+              )}
+
+              {activeChart === 'speed' && (
+                historyData.some((d) => d.speed != null) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={historyData}>
+                      <defs>
+                        <linearGradient id="colorSpeed" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
+                      <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis domain={[0, 'dataMax + 10']} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={28} />
+                      <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                      <Area type="monotone" dataKey="speed" name="Velocidad" stroke="#22d3ee" fillOpacity={1} fill="url(#colorSpeed)" strokeWidth={2} connectNulls />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-zinc-600 text-[10px] font-mono uppercase tracking-widest text-center px-4">
+                    Sin datos de velocidad en este rango
+                  </div>
+                )
+              )}
+
+              {activeChart === 'signal' && (
+                historyData.some((d) => d.signal_strength != null) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={historyData}>
+                      <defs>
+                        <linearGradient id="colorSignal" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#e879f9" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#e879f9" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
+                      <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis domain={['dataMin - 5', 'dataMax + 5']} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={36} />
+                      <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
+                      <Area type="monotone" dataKey="signal_strength" name="Señal" stroke="#e879f9" fillOpacity={1} fill="url(#colorSignal)" strokeWidth={2} connectNulls />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-zinc-600 text-[10px] font-mono uppercase tracking-widest text-center px-4">
+                    Sin datos de señal en este rango
+                  </div>
+                )
+              )}
             </div>
           </div>
-
-          <div className="h-[200px] md:h-[220px]">
-            {historyData.some((d) => d.moto_battery != null || d.moto_battery_b != null) ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={historyData}>
-                  <defs>
-                    <linearGradient id="colorBatA" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#34d399" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorBatB" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2dd4bf" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff0d" vertical={false} />
-                  <XAxis dataKey="time" stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                  <YAxis domain={[0, 100]} stroke="#ffffff30" fontSize={10} tickLine={false} axisLine={false} width={28} />
-                  <Tooltip contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '10px' }} />
-                  <Area type="monotone" dataKey="moto_battery" name="Batería A" stroke="#34d399" fillOpacity={1} fill="url(#colorBatA)" strokeWidth={2} connectNulls />
-                  <Area type="monotone" dataKey="moto_battery_b" name="Batería B" stroke="#2dd4bf" fillOpacity={1} fill="url(#colorBatB)" strokeWidth={2} connectNulls />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-zinc-600 text-[10px] font-mono uppercase tracking-widest text-center px-4">
-                Sin datos de batería en este rango
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Navegación inferior (móvil) — cambia qué sección se muestra arriba */}
