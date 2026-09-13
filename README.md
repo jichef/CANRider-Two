@@ -61,7 +61,7 @@ El ESP32 actúa como ECU secundaria: escucha tramas del bus CAN y emite la trama
 | **Conversor DC-DC de alta tensión a USB** | Debe aguantar la tensión de la batería principal del vehículo (48-72V en muchas eléctricas) — alimenta el ESP32 directamente desde la moto ([ejemplo: DC 8-85V a 5V/3A USB](https://www.amazon.es/dp/B09GFBB47L)) |
 | **Acceso al bus CAN del vehículo** | Cable directo a CAN-H / CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω). En muchos vehículos, alimentación + CAN-H/CAN-L están disponibles juntos en el conector de la ECU original |
 
-También es compatible con el **LilyGo T-A7670G** (más velocidad de datos LTE Cat-1) — [tienda oficial](https://lilygo.cc/products/t-sim-a7670e) (elige la variante «A7670G» en el desplegable, no la E ni la SA), también en AliExpress —, pero su variante estándar no lleva GPS integrado — necesita un módulo GPS externo (p.ej. Quectel L76K) aparte, con su propio cableado. Si no tienes ese módulo, usa el T-SIM7000G.
+También es compatible con el **LilyGo T-A7670G** (más velocidad de datos LTE Cat-1) — [tienda oficial](https://lilygo.cc/products/t-sim-a7670e) (elige la variante «A7670G» en el desplegable, no la E ni la SA), también en AliExpress — no te olvides seleccionar la que incluye GPS (with GPS).
 
 ### Conexiones (bus CAN)
 
