@@ -213,6 +213,14 @@
 // si la moto se enciende a mitad de la ventana. Si el WiFi de arriba ya
 // está conectado para telemetría, no se interrumpe para levantar el AP.
 //
+// La misma página incluye un botón "Iniciar viaje (sin CAN)" — guarda un
+// viaje por GPS (con sus waypoints) sin depender de ninguna trama CAN, para
+// cuando el ESP32 no va montado en la moto (p.ej. en una bici). Se cierra
+// solo (sin volver a tocar el botón) a los 5 min sin superar 5 km/h reales
+// de GPS, así que no hace falta tener el móvil cerca del AP al terminar.
+// Mientras está activo, el movimiento GPS no cuenta como posible
+// sustracción (ver moving_without_can más abajo) — es intencional.
+//
 // Usa una contraseña propia de al menos 8 caracteres — es un secreto igual
 // que SUPABASE_KEY, no la compartas ni la subas a git.
 
