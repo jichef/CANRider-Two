@@ -20,9 +20,9 @@ Este proyecto se publica **tal cual («as is»), sin garantía de ningún tipo**
 - **Emite una trama CAN**: la hora sincronizada por red, para la pantalla del vehículo — y **nunca nada más** que eso
 - **Envía telemetría** cada 15 segundos a Supabase, por LTE siempre disponible o por **WiFi preferente** (opcional) cuando hay una red conocida al alcance — más barato y estable; vuelve a LTE solo si el WiFi deja de estar disponible
 - **Posición GPS**, con respaldo automático por triangulación de celda (LBS, vía `AT+CLBS`) si no hay fix GPS — el portal marca esas posiciones como aproximadas y dibuja un círculo con el radio de precisión estimado
-- **Registra viajes** automáticamente: empiezan con la primera trama CAN (moto encendida) y terminan cuando el bus lleva 8s en silencio (moto apagada) — distancia, velocidad máxima, consumo de batería y la traza real del recorrido (para pintarla en el mapa coloreada por velocidad; se guardan hasta 300 puntos por viaje, ~75 min a un punto cada 15s — pasado eso, el resto del viaje sigue contando para distancia/duración pero no se añaden más puntos al dibujo). También se puede guardar un viaje **sin CAN** (p.ej. en bici) a mano desde el portal cautivo de OTA — ver más abajo
-- **Detección de sustracción**: si el GPS mide movimiento real (≥5 km/h) mientras el bus CAN lleva rato en silencio, no hay explicación normal — la moto no se mueve sola apagada. Puede ser indicio de que la están transportando sin la llave (no se activa durante un viaje manual sin CAN, ver arriba: ese movimiento es intencional). El portal muestra una alerta roja bien visible en cuanto se detecta
-- **Actualización de firmware por WiFi (OTA, opcional)**: al apagar la moto, levanta su propio WiFi con un portal cautivo para subir un nuevo firmware, reiniciar el ESP32, o iniciar/detener un viaje manual sin CAN — sin cable, sin Arduino IDE, sin Bluetooth ni ninguna app
+- **Registra viajes** automáticamente: empiezan con la primera trama CAN (moto encendida) y terminan cuando el bus lleva 8s en silencio (moto apagada) — distancia, velocidad máxima, consumo de batería y la traza real del recorrido (para pintarla en el mapa coloreada por velocidad; se guardan hasta 300 puntos por viaje, ~75 min a un punto cada 15s — pasado eso, el resto del viaje sigue contando para distancia/duración pero no se añaden más puntos al dibujo). También se registra un viaje si hay movimiento real **sin CAN** (p.ej. llevando el dispositivo en una bici, o una sustracción) — arranca solo en cuanto el GPS mide movimiento, sin pulsar nada, ver más abajo
+- **Detección de sustracción**: si el GPS mide movimiento real (≥5 km/h) mientras el bus CAN lleva rato en silencio, no hay explicación normal — la moto no se mueve sola apagada. Puede ser indicio de que la están transportando sin la llave, o simplemente que el dispositivo se está usando a propósito en algo sin CAN — en ambos casos se graba el recorrido igualmente, así que el propio movimiento ya sirve de "autorización" sin necesitar distinguirlos. El portal muestra una alerta roja bien visible en cuanto se detecta
+- **Actualización de firmware por WiFi (OTA, opcional)**: al apagar la moto, levanta su propio WiFi con un portal cautivo para subir un nuevo firmware o reiniciar el ESP32 — sin cable, sin Arduino IDE, sin Bluetooth ni ninguna app
 - **Panel web** en tiempo real con mapa (círculo de precisión cuando la posición es aproximada por LBS), historial de viajes (con opción de eliminarlos), indicadores de conexión y batería en gris cuando el dispositivo lleva más de 2 min sin reportar, y **gráficas de histórico** (batería A/B, velocidad, señal LTE con marcador de tramos WiFi) desplegables en un modal al pulsar la tarjeta correspondiente, con rango seleccionable (1H/6H/24H/7D/1M/1A)
 - **Integración con Home Assistant** opcional (`custom_components/can_rider`)
 
@@ -156,7 +156,7 @@ Si cambias variables de entorno después del primer deploy, tienes que forzar un
 
 Copia la carpeta `custom_components/can_rider` a tu instalación de Home Assistant (`config/custom_components/`), reinicia HA, y añade la integración desde **Ajustes → Dispositivos y servicios → Añadir integración → CanRider**. Te pedirá la URL y anon key de Supabase, el `VEHICLE_ID` y el modelo de placa.
 
-Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red, seguimiento GPS (`device_tracker`), estado de carga (`binary_sensor`) y datos del último viaje. También incluye el sensor **«Movimiento Sin CAN»** (`binary_sensor`, clase `tamper`): se activa si el GPS mide movimiento real con el bus CAN en silencio (moto apagada) — útil para montar una automatización de aviso ante una posible sustracción.
+Expone: batería A y B de la moto, batería del ESP32, velocidad, señal de red, seguimiento GPS (`device_tracker`), estado de carga (`binary_sensor`) y datos del último viaje. También incluye el sensor **«Movimiento Sin CAN»** (`binary_sensor`, clase `tamper`): se activa si el GPS mide movimiento real con el bus CAN en silencio (moto apagada) — útil para montar una automatización de aviso ante una posible sustracción. Se activa igual si el movimiento es intencional (dispositivo llevado a propósito en algo sin CAN); en ambos casos el recorrido queda grabado como un viaje.
 
 ---
 
@@ -170,13 +170,11 @@ Si configuraste `OTA_AP_PASSWORD` en el paso 3, no hace falta abrir la moto ni u
 
 El AP se apaga solo a los 4 min sin actividad HTTP, o 2 min tras desconectarse el último cliente (lo que llegue antes), o de inmediato si enciendes la moto a mitad de la ventana — nunca se puede actualizar con el vehículo en marcha. Si el WiFi de telemetría del paso 3 ya está conectado en ese momento, el AP de OTA no se levanta hasta que se libere la antena (comparten el mismo radio WiFi). Mientras el bus CAN siga en silencio, el AP se vuelve a levantar solo tras cada apagado por tiempo — sigue disponible aunque hayan pasado varios ciclos de 4 minutos sin que nadie se conecte.
 
-### Viaje manual sin CAN (opcional)
+La misma página incluye dos botones de diagnóstico: **"Ver log"** (muestra en el propio portal las últimas líneas de estado del firmware: arranque de red, resultado de cada intento de posición, éxito/fallo de cada envío) y **"Comprobar LBS ahora"** (fuerza un intento de posición aproximada por celda en el momento, sin esperar al ciclo automático).
 
-La misma página de OTA incluye un botón **"Iniciar viaje (sin CAN)"** — pensado para cuando el ESP32 no va montado en la moto (p.ej. llevándolo en una bici de prueba, o cualquier uso sin bus CAN al que conectarse). Funciona como un viaje normal: guarda waypoints reales por GPS, distancia, velocidad máxima y la traza para el mapa — solo que el inicio/fin no depende de tramas CAN.
+### Viaje sin CAN (p.ej. en bici, o sustracción)
 
-- **Iniciar**: pulsa el botón antes de salir. No hace falta quedarse conectado al AP — el viaje sigue grabándose por LTE aunque te alejes y pierdas el WiFi.
-- **Detener**: si vuelves a tener alcance del AP (se relanza solo mientras el CAN siga en silencio), pulsa el mismo botón para cerrarlo al momento.
-- **Cierre automático**: si no vuelves a pulsarlo, el viaje se cierra solo a los 5 minutos sin que el GPS marque más de 5 km/h reales — llegar a destino y parar ya lo termina, sin depender de tener el móvil a mano.
+No hace falta pulsar nada: en cuanto el GPS mide movimiento real (≥5 km/h) con el bus CAN en silencio, se empieza a grabar un viaje automáticamente — igual de válido si es el dispositivo usado a propósito en algo sin CAN (una bici) que si es una sustracción real, ya que en ambos casos interesa saber por dónde se movió. Guarda waypoints reales por GPS, distancia, velocidad máxima y la traza para el mapa, igual que un viaje normal — solo que el inicio/fin no depende de tramas CAN, sino de si hay movimiento real: se cierra solo a los 5 minutos sin superar esos 5 km/h.
 
 ---
 
@@ -217,11 +215,10 @@ Encendido
     │               AT+CBC del módem, poco fiable) y señal de red
     │            3. Construye JSON con los datos CAN acumulados
     │            4. Si hay movimiento GPS con el bus CAN en silencio,
-    │               marca moving_without_can (posible sustracción) —
-    │               salvo que sea un viaje manual sin CAN en marcha
+    │               marca moving_without_can (posible sustracción)
     │            5. HTTP POST → Supabase /telemetry
     │            6. Gestiona inicio/fin de viaje según actividad del bus
-    │               CAN (o el botón de viaje manual, ver OTA más abajo)
+    │               CAN, o movimiento GPS real sin CAN (ver más abajo),
     │               y acumula la traza del recorrido (lat/lon/velocidad
     │               por punto)
     │
@@ -239,7 +236,7 @@ máquina de estados ni espera a que termine):
   · AP OTA opcional — en cuanto el bus CAN queda en silencio (moto
     apagada), si hay contraseña configurada, levanta el WiFi CanRiderTwo
     con portal cautivo para actualizar firmware, reiniciar en remoto, o
-    iniciar/detener un viaje manual sin CAN
+    ver el log/comprobar el LBS en el momento
 ```
 
 ---

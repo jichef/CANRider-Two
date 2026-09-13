@@ -629,13 +629,13 @@
         <li><b>GPS positioning</b>, with <b>cell-tower triangulation (LBS)</b> as a fallback when there's no satellite coverage — every reading indicates which source it came from</li>
         <li><b>Network time with the correct time zone</b> (taken from the carrier, corrects for daylight saving) — and doesn't transmit the time over CAN until it's valid, so it never sends a clock full of garbage data</li>
         <li><b>Sends telemetry every 15 seconds</b> to Supabase: position, speed, the ESP32's own battery (read from the ESP32's own ADC, not the modem — more reliable), signal strength, and every CAN signal it read</li>
-        <li><b>Detects the start and end of each trip from the CAN bus itself</b> — bike on = frames on the bus, bike off = silence — instead of from GPS speed; it stores distance, top speed, duration, battery used and the actual route track. A trip can also be started/stopped <b>by hand, without CAN</b> (e.g. carrying the ESP32 on a bicycle) from the same OTA update page — it closes itself if you don't press the button again</li>
-        <li><b>Flags movement without CAN</b>: if the GPS measures real movement while the CAN bus has been silent for several seconds (bike off), it's flagged as possible theft — the bike doesn't move on its own while switched off (unless it's the manual trip above — that movement is intentional). The portal shows a clearly visible red alert as soon as this happens</li>
+        <li><b>Detects the start and end of each trip from the CAN bus itself</b> — bike on = frames on the bus, bike off = silence — instead of from GPS speed; it stores distance, top speed, duration, battery used and the actual route track. A CAN-less trip is also recorded automatically as soon as the GPS measures real movement (e.g. carrying the ESP32 on a bicycle, or a theft) — no button to press, it closes itself once movement stops</li>
+        <li><b>Flags movement without CAN</b>: if the GPS measures real movement while the CAN bus has been silent for several seconds (bike off), it's flagged as possible theft — the bike doesn't move on its own while switched off. It fires the same way for intentional movement (the ESP32 used on purpose somewhere without CAN) — either way the route gets recorded. The portal shows a clearly visible red alert as soon as this happens</li>
         <li><b>Handles unstable roaming</b> — retries with backoff between failures and a full network reconnect after consecutive failures, instead of hammering the carrier's network</li>
         <li><b>LBS position fallback</b> (cell-tower triangulation) when there's no GPS coverage — the portal flags it as approximate and draws a circle on the map with the estimated accuracy radius</li>
         <li><b>WiFi preferred over LTE (optional)</b> — if you configure known networks, they're used whenever in range instead of LTE (cheaper and more stable); falls back to LTE on its own once out of range</li>
         <li><b>Two boards supported</b> — LilyGo T-SIM7000G and T-A7670G — with the pins for each already sorted out: just pick which one you have in <code>config.h</code></li>
-        <li><b>Optional OTA update</b> — the moment you switch off, brings up its own WiFi with a captive portal (the page opens itself when you connect) to upload new firmware, reboot the ESP32, or start/stop the manual CAN-less trip — no cable, Arduino IDE, Bluetooth, or app required</li>
+        <li><b>Optional OTA update</b> — the moment you switch off, brings up its own WiFi with a captive portal (the page opens itself when you connect) to upload new firmware, reboot the ESP32, view the status log, or force an LBS check on the spot — no cable, Arduino IDE, Bluetooth, or app required</li>
       </ul>
     </section>
 
@@ -1057,7 +1057,7 @@
         <li>Switch the bike off. Once the CAN bus has been silent for a few seconds (the same moment a trip closes), the ESP32 brings up its own WiFi called <code>CanRiderTwo</code>.</li>
         <li>On your phone or computer, connect to that WiFi network using the password you set in <code>OTA_AP_PASSWORD</code>.</li>
         <li>Your device should open the update page on its own, the way it does when you join a coffee shop or airport WiFi. If it doesn't, open <code>http://192.168.4.1/</code> in a browser manually.</li>
-        <li>You'll see three buttons: one to upload a <code>.bin</code> file and flash new firmware, one to simply reboot the ESP32 remotely, and a third to start/stop a manual trip (see the note below).</li>
+        <li>You'll see several buttons: one to upload a <code>.bin</code> file and flash new firmware, one to reboot the ESP32 remotely, one to view the firmware's status log, and one to force an LBS check on the spot.</li>
       </ol>
 
       <p>To generate the <code>.bin</code> file for the step above: in Arduino IDE, with <code>main/main.ino</code> open, go to <span class="ui-path">Sketch → Export Compiled Binary</span>. The file appears inside the <code>main/</code> folder.</p>
@@ -1069,7 +1069,12 @@
 
       <div class="callout note">
         <span class="k">Bonus: CAN-less trip (e.g. on a bicycle)</span>
-        <p>The <b>"Iniciar viaje (sin CAN)"</b> ("Start trip, no CAN") button on that same page saves a trip by GPS, with its waypoints, without depending on any CAN frame — meant for when the ESP32 isn't mounted on the bike. Press it before heading out; you don't need to stay connected to the WiFi, the trip keeps recording over LTE even as you move away. To close it: press the same button if you're back in WiFi range, or just wait — it closes itself after 5 minutes without the GPS reporting more than 5 km/h of real movement.</p>
+        <p>Nothing to press: as soon as the GPS measures real movement with no CAN frames at all (say, carrying the ESP32 on a bicycle), a trip is saved automatically, with its waypoints — just like a normal one, except start/end depend on movement instead of the CAN bus. You don't need to stay connected to the WiFi, it keeps recording over LTE even as you move away. It closes itself after 5 minutes without the GPS reporting more than 5 km/h of real movement.</p>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">View log and check LBS</span>
+        <p>The <b>"Ver log"</b> ("View log") button shows the firmware's latest status lines right on the page — network boot, each position attempt's result, each telemetry send's success/failure — handy for diagnosing without a cable or Serial Monitor. The <b>"Comprobar LBS ahora"</b> ("Check LBS now") button forces a cell-tower position attempt on the spot, without waiting for the automatic cycle.</p>
       </div>
 
       <div class="callout warn">
@@ -1090,7 +1095,7 @@
         <li>Fill in your Supabase URL and anon key, the <code>VEHICLE_ID</code>, and the board model.</li>
       </ol>
 
-      <p>You'll get sensors for the bike's Battery A and B, charging status, ESP32 battery, speed, signal strength, GPS tracking, last-trip data, and a "movement without CAN" binary sensor so you can build your own alert (a phone notification, a siren...) if the bike moves while switched off.</p>
+      <p>You'll get sensors for the bike's Battery A and B, charging status, ESP32 battery (and whether it's on USB), speed, signal strength, connection type (WiFi/LTE), GPS tracking with its accuracy (lower when it comes from LBS) and source, last-trip data (distance, duration, start/end battery, consumption, top speed), and two binary sensors for possible theft: a raw "movement without CAN" one (turns off as soon as it's no longer detected) and an "alarm" one that stays on until you silence it by hand with the "Silence Theft Alarm" button or until real movement with the CAN bus alive is detected again.</p>
     </section>
 
     <!-- TROUBLESHOOTING -->

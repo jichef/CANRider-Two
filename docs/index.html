@@ -629,13 +629,13 @@
         <li><b>Posición por GPS</b>, con <b>triangulación por antena de red (LBS)</b> como reserva cuando no hay cobertura de satélites — cada lectura indica de qué fuente viene</li>
         <li><b>Hora de red con huso horario correcto</b> (la toma del operador, corrige horario de verano/invierno) — y no transmite la hora al CAN hasta que es válida, para no mandar un reloj con datos basura</li>
         <li><b>Envía telemetría cada 15 segundos</b> a Supabase: posición, velocidad, batería del propio ESP32 (leída por el ADC del ESP32, no por el módem — más fiable), señal de red, y todas las señales CAN leídas</li>
-        <li><b>Detecta inicio y fin de cada viaje por el propio bus CAN</b> — moto encendida = tramas en el bus, apagada = silencio — en vez de por velocidad GPS; guarda distancia, velocidad máxima, duración, batería consumida y la traza real del recorrido. También se puede iniciar/detener un viaje <b>a mano, sin CAN</b> (p.ej. llevando el ESP32 en una bici) desde la misma página de actualización OTA — se cierra solo si no vuelves a tocar el botón</li>
-        <li><b>Avisa de movimiento sin CAN</b>: si el GPS mide que la moto se mueve mientras el bus CAN lleva varios segundos en silencio (apagada), lo marca como posible sustracción — la moto no se mueve sola apagada (salvo que sea el viaje manual de arriba, ese movimiento es intencional). El portal muestra una alerta roja bien visible en cuanto pasa</li>
+        <li><b>Detecta inicio y fin de cada viaje por el propio bus CAN</b> — moto encendida = tramas en el bus, apagada = silencio — en vez de por velocidad GPS; guarda distancia, velocidad máxima, duración, batería consumida y la traza real del recorrido. También se registra un viaje sin CAN automáticamente en cuanto el GPS mide movimiento real (p.ej. llevando el ESP32 en una bici, o una sustracción) — sin pulsar nada, se cierra solo al dejar de moverse</li>
+        <li><b>Avisa de movimiento sin CAN</b>: si el GPS mide que la moto se mueve mientras el bus CAN lleva varios segundos en silencio (apagada), lo marca como posible sustracción — la moto no se mueve sola apagada. Se activa igual si el movimiento es intencional (el ESP32 usado a propósito en algo sin CAN); en ambos casos el recorrido queda grabado. El portal muestra una alerta roja bien visible en cuanto pasa</li>
         <li><b>Aguanta roaming inestable</b> — reintentos con espera entre fallos y reconexión completa de red tras fallos consecutivos, en vez de machacar la red del operador</li>
         <li><b>Respaldo de posición por LBS</b> (triangulación de celda) cuando no hay cobertura GPS — el portal lo marca como aproximado y dibuja un círculo con el radio de precisión estimado en el mapa</li>
         <li><b>WiFi preferente sobre LTE (opcional)</b> — si configuras redes conocidas, se usan en cuanto estén al alcance en vez de la LTE (más barato y estable); si dejan de estarlo, vuelve a LTE solo</li>
         <li><b>Dos placas soportadas</b> — LilyGo T-SIM7000G y T-A7670G — con los pines de cada una ya resueltos: solo hay que elegir cuál tienes en <code>config.h</code></li>
-        <li><b>Actualización OTA opcional</b> — al apagar la moto, levanta un WiFi propio con portal cautivo (la página se abre sola al conectarte) para subir el nuevo firmware, reiniciar el ESP32, o iniciar/detener el viaje manual sin CAN — sin cable ni Arduino IDE, sin Bluetooth ni ninguna app</li>
+        <li><b>Actualización OTA opcional</b> — al apagar la moto, levanta un WiFi propio con portal cautivo (la página se abre sola al conectarte) para subir el nuevo firmware, reiniciar el ESP32, ver el log de estado o comprobar el LBS en el momento — sin cable ni Arduino IDE, sin Bluetooth ni ninguna app</li>
       </ul>
     </section>
 
@@ -1054,7 +1054,7 @@
         <li>Apaga la moto. En cuanto el bus CAN lleva unos segundos en silencio (el mismo momento en que se cierra el viaje), el ESP32 levanta su propio WiFi llamado <code>CanRiderTwo</code>.</li>
         <li>En tu móvil u ordenador, conéctate a esa red WiFi con la contraseña que pusiste en <code>OTA_AP_PASSWORD</code>.</li>
         <li>El propio dispositivo debería abrir la página de actualización solo, como al conectarte al WiFi de una cafetería o un aeropuerto. Si no se abre sola, entra a mano en el navegador a <code>http://192.168.4.1/</code>.</li>
-        <li>Verás tres botones: uno para subir un archivo <code>.bin</code> y actualizar el firmware, otro para simplemente reiniciar el ESP32 en remoto, y un tercero para iniciar/detener un viaje manual (ver siguiente aviso).</li>
+        <li>Verás varios botones: uno para subir un archivo <code>.bin</code> y actualizar el firmware, otro para reiniciar el ESP32 en remoto, uno para ver el log de estado del firmware, y otro para forzar una comprobación de LBS en el momento.</li>
       </ol>
 
       <p>Para generar el <code>.bin</code> que subes en el paso anterior: en Arduino IDE, con <code>main/main.ino</code> abierto, ve a <span class="ui-path">Sketch → Export Compiled Binary</span>. El archivo aparece en la carpeta <code>main/</code>.</p>
@@ -1066,7 +1066,12 @@
 
       <div class="callout note">
         <span class="k">Bonus: viaje sin CAN (p.ej. en bici)</span>
-        <p>El botón <b>"Iniciar viaje (sin CAN)"</b> de esa misma página guarda un viaje por GPS, con sus waypoints, sin depender de ninguna trama CAN — pensado para cuando el ESP32 no va montado en la moto. Pulsa el botón antes de salir; no hace falta quedarse conectado al WiFi, el viaje sigue grabándose por LTE aunque te alejes. Para cerrarlo: pulsa el mismo botón si vuelves a tener alcance del WiFi, o simplemente espera — se cierra solo a los 5 minutos sin que el GPS marque más de 5 km/h reales.</p>
+        <p>No hace falta pulsar nada: en cuanto el GPS mide movimiento real sin ninguna trama CAN (por ejemplo, llevando el ESP32 en una bici), se guarda un viaje automáticamente, con sus waypoints — igual que uno normal, solo que el inicio/fin depende del movimiento y no del bus CAN. No hace falta quedarse conectado al WiFi, sigue grabándose por LTE aunque te alejes. Se cierra solo a los 5 minutos sin que el GPS marque más de 5 km/h reales.</p>
+      </div>
+
+      <div class="callout tip">
+        <span class="k">Ver log y comprobar LBS</span>
+        <p>El botón <b>"Ver log"</b> muestra en la propia página las últimas líneas de estado del firmware (arranque de red, resultado de cada intento de posición, éxito/fallo de cada envío) — útil para diagnosticar sin cable ni Monitor Serie. El botón <b>"Comprobar LBS ahora"</b> fuerza un intento de posición aproximada por celda en el momento, sin esperar al ciclo automático.</p>
       </div>
 
       <div class="callout warn">
@@ -1087,7 +1092,7 @@
         <li>Rellena la URL y anon key de Supabase, el <code>VEHICLE_ID</code> y el modelo de placa.</li>
       </ol>
 
-      <p>Aparecerán sensores de batería A y B de la moto, estado de carga, batería del ESP32, velocidad, señal de red, seguimiento GPS, datos del último viaje, y un sensor binario de "movimiento sin CAN" para montar tu propia alerta (notificación al móvil, sirena...) si la moto se mueve estando apagada.</p>
+      <p>Aparecerán sensores de batería A y B de la moto, estado de carga, batería del ESP32 (y si está en USB), velocidad, señal de red, tipo de conexión (WiFi/LTE), seguimiento GPS con su precisión (menor si viene de LBS) y su origen, datos del último viaje (distancia, duración, batería inicial/final, consumo, velocidad máxima), y dos sensores binarios para posible sustracción: uno con la lectura tal cual ("movimiento sin CAN", se apaga solo en cuanto deja de detectarse) y una "alarma" que se queda encendida hasta que se silencia a mano con el botón "Silenciar Alarma de Robo" o hasta que se detecta movimiento real con el bus CAN otra vez.</p>
     </section>
 
     <!-- PROBLEMAS -->
