@@ -1355,7 +1355,10 @@ input[type=file]{width:100%;margin-bottom:16px;color:#e7efea}
 button{width:100%;background:#167a70;color:#fff;border:0;border-radius:8px;padding:12px;
        font-size:14px;font-weight:600;cursor:pointer}
 button:disabled{opacity:0.5}
-#status{margin-top:16px;font-size:13px;color:#7fa79e;white-space:pre-wrap}
+#status{margin-top:16px;font-size:12px;line-height:1.5;font-family:Menlo,Consolas,'Liberation Mono',monospace;
+        color:#8fe3a0;background:#0a0f0d;border:1px solid #2b3532;border-radius:8px;padding:10px 12px;
+        white-space:pre-wrap;word-break:break-word;max-height:220px;overflow-y:auto}
+#status:empty{display:none;border:0;padding:0}
 #bar{height:6px;background:#2b3532;border-radius:3px;overflow:hidden;margin-top:12px;display:none}
 #bar div{height:100%;width:0;background:#167a70;transition:width .2s}
 </style></head><body>
