@@ -1427,9 +1427,19 @@ button:disabled{opacity:0.5}
   <hr style="border:0;border-top:1px solid #2b3532;margin:18px 0">
   <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
   <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
+)HTML"
+// Los #if/#endif de dentro de un R"HTML(...)" NO los ve el preprocesador —
+// una cadena raw se tokeniza entera de un tirón antes de que el
+// preprocesador mire línea a línea, así que quedarían como texto literal
+// en la página (visto en campo). Hay que cerrar la cadena, poner el bloque
+// condicional como una cadena adyacente aparte (el compilador concatena
+// literales de cadena consecutivos en una sola constante), y reabrir.
 #if defined(LOG_EMAIL_USER)
+R"HTML(
   <button id="logbtn" onclick="sendLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Enviar log por email</button>
+)HTML"
 #endif
+R"HTML(
 </div>
 <script>
 function tripPaint(active){
@@ -1450,7 +1460,9 @@ function tripToggle(){
     btn.disabled=false;
   });
 }
+)HTML"
 #if defined(LOG_EMAIL_USER)
+R"HTML(
 function sendLog(){
   var btn=document.getElementById('logbtn');
   btn.disabled=true;
@@ -1464,7 +1476,9 @@ function sendLog(){
     btn.disabled=false;btn.textContent=prev;
   });
 }
+)HTML"
 #endif
+R"HTML(
 function up(){
   var f=document.getElementById('f').files[0];
   if(!f){document.getElementById('status').textContent='Elige un archivo .bin primero';return;}
