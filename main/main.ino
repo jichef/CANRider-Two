@@ -658,10 +658,16 @@ static void ensureLbsBearer() {
     logLine("[LBS] Bearer SAPBR: config=%s abrir=%s", ok ? "ok" : "FALLO", opened ? "ok" : "ya-activo/fallo");
 }
 
-static void readLBS() {
-    static uint32_t lastTry = 0;
-    if (millis() - lastTry < 60000) return;
-    lastTry = millis();
+static uint32_t lbsLastTry = 0;
+
+// Un solo intento de LBS, sin mirar el límite de 1/60s — lo usa tanto
+// readLBS() (que sí respeta ese límite) como el botón manual "Comprobar
+// LBS ahora" del portal OTA (donde una pulsación explícita del usuario no
+// necesita protección contra sí misma). Devuelve un resumen en texto para
+// mostrar directamente en el portal, además de dejar las mismas líneas de
+// siempre en el log en RAM.
+static String doLbsAttempt() {
+    lbsLastTry = millis();
 
     ensureLbsBearer();
     // Se guarda junto al intento de LBS para poder comparar, la próxima vez
@@ -671,10 +677,15 @@ static void readLBS() {
     // simplemente sigue acampado en la misma celda de siempre (reselección
     // perezosa), que es indistinguible mirando solo la coordenada.
     String cpsi = queryAT("AT+CPSI?", "+CPSI:", 5000);
-    logLine("[CELL] %s", cpsi.length() ? cpsi.c_str() : "sin respuesta de AT+CPSI");
+    String cpsiLine = cpsi.length() ? cpsi : "(sin respuesta de AT+CPSI)";
+    logLine("[CELL] %s", cpsiLine.c_str());
+
     String resp = queryAT("AT+CLBS=1,1", "+CLBS:", 10000);
     int colon = resp.indexOf(':');
-    if (colon < 0) { logLine("[LBS] Sin respuesta de AT+CLBS"); return; }
+    if (colon < 0) {
+        logLine("[LBS] Sin respuesta de AT+CLBS");
+        return cpsiLine + "\nSin respuesta de AT+CLBS";
+    }
     String d = resp.substring(colon + 2); d.trim();
 
     String f[4]; int fi = 0, prev = 0;
@@ -687,11 +698,13 @@ static void readLBS() {
     // haberse notado porque CLBS nunca había llegado a tener éxito para
     // poder comprobarlo.
     if (fi < 3 || f[0] != "0") {
-        logLine("[LBS] +CLBS código %s (0=éxito; ver tabla locationcode del Application Note)",
-                fi > 0 ? f[0].c_str() : "?");
-        return;
+        String msg = "+CLBS código " + (fi > 0 ? f[0] : String("?")) +
+                     " (0=éxito; ver tabla locationcode del Application Note)";
+        logLine("[LBS] %s", msg.c_str());
+        return cpsiLine + "\n" + msg;
     }
-    logLine("[LBS] OK lon=%s lat=%s acc=%sm", f[1].c_str(), f[2].c_str(), fi >= 4 ? f[3].c_str() : "?");
+    String okMsg = "LBS OK lon=" + f[1] + " lat=" + f[2] + " acc=" + (fi >= 4 ? f[3] : String("?")) + "m";
+    logLine("[LBS] %s", okMsg.c_str());
 
     // Ojo: no se toca t.capturedAt aquí — solo posición, no hora. Si se
     // pisara con millis() actual sin también avanzar hour/min/sec, el
@@ -705,6 +718,13 @@ static void readLBS() {
     t.lat       = f[2].toFloat();
     t.speed_kmh = 0;  // LBS no da velocidad; no arrastrar la última del GPS
     storeTime(t);
+
+    return cpsiLine + "\n" + okMsg;
+}
+
+static void readLBS() {
+    if (millis() - lbsLastTry < 60000) return;
+    doLbsAttempt();
 }
 
 // AT+CGNSINF → "+CGNSINF: run,fix,YYYYMMDDHHmmSS.sss,lat,lon,alt,speed,course,..."
@@ -1383,6 +1403,7 @@ button:disabled{opacity:0.5}
   <p class="sub" style="margin-bottom:10px">Viaje sin CAN (p.ej. en bici) — se guarda por GPS, con sus waypoints, igual que un viaje normal.</p>
   <button id="trip" onclick="tripToggle()" style="background:#1f2937;color:#93c5fd">Iniciar viaje (sin CAN)</button>
   <button id="logbtn" onclick="viewLog()" style="margin-top:10px;background:#1f2937;color:#a7f3d0">Ver log</button>
+  <button id="lbsbtn" onclick="checkLbs()" style="margin-top:10px;background:#1f2937;color:#fbbf24">Comprobar LBS ahora</button>
 </div>
 <script>
 function tripPaint(active){
@@ -1412,6 +1433,19 @@ function viewLog(){
   }).catch(function(){
     document.getElementById('status').textContent='No se pudo contactar con el ESP32';
     btn.disabled=false;
+  });
+}
+function checkLbs(){
+  var btn=document.getElementById('lbsbtn');
+  btn.disabled=true;
+  var prev=btn.textContent;
+  btn.textContent='Consultando... (puede tardar ~15s)';
+  fetch('/lbs/check',{method:'POST'}).then(function(r){return r.text();}).then(function(t){
+    document.getElementById('status').textContent=t;
+    btn.disabled=false;btn.textContent=prev;
+  }).catch(function(){
+    document.getElementById('status').textContent='No se pudo contactar con el ESP32';
+    btn.disabled=false;btn.textContent=prev;
   });
 }
 function up(){
@@ -1511,6 +1545,15 @@ static void otaStartAP() {
     otaServer.on("/log/view", HTTP_GET, []() {
         otaLastActivity = millis();
         otaServer.send(200, "text/plain", logBufferText());
+    });
+
+    // Bloqueante (AT+SAPBR/AT+CPSI/AT+CLBS, hasta ~15s) — igual que el resto
+    // de rutas de este WebServer, se ejecuta en el mismo hilo único que
+    // loop(), así que mientras dura no compite con el ciclo normal de
+    // telemetría por el diálogo AT: uno u otro, nunca los dos a la vez.
+    otaServer.on("/lbs/check", HTTP_POST, []() {
+        otaLastActivity = millis();
+        otaServer.send(200, "text/plain", doLbsAttempt());
     });
 
     otaServer.on("/update", HTTP_POST, []() {
