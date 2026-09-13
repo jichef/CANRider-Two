@@ -591,9 +591,40 @@ export default function DashboardContent() {
     }
   };
 
+  // Sondea una fila de device_commands ya insertada hasta que el ESP32 la
+  // marque done=true (en su siguiente ciclo por LTE, checkRemoteCommand()
+  // en main.ino — hasta ~60s) o hasta agotar el plazo. En ambos casos borra
+  // la fila al terminar: sin esto, un comando que nadie llega a recoger a
+  // tiempo (dispositivo sin cobertura en ese momento) se quedaría pendiente
+  // para siempre y bloquearía cualquier comando nuevo — checkRemoteCommand()
+  // siempre coge el pendiente más antiguo, así que uno atascado dejaría sin
+  // procesar los que vinieran después.
+  const pollDeviceCommand = useCallback(async (id: number, command: 'lbs_check' | 'gps_reset') => {
+    if (!supabase) return;
+    setCmdBusy(command);
+
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      const { data: row } = await supabase
+        .from('device_commands')
+        .select('done, result')
+        .eq('id', id)
+        .single();
+      if (row?.done) {
+        setCmdMessage(row.result || 'Hecho');
+        setCmdBusy(null);
+        await supabase.from('device_commands').delete().eq('id', id);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    setCmdMessage('Sin respuesta del dispositivo (¿sin cobertura?)');
+    setCmdBusy(null);
+    await supabase.from('device_commands').delete().eq('id', id);
+  }, [supabase]);
+
   const sendDeviceCommand = async (command: 'lbs_check' | 'gps_reset') => {
     if (!supabase || cmdBusy) return;
-    setCmdBusy(command);
     setCmdMessage(null);
 
     const { data, error } = await supabase
@@ -604,30 +635,32 @@ export default function DashboardContent() {
 
     if (error || !data) {
       setCmdMessage('No se pudo enviar el comando');
-      setCmdBusy(null);
       return;
     }
-
-    // El ESP32 solo revisa comandos pendientes cada ~60s en su ciclo por
-    // LTE (checkRemoteCommand() en main.ino) — se sondea hasta 90s antes de
-    // darlo por perdido (p.ej. dispositivo sin cobertura en ese momento).
-    const deadline = Date.now() + 90000;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const { data: row } = await supabase
-        .from('device_commands')
-        .select('done, result')
-        .eq('id', data.id)
-        .single();
-      if (row?.done) {
-        setCmdMessage(row.result || 'Hecho');
-        setCmdBusy(null);
-        return;
-      }
-    }
-    setCmdMessage('Sin respuesta del dispositivo (¿sin cobertura?)');
-    setCmdBusy(null);
+    pollDeviceCommand(data.id, command);
   };
+
+  // Si al cargar la página ya había un comando sin resolver (p.ej.
+  // recargaste mientras el ESP32 aún no lo había recogido), retoma el
+  // sondeo en vez de mostrar los iconos como inactivos — el estado real
+  // vive en Supabase, no solo en el ciclo de vida de este componente.
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('device_commands')
+        .select('id, command')
+        .eq('motorcycle_id', process.env.NEXT_PUBLIC_VEHICLE_ID)
+        .eq('done', false)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled && data) pollDeviceCommand(data.id, data.command as 'lbs_check' | 'gps_reset');
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase]);
 
   return (
     <div className="min-h-[100dvh] md:h-[100dvh] md:overflow-y-auto bg-black text-zinc-300 font-sans selection:bg-cyan-500/30 pb-24 md:pb-0">
