@@ -96,8 +96,11 @@ Estos pines ya vienen puestos automáticamente en `config.h.example` según la p
 
 Para una guía visual y muy detallada, usa [jichef.github.io/CANRider-Two](https://jichef.github.io/CANRider-Two/). Resumen rápido aquí:
 
-### 1. Clonar el repositorio
+### 1. Descargar el proyecto
 
+Entra en [github.com/jichef/CANRider-Two](https://github.com/jichef/CANRider-Two), pulsa el botón verde **Code** y luego **Download ZIP**. Descomprime el archivo en tu ordenador — esa carpeta descomprimida es con la que vas a trabajar en los siguientes pasos.
+
+Si ya usas git, también puedes clonarlo directamente:
 ```bash
 git clone https://github.com/jichef/CANRider-Two.git
 cd CANRider-Two
