@@ -53,15 +53,14 @@ El ESP32 actúa como ECU secundaria: escucha tramas del bus CAN y emite la trama
 
 | Componente | Descripción |
 |---|---|
-| **LilyGo T-SIM7000G** | Placa ESP32 con módem LTE Cat-M1/NB-IoT y GPS integrados (placa probada y recomendada) — [tienda oficial](https://lilygo.cc/products/t-sim7000g), también en AliExpress |
+| **LilyGo T-SIM7000G** | Placa ESP32 con módem LTE Cat-M1/NB-IoT y GPS integrados (placa probada a fondo con moto real en este proyecto) — [tienda oficial](https://lilygo.cc/products/t-sim7000g), también en AliExpress |
+| **LilyGo T-A7670G** (alternativa) | LTE Cat-1 — más compatible con operadores que no soportan bien Cat-M1 (más rápido y con mayor cobertura real que el SIM7000G en ese caso) — [tienda oficial](https://lilygo.cc/products/t-sim-a7670e), elige la variante «A7670G» en el desplegable (no la E ni la SA) **y no olvides seleccionar la opción «with GPS»** — también en AliExpress |
 | **Transceptor CAN** | SN65HVD230, TJA1050 o similar, alimentado a 3.3V ([ejemplo](https://www.amazon.es/dp/B0F9FDK6RJ)) |
 | **SIM con datos** | Con APN activo (M2M/IoT de cualquier operador) |
-| **Antena LTE + antena GPS** | Las que incluye el kit del T-SIM7000G |
+| **Antena LTE + antena GPS** | Las que incluye el kit de la placa elegida |
 | **Batería 18650** | Como respaldo de alimentación (opcional pero recomendado) |
 | **Conversor DC-DC de alta tensión a USB** | Debe aguantar la tensión de la batería principal del vehículo (48-72V en muchas eléctricas) — alimenta el ESP32 directamente desde la moto ([ejemplo: DC 8-85V a 5V/3A USB](https://www.amazon.es/dp/B09GFBB47L)) |
 | **Acceso al bus CAN del vehículo** | Cable directo a CAN-H / CAN-L (el transceptor ya incluye la resistencia de terminación de 120 Ω). En muchos vehículos, alimentación + CAN-H/CAN-L están disponibles juntos en el conector de la ECU original |
-
-También es compatible con el **LilyGo T-A7670G** (más velocidad de datos LTE Cat-1) — [tienda oficial](https://lilygo.cc/products/t-sim-a7670e) (elige la variante «A7670G» en el desplegable, no la E ni la SA), también en AliExpress — no te olvides seleccionar la que incluye GPS (with GPS).
 
 ### Conexiones (bus CAN)
 
