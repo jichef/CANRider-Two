@@ -231,24 +231,26 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     TinyGsmClientSecure sslClient(modem);
     if (!sslClient.connect(host.c_str(), 443, 15)) {
         Serial.println("[HTTPS] connect() falló");
-        // Visto en varios tests de estabilidad de horas: cuando nosotros
-        // nos rendimos con AT+CAOPEN, el módem puede seguir resolviéndolo
-        // por su cuenta y mandar la respuesta ("+CAOPEN: 0,2"/"0,27" o
-        // similar) bastante más tarde — un drenaje a ciegas de 4s (primer
-        // intento) no bastaba ni de lejos, y ni siquiera AT+CACLOSE=0 con
-        // solo 5s de margen (segundo intento) conseguía sincronizarse
-        // siempre: en ese caso el propio CACLOSE se quedaba esperando
-        // porque el módem seguía "ocupado" con el CAOPEN abandonado, y el
-        // ATE0 siguiente aún se llevaba un timeout de propina. Con 15s de
-        // margen aquí, sendAT() ya reconoce el "OK"/"ERROR" real en cuanto
-        // llega (no espera los 15s enteros si contesta antes) — así se
-        // absorbe la respuesta tardía en su sitio en vez de dejarla
-        // colarse en el primer comando del siguiente intento de conexión.
-        sendAT("AT+CACLOSE=0", "OK", 15000);
-        // Por si aun así queda algo suelto en el buffer.
+        // Visto en varios tests de estabilidad de horas: cuando nosotros nos
+        // rendimos con AT+CAOPEN, el módem puede seguir resolviéndolo por su
+        // cuenta y mandar la respuesta ("+CAOPEN: 0,2"/"0,27" o similar)
+        // bastante más tarde. Un intento anterior de esto esperaba hasta 15s
+        // a que AT+CACLOSE=0 diera "OK" y daba el resto por drenado — pero
+        // confirmado en vivo por Serial: a veces ni el propio
+        // CACLOSE ve su "OK" dentro de esos 15s, y la respuesta tardía del
+        // CAOPEN abandonado sigue colándose 2-3 ciclos de NET_SETUP después,
+        // corrompiendo el ATE0 de cada uno (visto: 2 ATE0 seguidos con
+        // timeout antes de que apareciera "+CAOPEN: 0,2" suelto en un
+        // tercero). En vez de esperar un "OK" concreto con un tope fijo,
+        // aquí se manda AT+CACLOSE=0 sin esperar su respuesta y se drena
+        // todo lo que llegue por un tiempo bastante más largo, dando por
+        // terminado el drenaje solo cuando hay silencio real en la línea
+        // (no cuando se cumple un plazo arbitrario) — más lento en el caso
+        // malo, pero fiable, en vez de rápido y corrupto.
+        SerialAT.println("AT+CACLOSE=0");
         uint32_t drainStart = millis(), lastDrainByte = millis();
-        while (millis() - drainStart < 2000 && millis() - lastDrainByte < 500) {
-            while (SerialAT.available()) { SerialAT.read(); lastDrainByte = millis(); }
+        while (millis() - drainStart < 35000 && millis() - lastDrainByte < 1500) {
+            while (SerialAT.available()) { char c = SerialAT.read(); Serial.write(c); lastDrainByte = millis(); }
             delay(20);
         }
         return false;
@@ -1530,6 +1532,15 @@ static uint32_t   otaLastActivity       = 0;
 static uint32_t   otaClientDisconnectAt = 0;
 static int        otaLastStationCount   = 0;
 
+// Se pone a true cuando el AP se cierra por tiempo (inactividad o nadie
+// conectado), no cuando lo cierra la moto al encenderse. Mientras esté a
+// true, otaLoop() no vuelve a levantar el AP aunque el CAN siga en
+// silencio — si no, se reabriría solo en la siguiente vuelta del bucle
+// (el CAN sigue apagado igual justo después de cerrarlo). Se limpia en
+// cuanto canBusAlive() vuelve a ser true (la moto se enciende de verdad),
+// así que el siguiente apagado sí puede levantar el AP otra vez.
+static bool       otaSuppressed         = false;
+
 const char OTA_PAGE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CanRider OTA</title>
@@ -1826,11 +1837,13 @@ static void otaLoop() {
         if (otaClientDisconnectAt != 0 && millis() - otaClientDisconnectAt > OTA_CLIENT_GRACE_MS) {
             Serial.println("[OTA] 2 min sin nadie conectado, cerrando AP");
             otaStopAP();
+            otaSuppressed = true;
             return;
         }
         if (millis() - otaLastActivity > OTA_AP_TIMEOUT_MS) {
             Serial.println("[OTA] 4 min sin actividad, cerrando AP");
             otaStopAP();
+            otaSuppressed = true;
         }
         return;
     }
@@ -1842,7 +1855,8 @@ static void otaLoop() {
     // y así el AP funciona también en casa, donde lo normal es tener el
     // WiFi de telemetría al alcance. Al cerrarse el AP (por tiempo o
     // porque la moto se enciende), el WiFi de telemetría se retoma solo.
-    if (canBusAlive()) return;
+    if (canBusAlive()) { otaSuppressed = false; return; }
+    if (otaSuppressed) return;
     wifiForceDisconnect();
     otaStartAP();
 }
