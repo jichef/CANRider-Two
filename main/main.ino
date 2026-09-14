@@ -139,10 +139,16 @@ static void logLine(const char* fmt, ...) {
     TimeRef t = snapshotTime();
     if (t.valid) {
         // Misma conversión UTC->hora local (con el offset de red, incluye
-        // DST) que usa txSignalByte() para la trama de reloj del CAN — aquí
-        // sin la corrección por tiempo transcurrido, de sobra para marcar
-        // una línea de log al segundo.
-        int32_t localSec = (int32_t)t.hour * 3600 + (int32_t)t.min * 60 + t.sec + t.utcOffsetMin * 60;
+        // DST) que usa txSignalByte() para la trama de reloj del CAN,
+        // incluyendo el tiempo transcurrido desde la captura — sin esto,
+        // toda línea de log entre dos sincronizaciones de hora reales
+        // (de red o GPS) sale con el MISMO timestamp, por muy separadas
+        // que estén de verdad (visto en banco el 15/09/2026: varios
+        // minutos de reintentos de módem con timestamps idénticos al
+        // segundo, justo cuando más falta hacía distinguirlos).
+        uint32_t elapsedSec = (millis() - t.capturedAt) / 1000;
+        int32_t localSec = (int32_t)t.hour * 3600 + (int32_t)t.min * 60 + t.sec
+                          + (int32_t)elapsedSec + t.utcOffsetMin * 60;
         int dayDelta = 0;
         while (localSec < 0)      { localSec += 86400; dayDelta--; }
         while (localSec >= 86400) { localSec -= 86400; dayDelta++; }
