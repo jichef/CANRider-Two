@@ -1210,6 +1210,16 @@ static TripState tripState;
 static bool     offCanTripActive       = false;
 static uint32_t offCanTripLastMovingMs = 0;
 
+// Lecturas seguidas con velocidad GPS real por encima de THEFT_SPEED_KMH,
+// con el bus CAN en silencio — la cuenta buildTelemetrySnapshot() cada
+// ciclo (una sola vez, es la fuente de verdad), y tanto el aviso de
+// posible sustracción como el arranque de offCanTripActive exigen que
+// llegue a 2 antes de darlo por movimiento real. Visto en campo: un único
+// pico de velocidad GPS (ruido típico en interior/zona urbana estando
+// parado) abrió un viaje falso y una alarma falsa con la moto ni
+// conectada ni encendida — un pico aislado no es un desplazamiento.
+static int g_offCanMovingStreak = 0;
+
 #define OFFCAN_TRIP_IDLE_TIMEOUT_MS 300000UL  // 5 min sin moverse -> se da el viaje por terminado solo
 
 // A diferencia del viaje normal (que termina en cuanto el CAN se calla,
@@ -1217,9 +1227,9 @@ static uint32_t offCanTripLastMovingMs = 0;
 // señal de "se acabó" salvo dejar de moverse — así que se cierra solo tras
 // OFFCAN_TRIP_IDLE_TIMEOUT_MS sin superar THEFT_SPEED_KMH de velocidad GPS
 // real. Si vuelve a verse CAN vivo, se corta al momento (es un viaje normal).
-static void offCanTripTick(bool busAlive, bool hasPos, float speedKmh) {
+static void offCanTripTick(bool busAlive) {
     if (busAlive) { offCanTripActive = false; offCanTripLastMovingMs = 0; return; }
-    if (hasPos && speedKmh >= THEFT_SPEED_KMH) {
+    if (g_offCanMovingStreak >= 2) {
         offCanTripActive       = true;
         offCanTripLastMovingMs = millis();
         return;
@@ -1937,9 +1947,13 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     // salvo que el movimiento sin CAN sea a propósito (viaje manual desde
     // el portal, ver manualTripActive): mismo movimiento, pero autorizado,
     // así que no salta la alarma — aun así el recorrido se sigue grabando
-    // igual (ver offCanTripActive/manualTripActive en updateTrip()).
-    bool movingWithoutCan = snap.t.hasPos && !snap.busAlive && !manualTripActive
-                            && snap.t.speed_kmh >= THEFT_SPEED_KMH;
+    // igual (ver offCanTripActive/manualTripActive en updateTrip()). Exige
+    // 2 lecturas seguidas por encima del umbral (g_offCanMovingStreak, ver
+    // comentario junto a offCanTripActive) — un pico aislado de ruido GPS
+    // no cuenta.
+    bool rawMovingNow = snap.t.hasPos && !snap.busAlive && snap.t.speed_kmh >= THEFT_SPEED_KMH;
+    g_offCanMovingStreak = rawMovingNow ? g_offCanMovingStreak + 1 : 0;
+    bool movingWithoutCan = g_offCanMovingStreak >= 2 && !manualTripActive;
     if (movingWithoutCan)
         Serial.println("[ALERTA] Movimiento GPS sin tramas CAN — posible sustracción");
 
@@ -2168,7 +2182,7 @@ static void wifiFallbackLoop() {
             // que LTE, así que el cierre también sale por aquí cuando hay
             // WiFi conectado; si falla por los dos caminos, pendingTripBody
             // lo reintenta como siempre.
-            offCanTripTick(snap.busAlive, snap.t.hasPos, snap.t.speed_kmh);
+            offCanTripTick(snap.busAlive);
             manualTripTick(snap.t.hasPos, snap.t.speed_kmh);
             updateTrip(snap.busAlive || offCanTripActive || manualTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t);
             flushPendingTrip();
@@ -2342,7 +2356,7 @@ void loop() {
         }
 
         // Actualizar viaje; si termina, re-inicializar sesión HTTP
-        offCanTripTick(snap.busAlive, snap.t.hasPos, snap.t.speed_kmh);
+        offCanTripTick(snap.busAlive);
         manualTripTick(snap.t.hasPos, snap.t.speed_kmh);
         if (updateTrip(snap.busAlive || offCanTripActive || manualTripActive, snap.t.speed_kmh, snap.currentSoc, snap.t.lat, snap.t.lon, snap.t.hasPos, snap.t))
             state = HTTP_SETUP;
