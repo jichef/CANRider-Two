@@ -73,6 +73,19 @@
   #define CAN_RX_PIN     33
 #endif
 
+// Red de seguridad: si alguna vez CAN_TX_PIN/CAN_RX_PIN se redefinen a mano
+// más abajo (en vez de dejar que el #if de arriba los elija), esto para la
+// compilación en vez de dejarlo pasar en silencio con los pines de la placa
+// equivocada. No es hipotético — es exactamente lo que pasó en producción
+// (14/09/2026): los pines del A7670G quedaron activos varios días con el
+// firmware del SIM7000G corriendo, sin ningún aviso, hasta desmontar el CAN
+// a mano y medir con polímetro para encontrarlo.
+#if defined(MODEM_SIM7000G) && (CAN_TX_PIN != 32 || CAN_RX_PIN != 33)
+  #error "CAN_TX_PIN/CAN_RX_PIN no son los del T-SIM7000G (32/33) -- revisa config.h"
+#elif defined(MODEM_A7670G) && (CAN_TX_PIN != 22 || CAN_RX_PIN != 21)
+  #error "CAN_TX_PIN/CAN_RX_PIN no son los del T-A7670G (22/21) -- revisa config.h"
+#endif
+
 //   TWAI_TIMING_CONFIG_500KBITS()  → 500 kbps (CAN automotriz estándar)
 //   TWAI_TIMING_CONFIG_250KBITS()  → 250 kbps (J1939 / algunos vehículos eléctricos)
 //   TWAI_TIMING_CONFIG_125KBITS()  → 125 kbps
