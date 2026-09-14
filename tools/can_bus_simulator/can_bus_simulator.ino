@@ -24,9 +24,25 @@
 
 #include "driver/twai.h"
 
-// ── Pines — AJUSTA ESTO a tu cableado real ──────────────────────────────────
-#define CAN_TX_PIN 4
-#define CAN_RX_PIN 5
+// ── Placa del emisor — AJUSTA ESTO a tu cableado real ───────────────────────
+// Mismo espíritu que MODEM_A7670G/MODEM_SIM7000G en main/config.h: un nombre
+// de placa en vez de un número de pin suelto — así no se puede tener un pin
+// "sin etiquetar" que luego nadie sepa a qué placa correspondía (justo el
+// error que se encontró en config.h: pines del A7670G activos mientras
+// corría el firmware del SIM7000G, sin que nada avisara). Activa una sola
+// opción; si usas otra placa distinta, añade tu propio #elif con sus pines.
+#define SIM_BOARD_CUSTOM
+// #define SIM_BOARD_LILYGO_SIM7000G   // ESP32 T-SIM7000G de repuesto como emisor
+
+#if defined(SIM_BOARD_LILYGO_SIM7000G)
+  #define CAN_TX_PIN 32
+  #define CAN_RX_PIN 33
+#elif defined(SIM_BOARD_CUSTOM)
+  #define CAN_TX_PIN 4    // <- pon aquí tu cableado real
+  #define CAN_RX_PIN 5
+#else
+  #error "Define arriba qué placa usas (SIM_BOARD_...)"
+#endif
 
 // Mismas frame_id/byte que usa main/config.h — cámbialos aquí también si los
 // cambiaste allí.
