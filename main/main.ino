@@ -89,6 +89,25 @@ static uint32_t stateAt   = 0;
 static uint32_t nextPost  = 0;
 static int      httpFails = 0;
 
+// outageStartMs: desde cuándo se dejó de estar en RUNNING (se reinicia al
+// volver a RUNNING). Es la red de seguridad "paciente": si ERROR_WAIT lleva
+// más de MODEM_HANG_RESET_MS sin ver RUNNING (registro de red lento/con mala
+// cobertura, pero el módem SÍ responde por AT), se fuerza igualmente un
+// reinicio duro — ver modemHardReset() más abajo.
+#define MODEM_HANG_RESET_MS (5UL * 60UL * 1000UL)
+static uint32_t outageStartMs = 0;
+
+// netAtFailStreak: cuántas veces SEGUIDAS ha fallado networkSetup() sin que
+// "ATE0" llegara siquiera a responder — a diferencia de un registro de red
+// lento (que sí responde a ATE0 y falla más adelante, y puede tardar
+// legítimamente 15-20 min en resolverse solo), esto es inequívocamente un
+// módem colgado: nunca se ha visto que un fallo de cobertura normal impida
+// responder a "ATE0". Por eso aquí NO hace falta esperar los 5 min de
+// MODEM_HANG_RESET_MS — con 3 fallos seguidos (~45s) ya se escala al
+// reinicio duro, en vez de seguir reintentando algo que no va a cambiar solo.
+#define MODEM_AT_DEAD_STREAK 3
+static int netAtFailStreak = 0;
+
 // ── Log en RAM (para el botón "Enviar log" del portal OTA) ──────────────────────
 // Buffer circular de líneas de texto — no es un volcado byte a byte del diálogo
 // AT (eso sería tan caro como DUMP_AT_COMMANDS), solo las líneas de estado ya
@@ -878,7 +897,10 @@ int16_t readSignalStrength() {
 //   NO emite ninguna trama que el usuario no haya configurado explícitamente.
 // • Recibe tramas del bus y las decodifica según la config de Supabase.
 
-void setupCAN() {
+// Instala y arranca el periférico TWAI — factorizado aparte de setupCAN()
+// para poder reinstalarlo entero tras un bus-off (ver comentario en
+// canTask() sobre por qué no se usa twai_initiate_recovery()).
+static bool twaiBringUp() {
     twai_general_config_t gcfg = TWAI_GENERAL_CONFIG_DEFAULT(
         (gpio_num_t)CAN_TX_PIN, (gpio_num_t)CAN_RX_PIN, TWAI_MODE_NORMAL);
     // TWAI_GENERAL_CONFIG_DEFAULT deja rx_queue_len en 5 (verificado en
@@ -892,7 +914,11 @@ void setupCAN() {
     gcfg.rx_queue_len = 64;
     twai_timing_config_t  tcfg = CAN_SPEED;
     twai_filter_config_t  fcfg = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-    if (twai_driver_install(&gcfg, &tcfg, &fcfg) != ESP_OK || twai_start() != ESP_OK)
+    return twai_driver_install(&gcfg, &tcfg, &fcfg) == ESP_OK && twai_start() == ESP_OK;
+}
+
+void setupCAN() {
+    if (!twaiBringUp())
         Serial.println("[CAN] Error TWAI");
     else
         Serial.println("[CAN] TWAI listo");
@@ -912,28 +938,40 @@ void canTask(void*) {
         TimeRef  t   = snapshotTime();
 
         // — Recuperación de bus-off —
-        // Visto en campo con la moto real: tras transmitir bien un rato, el
-        // contador de errores de TX llega a 128 (p.ej. si deja de haber
-        // ACK un momento) y el periférico se autodesconecta del bus
-        // (bus-off), tal y como exige el propio estándar CAN. Sin
+        // Visto en campo (con la moto real, y luego reproducido en banco
+        // estando solo en el bus sin nadie más): tras fallar el ACK
+        // suficientes veces seguidas, el periférico se autodesconecta del
+        // bus (bus-off), tal y como exige el propio estándar CAN. Sin
         // recuperarlo, el reloj dejaría de emitirse para siempre hasta un
-        // reinicio manual del ESP32. Esto es manejo de errores del driver
-        // TWAI, no tráfico nuevo: sigue sin emitirse nada salvo la misma
-        // trama del reloj ya configurada.
-        static bool recovering = false;
+        // reinicio manual del ESP32.
+        //
+        // NO se usa twai_initiate_recovery(): tiene un bug conocido y
+        // confirmado del propio driver TWAI de ESP-IDF (esp-idf#9697) —
+        // una condición de carrera entre la recuperación y un intento de
+        // transmisión que aún estuviera "en vuelo" puede dejar un contador
+        // interno del driver en negativo y hacer un assert fatal (reinicio
+        // duro del ESP32: "twai_handle_tx_buffer_frame ... tx_msg_count >=
+        // 0"). Confirmado en campo el 15/09/2026 nada más corregir los
+        // pines de CAN: en cuanto el periférico empezó a intentar
+        // transmitir de verdad (antes, con los pines equivocados, ni
+        // siquiera llegaba a intentarlo), el primer bus-off en banco
+        // (estando solo, sin la moto ni otro nodo) hizo petar el firmware
+        // en el momento exacto de llamar a esa función.
+        //
+        // En vez de "recuperar" el periférico con esa función, se
+        // desinstala y se vuelve a instalar entero — más lento (unos ms
+        // más), pero no pasa por el código interno del driver que tiene el
+        // fallo. twai_driver_uninstall()/twaiBringUp() son síncronas
+        // (bloquean hasta terminar), así que no hace falta repartir esto
+        // en varias vueltas del bucle como antes.
         twai_status_info_t twaiSt;
         twai_get_status_info(&twaiSt);
-        if (twaiSt.state == TWAI_STATE_BUS_OFF && !recovering) {
-            Serial.println("[CAN] Bus-off detectado, iniciando recuperación...");
-            twai_initiate_recovery();
-            recovering = true;
-        }
-        if (recovering) {
-            if (twaiSt.state == TWAI_STATE_STOPPED) {
-                twai_start();
-                Serial.println("[CAN] Bus recuperado, reanudando");
-                recovering = false;
-            }
+        if (twaiSt.state == TWAI_STATE_BUS_OFF) {
+            Serial.println("[CAN] Bus-off detectado, reinstalando TWAI...");
+            twai_stop();
+            twai_driver_uninstall();
+            Serial.println(twaiBringUp() ? "[CAN] Bus recuperado, reanudando"
+                                          : "[CAN] Fallo al reinstalar TWAI, se reintentará");
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
@@ -1870,9 +1908,16 @@ static bool otaActive() { return false; }
 #endif
 
 // ── Red ───────────────────────────────────────────────────────────────────────
+// atAlive (opcional): si no es null, se marca a true en cuanto "ATE0"
+// responde. Distingue "el módem está vivo pero el registro de red va lento"
+// (normal, hasta 15-20 min vistos en campo sin ninguna intervención) de "el
+// módem no responde ni a lo más básico" (colgado de verdad) — ver
+// netAtFailStreak/MODEM_AT_DEAD_STREAK más abajo, que usa esto para
+// reaccionar mucho más rápido solo en el segundo caso.
 #if defined(MODEM_A7670G)
-bool networkSetup() {
+bool networkSetup(bool* atAlive = nullptr) {
     if (!sendAT("ATE0"))              return false;
+    if (atAlive) *atAlive = true;
     if (!sendAT("AT+CPIN?", "READY")) return false;
     String apn = String("AT+CGDCONT=1,\"IP\",\"") + APN + "\"";
     if (!sendAT(apn.c_str()))                  return false;
@@ -1888,8 +1933,9 @@ bool networkSetup() {
     return true;
 }
 #else // SIM7000G
-bool networkSetup() {
+bool networkSetup(bool* atAlive = nullptr) {
     if (!sendAT("ATE0"))              return false;
+    if (atAlive) *atAlive = true;
 
     // AT+CNMP=2 (automático) explícito, no implícito. Con AT+CNMP=38 (solo
     // LTE) se comprobó que el módem SÍ registra en Cat-M1 aquí ("+CPSI:
@@ -2240,6 +2286,48 @@ static void wifiForceDisconnect()  {}
 static bool postTripUpdate(const String& body) { return httpPostTo("/rest/v1/trips", body); }
 #endif
 
+// ── Reinicio duro del módem (PWRKEY/RESET) ──────────────────────────────────
+// Visto en campo (14-15/09/2026): cuando el módem se queda "colgado" de
+// verdad —ni siquiera responde ya a un simple "ATE0"— NET_SETUP/ERROR_WAIT
+// se quedan reintentando por AT cada ~15s sin arreglar nada, durante horas
+// (huecos de telemetría de hasta 150 min seguidos en Supabase esos días).
+// Reintentar por AT no basta ahí: hace falta un power-cycle real del propio
+// módem. Ver outageStartMs/MODEM_HANG_RESET_MS más abajo para cuándo se
+// dispara esto.
+static void modemPowerOnPulse() {
+    digitalWrite(BOARD_PWRKEY_PIN, LOW);  delay(100);
+    digitalWrite(BOARD_PWRKEY_PIN, HIGH); delay(MODEM_POWERON_PULSE_WIDTH_MS);
+    digitalWrite(BOARD_PWRKEY_PIN, LOW);
+}
+
+static void modemHardReset() {
+    Serial.println("[MODEM] Reinicio duro (colgado sin responder por AT)");
+#if defined(MODEM_RESET_PIN)
+    // A7670G: tiene un pin de RESET de verdad, aparte del PWRKEY — el mismo
+    // que ya se usa una vez al arrancar en setup() para módems que quedaron
+    // en estado raro. Más directo y fiable que jugar con temporizaciones de
+    // PWRKEY.
+    digitalWrite(MODEM_RESET_PIN, MODEM_RESET_LEVEL);  delay(200);
+    digitalWrite(MODEM_RESET_PIN, !MODEM_RESET_LEVEL);
+    delay(2600);
+#else
+    // SIM7000G: no tiene pin de RESET separado, solo PWRKEY — y el PWRKEY
+    // no es un simple "toggle": la duración del pulso le dice al módem qué
+    // acción se pide (encender ~1s, apagar ~1.3s — MODEM_POWERON/OFF_
+    // PULSE_WIDTH_MS en utilities.h), y el propio módem decide si tiene
+    // sentido según su estado interno (un pulso de "apagar" estando ya
+    // apagado no hace nada). Por eso aquí se manda SIEMPRE primero un pulso
+    // de apagado y luego uno de encendido, en vez de asumir en qué estado
+    // estaba: así se termina encendido pase lo que pase, sin necesidad de
+    // saber si seguía vivo pero mudo, o realmente muerto.
+    digitalWrite(BOARD_PWRKEY_PIN, LOW);  delay(100);
+    digitalWrite(BOARD_PWRKEY_PIN, HIGH); delay(MODEM_POWEROFF_PULSE_WIDTH_MS);
+    digitalWrite(BOARD_PWRKEY_PIN, LOW);
+    delay(3000);  // margen para que el apagado termine antes de reencender
+#endif
+    modemPowerOnPulse();
+}
+
 // ── Arranque ──────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200); delay(1000);
@@ -2268,9 +2356,7 @@ void setup() {
     digitalWrite(MODEM_DTR_PIN, LOW);  // asegura que el módem no está en sleep
 #endif
     pinMode(BOARD_PWRKEY_PIN,  OUTPUT);
-    digitalWrite(BOARD_PWRKEY_PIN, LOW);  delay(100);
-    digitalWrite(BOARD_PWRKEY_PIN, HIGH); delay(MODEM_POWERON_PULSE_WIDTH_MS);
-    digitalWrite(BOARD_PWRKEY_PIN, LOW);
+    modemPowerOnPulse();
 
     SerialAT.begin(MODEM_BAUDRATE, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
     setupCAN();
@@ -2278,6 +2364,7 @@ void setup() {
     xTaskCreatePinnedToCore(canTask, "CAN", 3072, NULL, 1, NULL, 0);
     setupOTA();
     stateAt = millis();
+    outageStartMs = millis();
 }
 
 // ── Loop principal (Core 1) ───────────────────────────────────────────────────
@@ -2296,15 +2383,19 @@ void loop() {
         state = ERROR_WAIT; stateAt = millis();
         break;
 
-    case NET_SETUP:
+    case NET_SETUP: {
         logLine("[STATE] NET_SETUP");
-        if (networkSetup()) {
+        bool atAlive = false;
+        if (networkSetup(&atAlive)) {
+            netAtFailStreak = 0;
             if (!readNetworkTime()) Serial.println("[WARN] Hora de red no disponible");
             state = HTTP_SETUP;
         } else {
+            netAtFailStreak = atAlive ? 0 : (netAtFailStreak + 1);
             state = ERROR_WAIT; stateAt = millis();
         }
         break;
+    }
 
     case HTTP_SETUP:
         logLine("[STATE] HTTP_SETUP");
@@ -2324,6 +2415,7 @@ void loop() {
         if (setupHTTP()) {
             logLine("[STATE] RUNNING");
             httpFails = 0; state = RUNNING; nextPost = millis();
+            outageStartMs = millis();
         } else {
             state = ERROR_WAIT; stateAt = millis();
         }
@@ -2392,6 +2484,19 @@ void loop() {
         // igual aquí aunque el WiFi esté conectado, para que esté lista en
         // cuanto el WiFi deje de estar al alcance.
         if (millis() - stateAt > RETRY_WAIT_MS) {
+            bool atDead     = netAtFailStreak >= MODEM_AT_DEAD_STREAK;
+            bool longOutage = millis() - outageStartMs > MODEM_HANG_RESET_MS;
+            if (atDead || longOutage) {
+                logLine(atDead ? "[MODEM] AT no responde (%lu intentos), reinicio duro"
+                                : "[MODEM] %lu s sin RUNNING, reinicio duro",
+                        atDead ? (unsigned long)netAtFailStreak
+                               : (unsigned long)((millis() - outageStartMs) / 1000));
+                modemHardReset();
+                outageStartMs = millis();
+                netAtFailStreak = 0;
+                state = MODEM_BOOT; stateAt = millis();
+                break;
+            }
 #if defined(MODEM_A7670G)
             sendAT("AT+HTTPTERM"); sendAT("AT+NETCLOSE");
 #endif
