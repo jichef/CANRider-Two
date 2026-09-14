@@ -30,19 +30,23 @@
 // "sin etiquetar" que luego nadie sepa a qué placa correspondía (justo el
 // error que se encontró en config.h: pines del A7670G activos mientras
 // corría el firmware del SIM7000G, sin que nada avisara). Activa una sola
-// opción — las dos placas que soporta el proyecto principal, mismos pines
-// que main/config.h.
-#define SIM_BOARD_SIM7000G
+// opción. SIM_BOARD_GENERIC_4_5 es un ESP32 genérico (no una LilyGo T-*)
+// cableado a mano a esos pines — confirmado físicamente el 15/09/2026.
+#define SIM_BOARD_GENERIC_4_5
+// #define SIM_BOARD_SIM7000G
 // #define SIM_BOARD_A7670G
 
-#if defined(SIM_BOARD_SIM7000G)
+#if defined(SIM_BOARD_GENERIC_4_5)
+  #define CAN_TX_PIN 4
+  #define CAN_RX_PIN 5
+#elif defined(SIM_BOARD_SIM7000G)
   #define CAN_TX_PIN 32
   #define CAN_RX_PIN 33
 #elif defined(SIM_BOARD_A7670G)
   #define CAN_TX_PIN 22
   #define CAN_RX_PIN 21
 #else
-  #error "Define arriba qué placa usas (SIM_BOARD_SIM7000G o SIM_BOARD_A7670G)"
+  #error "Define arriba qué placa usas (SIM_BOARD_...)"
 #endif
 
 // Mismas frame_id/byte que usa main/config.h — cámbialos aquí también si los
@@ -99,8 +103,41 @@ void setup() {
     }
 }
 
+// Cada "[TX] fallo al mandar" seguido puede ser un síntoma o la causa: si el
+// camino de TRANSMISIÓN de esta placa está roto (pin D/TX del transceptor,
+// o su cableado), cada intento sin ACK cuenta como error, y tras
+// suficientes seguidos el controlador entra en bus-off — que desconecta
+// TAMBIÉN la recepción, aunque el camino RX en sí esté perfectamente bien.
+// Esto imprime el estado y el contador de errores TX cada 3s para
+// confirmarlo o descartarlo, y se recupera solo si llega a pasar (mismo
+// patrón que canTask() en main/main.ino).
+static uint32_t lastStatusMs = 0;
+static void printBusStatus() {
+    twai_status_info_t st;
+    if (twai_get_status_info(&st) != ESP_OK) return;
+    const char* stateName =
+        st.state == TWAI_STATE_RUNNING  ? "RUNNING"  :
+        st.state == TWAI_STATE_BUS_OFF  ? "BUS_OFF"  :
+        st.state == TWAI_STATE_STOPPED  ? "STOPPED"  :
+        st.state == TWAI_STATE_RECOVERING ? "RECOVERING" : "?";
+    Serial.printf("[BUS] estado=%s tx_err=%d rx_err=%d tx_failed=%d arb_lost=%d bus_err=%d\n",
+                  stateName, st.tx_error_counter, st.rx_error_counter,
+                  st.tx_failed_count, st.arb_lost_count, st.bus_error_count);
+    if (st.state == TWAI_STATE_BUS_OFF) {
+        Serial.println("[BUS] BUS-OFF -- iniciando recuperacion");
+        twai_initiate_recovery();
+    } else if (st.state == TWAI_STATE_STOPPED) {
+        twai_start();
+    }
+}
+
 void loop() {
     uint32_t now = millis();
+
+    if (now - lastStatusMs > 3000) {
+        lastStatusMs = now;
+        printBusStatus();
+    }
 
     // — Recepción: imprime cualquier trama que llegue —
     twai_message_t rx;
