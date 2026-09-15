@@ -345,6 +345,17 @@ CREATE POLICY "select anon" ON device_commands FOR SELECT USING (true);
 DROP POLICY IF EXISTS "update anon" ON device_commands;
 CREATE POLICY "update anon" ON device_commands FOR UPDATE USING (true) WITH CHECK (true);
 
+-- Faltaba esta también (mismo fallo que ya se encontró en trips): el
+-- portal borra la fila al terminar (éxito o timeout, ver
+-- sendDeviceCommand()/pollDeviceCommand() en DashboardContent.tsx) para
+-- que checkRemoteCommand() no vuelva a recoger la misma fila para
+-- siempre — sin política de DELETE, esos DELETE llevaban fallando en
+-- silencio (200 OK, 0 filas afectadas) desde que se añadió esta tabla.
+-- Detectado el 15/09/2026: una fila de una prueba del 14/09 seguía
+-- pendiente 24h después, reejecutándose cada 60s sin parar.
+DROP POLICY IF EXISTS "delete anon" ON device_commands;
+CREATE POLICY "delete anon" ON device_commands FOR DELETE USING (true);
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Fin. Si el editor de Supabase dice "Success. No rows returned" al final,
 -- todo se ha creado correctamente.
