@@ -1347,6 +1347,20 @@ static void checkRemoteCommand() {
     if (millis() - lastCheck < 60000) return;
     lastCheck = millis();
 
+    // Si el PATCH de "hecho" de más abajo falla (nunca se comprobaba: ver
+    // commit de este mismo cambio), el comando se queda pendiente para
+    // siempre y este bloque completo — GET + LBS entero (SAPBR/CPSI/CLBS)
+    // + otro PATCH — se repetía CADA 60s sin parar, encima de la
+    // telemetría normal del mismo ciclo. Con señal marginal, ese tráfico
+    // extra concentrado parece ser lo que terminaba de tumbar el módem
+    // (visto en campo el 15/09/2026: cada repetición del mismo id=5
+    // precede a un fallo de POST y 1-2 reinicios duros). Si el mismo id ya
+    // se intentó hace poco, se espera más antes de reintentarlo — no hace
+    // falta la prisa de cada 60s para un comando que ya sabemos que no
+    // está cuajando.
+    static long     lastAttemptedId   = -1;
+    static uint32_t lastAttemptedIdAt = 0;
+
     int status; String respBody;
     bool ok = sim7000Request("GET",
             "/rest/v1/device_commands?motorcycle_id=eq." VEHICLE_ID
@@ -1367,6 +1381,16 @@ static void checkRemoteCommand() {
         logLine("[CMD] sin comando pendiente");
         return;  // "[]" — no hay comando pendiente
     }
+
+    if (id == lastAttemptedId && millis() - lastAttemptedIdAt < 300000UL) {
+        // Mismo comando que ya se intentó hace menos de 5 min y sigue sin
+        // marcarse "hecho" (el PATCH sigue fallando) — no reintentar cada
+        // 60s, ver comentario de arriba.
+        return;
+    }
+    lastAttemptedId   = id;
+    lastAttemptedIdAt = millis();
+
     logLine("[CMD] pendiente id=%ld comando=%s", id, command.c_str());
 
     String result;
@@ -1394,7 +1418,12 @@ static void checkRemoteCommand() {
     sanitized.replace("\n", " | ");
     String patchBody = "{\"done\":true,\"result\":\"" + sanitized + "\"}";
     String patchPath = "/rest/v1/device_commands?id=eq." + String(id);
-    sim7000Request("PATCH", patchPath, patchBody, status, respBody);
+    if (!sim7000Request("PATCH", patchPath, patchBody, status, respBody) || status >= 300) {
+        // Antes esto se ignoraba del todo — el comando se quedaba
+        // pendiente sin ningún aviso, y solo lastAttemptedIdAt (arriba)
+        // evita que se reintente cada 60s indefinidamente.
+        logLine("[CMD] PATCH \"hecho\" fallo (status=%d), id=%ld sigue pendiente", status, id);
+    }
 }
 
 #endif
