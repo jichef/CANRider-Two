@@ -272,6 +272,21 @@ CREATE POLICY "insert anon" ON trips FOR INSERT WITH CHECK (true);
 DROP POLICY IF EXISTS "select anon" ON trips;
 CREATE POLICY "select anon" ON trips FOR SELECT USING (true);
 
+-- Faltaba esta: el propio firmware asume que existe (Prefer: resolution=
+-- merge-duplicates en cada checkpoint intermedio del viaje, ver
+-- httpPostTo()/postTripUpdate() en main.ino, pensado como upsert sobre la
+-- primary key) pero sin política de UPDATE, RLS bloqueaba esa mitad del
+-- upsert en cuanto un checkpoint SÍ coincidía con una fila ya existente —
+-- solo pasaba desapercibido porque en el hardware desplegado (SIM7000G,
+-- WiFi de rescate desactivado) los checkpoints intermedios no llegan a
+-- intentarse nunca (shouldSendTripCheckpoint() exige WiFi ahí) y cada
+-- viaje se guarda entero de una sola vez al cerrar, como un INSERT limpio
+-- sin conflicto. Detectado el 15/09/2026 al intentar corregir a mano un
+-- viaje ya guardado con puntos de LBS colados en la ruta (ver el fix de
+-- updateTrip() en main.ino) y no poder hacer el UPDATE con la anon key.
+DROP POLICY IF EXISTS "update anon" ON trips;
+CREATE POLICY "update anon" ON trips FOR UPDATE USING (true) WITH CHECK (true);
+
 -- Permite borrar viajes desde el portal (botón de la papelera en el
 -- historial) — mismo nivel de acceso que insert/select de arriba, ya
 -- abierto con la anon key: este proyecto no tiene autenticación de
