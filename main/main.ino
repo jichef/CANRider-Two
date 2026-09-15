@@ -278,7 +278,22 @@ static void sdRawWrite(const String& s) {
     xSemaphoreTake(sdMux, portMAX_DELAY);
     if (g_sdReady) {
         g_sdLogFile.print(s);
-        g_sdLogFile.flush();
+        // flush() por cada línea (como al principio) resultó ser
+        // demasiado caro aquí: es una escritura física bloqueante en cada
+        // comando AT, y con el diálogo AT ahora en su propia tarea
+        // (modemTask(), ver comentario de esa tarea en setup()) ese coste
+        // extra parece bastar para desestabilizar el enganche de datos —
+        // confirmado el 15/09/2026 con una bisección en banco: quitando
+        // este flush() por línea, la fiabilidad volvió a la de antes del
+        // refactor. Se sigue flusheando cada pocas líneas en vez de nunca,
+        // para no perder demasiado log si hay un corte de corriente justo
+        // en mitad de un episodio (que es precisamente cuando más
+        // interesa tenerlo).
+        static uint16_t flushCounter = 0;
+        if (++flushCounter >= 10) {
+            flushCounter = 0;
+            g_sdLogFile.flush();
+        }
         static uint16_t sizeCheckCounter = 0;
         if (++sizeCheckCounter >= 50) {  // más frecuente que en logLine(): el diálogo AT genera muchas más líneas
             sizeCheckCounter = 0;
