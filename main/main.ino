@@ -413,6 +413,18 @@ static bool sim7000Request(const String& method, const String& path, const Strin
     // antes de poder ni siquiera reintentar — medido con timestamps: saltos
     // de ~75.5s entre páginas fallidas. 15s de margen es de sobra para el
     // caso bueno (CAOPEN normalmente responde en 1-2s cuando funciona).
+    // Se probó AT+CSSLCFG="authmode",0,0 y luego "ignorlocaltime",0,1 aquí
+    // mismo (15/09/2026), sospechando que el SIM7000G rechazaba el
+    // handshake TLS por validar la fecha del certificado contra su reloj
+    // interno (atascado en 1980 sin NITZ). Los dos dieron ERROR siempre —
+    // ninguno es la sintaxis correcta para este chip en este punto del
+    // flujo (probablemente porque el contexto SSL aún no existe, algo que
+    // solo se crea dentro de connect()). Se retiraron: en la misma sesión,
+    // con señal realmente buena (CSQ=31) llegó NITZ real y el POST
+    // funcionó sin ningún cambio de por medio — la causa parece ser
+    // simplemente señal intermitente, no un bug de TLS. Queda pendiente de
+    // confirmar del todo si sigue fallando incluso con señal buena en el
+    // futuro.
     TinyGsmClientSecure sslClient(modem);
     if (!sslClient.connect(host.c_str(), 443, 15)) {
         Serial.println("[HTTPS] connect() falló");
