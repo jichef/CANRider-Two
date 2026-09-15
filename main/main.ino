@@ -1436,6 +1436,23 @@ static bool shouldSendTripCheckpoint() { return wifiConnected(); }
 // telemetría; si fue por WiFi no hace falta, esa ruta no toca el módem).
 bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
                 bool hasPos, const TimeRef& t) {
+    // Solo el GPS real (t.posSource=='g') alimenta el track/la distancia del
+    // viaje. La posición por LBS (posSource=='l', fallback de readGPS()
+    // cuando no hay fix) es una estimación por celda de hasta ~550m, que
+    // además se queda CLAVADA en el mismo punto mientras el módem no cambie
+    // de celda servidora — no es una posición "vieja" cacheada por error,
+    // es que la celda no se mueve aunque la moto sí. Antes se aceptaba igual
+    // que un fix GPS: cada vez que el GPS perdía cobertura un momento (muy
+    // normal en moto, bajo árboles/edificios), el punto de esa celda
+    // (típicamente cerca de donde arrancó el viaje) se colaba en mitad de la
+    // ruta real, dando saltos "ida y vuelta al punto de inicio" en el mapa
+    // Y sumando esa ida-vuelta como distancia real recorrida (visto en
+    // campo 15/09/2026: un viaje de 16 min con el punto de LBS repetido 4
+    // veces intercalado con tramos de GPS real). hasPos se sigue usando tal
+    // cual para lo demás (detección de robo sin CAN, etc.) — ahí una
+    // posición aproximada por celda sigue siendo útil.
+    bool hasGpsPos = hasPos && t.posSource == 'g';
+
     // t.valid además de busAlive: si el CAN se enciende antes de que el
     // módem tenga la hora de red sincronizada (típico justo tras arrancar
     // o reconectar), tripState.sy/sm/... se capturarían en 0 y el viaje se
@@ -1449,13 +1466,13 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         tripState.startSoc   = soc;
         tripState.distanceKm = 0;
         tripState.maxSpeed   = speed;
-        tripState.hasLastPos = hasPos;
+        tripState.hasLastPos = hasGpsPos;
         tripState.lastLat    = lat;
         tripState.lastLon    = lon;
         tripState.sy = t.year; tripState.sm = t.month; tripState.sd = t.day;
         tripState.sh = t.hour; tripState.smin = t.min; tripState.ss = t.sec;
         tripState.trackCount = 0;
-        if (hasPos) {
+        if (hasGpsPos) {
             tripState.trackLat[0]       = lat;
             tripState.trackLon[0]       = lon;
             tripState.trackSpeed[0]     = speed;
@@ -1479,11 +1496,11 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 
     if (speed > tripState.maxSpeed) tripState.maxSpeed = speed;
 
-    if (hasPos && tripState.hasLastPos)
+    if (hasGpsPos && tripState.hasLastPos)
         tripState.distanceKm += haversineKm(tripState.lastLat, tripState.lastLon, lat, lon);
-    if (hasPos) { tripState.lastLat = lat; tripState.lastLon = lon; tripState.hasLastPos = true; }
+    if (hasGpsPos) { tripState.lastLat = lat; tripState.lastLon = lon; tripState.hasLastPos = true; }
 
-    if (hasPos && tripState.trackCount < MAX_TRIP_POINTS) {
+    if (hasGpsPos && tripState.trackCount < MAX_TRIP_POINTS) {
         int i = tripState.trackCount;
         tripState.trackLat[i]       = lat;
         tripState.trackLon[i]       = lon;
