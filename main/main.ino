@@ -2557,21 +2557,31 @@ void setup() {
     // esperas largas DENTRO de TinyGsm (modem.gprsConnect() y similares,
     // en networkSetup()) que no pasan por nuestro sendAT()/queryAT() — no
     // podemos meterles un ceder-CPU porque son internas de la librería.
-    // Sin esto, el vigía de tareas (TWDT) reinicia el ESP32 en duro en
-    // cuanto esa espera interna tarda más de su plazo por defecto (visto
-    // en banco el 15/09/2026: "IDLE0 (CPU 0) did not reset the watchdog",
-    // con MODEM como tarea en ejecución, justo tras AT+CTZU).
-    // disableCore0WDT() (probado primero) quita el aviso pero deja un
-    // esp_task_wdt_reset(): task not found repitiéndose sin parar — algo
-    // sigue intentando resetear el watchdog de una tarea ya desuscrita en
-    // este core de ESP-IDF (5.4). En vez de desactivarlo, se reconfigura
-    // con un plazo mucho más generoso (2 min: de sobra para el peor caso
-    // visto de TinyGsm, muy por debajo de los 5 min de
-    // MODEM_HANG_RESET_MS) — sigue vigilando un cuelgue de verdad a bajo
-    // nivel, solo que sin dispararse por esperas largas pero normales.
+    //
+    // Primer intento (15/09/2026, banco): subir el plazo del TWDT a 2 min
+    // en vez de desactivarlo — pero volvió a saltar más tarde, esta vez en
+    // IDLE1 (core 1, el propio portal OTA) tras varios minutos de uso real,
+    // no en el sitio ni en el plazo esperado. Eso destapó el error de
+    // fondo: antes de tocar nada, este código llevaba MESES en producción
+    // con exactamente el mismo patrón de esperas bloqueantes (todo vivía
+    // en el loopTask de Arduino) sin que el TWDT saltara ni una sola vez —
+    // la explicación más simple es que, por defecto, este proyecto NUNCA
+    // vigiló las tareas IDLE, y fue justo el esp_task_wdt_reconfigure() de
+    // aquí el que las metió a vigilancia por primera vez (idle_core_mask
+    // explícito). Subir el plazo solo retrasaba el problema, no lo
+    // quitaba: cualquier cifra fija se puede quedar corta contra un
+    // reintento de red genuinamente largo.
+    //
+    // En vez de perseguir un plazo "suficientemente grande" caso a caso,
+    // se deja de vigilar las tareas IDLE directamente (idle_core_mask=0) —
+    // volviendo al comportamiento de fondo que ya llevaba meses probado.
+    // El vigía de módem colgado a nivel de aplicación (modemHardReset()/
+    // MODEM_HANG_RESET_MS, 5 min) sigue siendo la protección real contra
+    // un cuelgue de verdad; este TWDT de bajo nivel solo protegía contra
+    // ESO, y de forma redundante.
     esp_task_wdt_config_t wdtCfg = {
         .timeout_ms    = 120000,
-        .idle_core_mask = (1 << 0) | (1 << 1),
+        .idle_core_mask = 0,
         .trigger_panic  = true,
     };
     esp_task_wdt_reconfigure(&wdtCfg);
