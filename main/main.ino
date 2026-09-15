@@ -4,6 +4,9 @@
 #include "structs.h"
 #include <esp_adc_cal.h>
 #include <stdarg.h>  // va_list/va_start/va_end, para logLine()
+#include <SPI.h>
+#include <SD.h>      // log persistente en microSD, ver setupSDLog()/logLine()
+#include <esp_task_wdt.h>  // esp_task_wdt_reconfigure(), ver setup()
 
 #if defined(MODEM_SIM7000G)
 // El motor AT+SH de esta revisión de firmware SIM7000G es poco fiable
@@ -122,11 +125,113 @@ static int netAtFailStreak = 0;
 static char logBuf[LOG_BUF_LINES][LOG_LINE_MAXLEN];
 static int  logCount = 0;
 static int  logNext  = 0;
+// logLine() se llama tanto desde la tarea del módem (modemTask(), ver
+// final del archivo) como, indirectamente, desde el portal OTA en el otro
+// core (logBufferText() para /log/view) — sin esto, una lectura del
+// portal a mitad de una escritura podría leer una línea a medio formar.
+static SemaphoreHandle_t logMux = NULL;
 
 // Definida más abajo (junto al resto de utilidades de hora de red) — se
 // necesita aquí para pasar la fecha del log a hora local cuando el offset
 // (t.utcOffsetMin) empuja al día anterior/siguiente.
 static void shiftDate(uint16_t &year, uint8_t &month, uint8_t &day, int deltaDays);
+
+// ── Log persistente en microSD ───────────────────────────────────────────────
+// El log en RAM (arriba) se pierde en cada reinicio, y hasta ahora la única
+// copia que sobrevivía era Supabase — que depende de la misma LTE que
+// puede llevar horas caída, justo cuando más falta hace poder ver qué pasó.
+// Visto en campo el 15/09/2026: 3h+ sin ningún contacto, un reinicio de por
+// medio, y ningún rastro de qué había intentado el módem antes de
+// desconectar el USB para mirarlo. Con la SD, el historial sobrevive a
+// reinicios y cortes de corriente sin depender de tener red.
+//
+// Pines ya definidos en AT/utilities.h para ambas placas (BOARD_MISO_PIN,
+// BOARD_MOSI_PIN, BOARD_SCK_PIN, BOARD_SD_CS_PIN) — el propio slot microSD
+// que ya trae la placa LilyGo, sin cableado adicional. Si no hay tarjeta
+// metida, SD.begin() falla rápido (no bloquea) y el dispositivo sigue
+// funcionando igual que hasta ahora, solo sin persistencia — la SD es un
+// añadido opcional, nunca una dependencia dura.
+// Nombre de archivo con fecha y hora reales (p.ej. "/log_2026-09-15_09-31-55.log")
+// para poder distinguir a simple vista una sesión de otra en la tarjeta —
+// "log_current.log" para todas sería tan inútil como los timestamps
+// pegados que se arregló arriba. El problema: al arrancar puede que
+// todavía no haya hora real (de red ni GPS) — justo el caso de esta misma
+// noche, con el módem sin responder desde el minuto cero — así que el
+// nombre definitivo no siempre se puede poner de entrada. Se empieza
+// escribiendo en LOG_FALLBACK_NAME y, en cuanto logLine() ve t.valid por
+// primera vez en este arranque, se renombra una sola vez al nombre real
+// con fecha (maybeNameSDLogFromTime()). Si nunca llega a haber hora en
+// toda la sesión, se queda con el nombre de reserva — sigue siendo mejor
+// que no tener nada, que es lo que había hasta ahora en ese caso.
+#define SD_LOG_FALLBACK_NAME "/log_current.log"
+#define SD_LOG_MAX_BYTES     (512UL * 1024UL)  // por archivo — de sobra para una sesión larga de texto; al superarlo se cierra y se abre uno nuevo (con fecha si ya se sabe la hora) en vez de crecer sin límite en una tarjeta que puede ser pequeña
+static bool   g_sdReady    = false;
+static bool   g_sdLogNamed = false;  // true en cuanto se ha renombrado con fecha/hora real
+static String g_sdLogPath  = SD_LOG_FALLBACK_NAME;
+static File   g_sdLogFile;
+// El bus SPI de la SD y el propio File no son seguros entre tareas: la
+// tarea del módem escribe en cada logLine() y el portal OTA (otro core)
+// puede leer a la vez desde /log/sd — sin esto, un flush()/open() cruzado
+// con una escritura en curso puede corromper el archivo o colgar el SPI.
+static SemaphoreHandle_t sdMux = NULL;
+
+static void openSDLogFile(const String& path) {
+    g_sdLogFile = SD.open(path, FILE_APPEND);
+    g_sdReady   = (bool)g_sdLogFile;
+    g_sdLogPath = path;
+}
+
+static void setupSDLog() {
+    SPI.begin(BOARD_SCK_PIN, BOARD_MISO_PIN, BOARD_MOSI_PIN, BOARD_SD_CS_PIN);
+    if (!SD.begin(BOARD_SD_CS_PIN)) {
+        Serial.println("[SD] Sin tarjeta o fallo al montar — log solo en RAM");
+        return;
+    }
+    SD.remove(SD_LOG_FALLBACK_NAME);  // resto de un arranque anterior que nunca llegó a tener hora
+    openSDLogFile(SD_LOG_FALLBACK_NAME);
+    Serial.println(g_sdReady ? "[SD] Log persistente listo (sin fecha aún, pendiente de hora)"
+                              : "[SD] Tarjeta detectada pero no se pudo abrir el log");
+}
+
+// Llamada desde logLine() con cada t ya calculado — barata cuando
+// g_sdLogNamed ya es true (un solo if). Formato del nombre: guiones en vez
+// de ":" (no válido en FAT) y sin espacios, para máxima compatibilidad.
+static void maybeNameSDLogFromTime(const TimeRef& t) {
+    if (!g_sdReady || g_sdLogNamed || !t.valid) return;
+    char name[40];
+    snprintf(name, sizeof(name), "/log_%04d-%02d-%02d_%02d-%02d-%02d.log",
+             t.year, t.month, t.day, t.hour, t.min, t.sec);
+    g_sdLogFile.close();
+    if (SD.rename(SD_LOG_FALLBACK_NAME, name)) {
+        openSDLogFile(name);
+    } else {
+        // Si el propio renombrado falla (raro, pero la tarjeta no lo
+        // garantiza), se sigue escribiendo en el de reserva antes que
+        // perder el log por completo.
+        openSDLogFile(SD_LOG_FALLBACK_NAME);
+    }
+    g_sdLogNamed = true;
+}
+
+// Al superar SD_LOG_MAX_BYTES: cierra el archivo activo y abre uno nuevo.
+// Si ya se conoce la hora, el nuevo ya nace con nombre de fecha (nunca
+// vuelve a pasar por el de reserva); si no, reanuda desde el de reserva
+// (maybeNameSDLogFromTime lo renombrará más tarde igual que al arrancar).
+static void rotateSDLogIfNeeded() {
+    if (!g_sdReady || g_sdLogFile.size() <= SD_LOG_MAX_BYTES) return;
+    g_sdLogFile.close();
+    TimeRef t = snapshotTime();
+    if (t.valid) {
+        char name[40];
+        snprintf(name, sizeof(name), "/log_%04d-%02d-%02d_%02d-%02d-%02d.log",
+                 t.year, t.month, t.day, t.hour, t.min, t.sec);
+        openSDLogFile(name);
+    } else {
+        SD.remove(SD_LOG_FALLBACK_NAME);
+        g_sdLogNamed = false;
+        openSDLogFile(SD_LOG_FALLBACK_NAME);
+    }
+}
 
 static void logLine(const char* fmt, ...) {
     char msg[LOG_LINE_MAXLEN];
@@ -159,36 +264,88 @@ static void logLine(const char* fmt, ...) {
                  (int)(localSec / 3600), (int)((localSec / 60) % 60), (int)(localSec % 60),
                  msg);
     } else {
-        snprintf(tmp, sizeof(tmp), "%s", msg);
+        // Sin hora real (de red ni GPS) — exactamente el caso del 15/09/2026
+        // con el módem sin responder: antes esto salía sin ninguna marca de
+        // tiempo, imposible saber cuánto duró cada reintento al releer el
+        // log después. "+segundos desde el arranque" no sustituye a una
+        // fecha real, pero para eso ya sirve de sobra: distingue intentos
+        // separados por segundos de los separados por horas.
+        snprintf(tmp, sizeof(tmp), "[+%lus] %s", (unsigned long)(millis() / 1000UL), msg);
     }
 
     Serial.println(tmp);
+    xSemaphoreTake(logMux, portMAX_DELAY);
     strncpy(logBuf[logNext], tmp, LOG_LINE_MAXLEN - 1);
     logBuf[logNext][LOG_LINE_MAXLEN - 1] = '\0';
     logNext = (logNext + 1) % LOG_BUF_LINES;
     if (logCount < LOG_BUF_LINES) logCount++;
+    xSemaphoreGive(logMux);
+
+    // maybeNameSDLogFromTime()/rotateSDLogIfNeeded() no toman sdMux por su
+    // cuenta — asumen que quien las llama ya lo tiene tomado, para poder
+    // encadenarlas aquí sin recaer en el mismo mutex (no es reentrante).
+    xSemaphoreTake(sdMux, portMAX_DELAY);
+    if (t.valid) maybeNameSDLogFromTime(t);
+    if (g_sdReady) {
+        g_sdLogFile.println(tmp);
+        g_sdLogFile.flush();
+        // Comprueba el límite de tamaño de vez en cuando en vez de en cada
+        // línea (size() en SD cuesta más que en RAM) — de sobra para no
+        // pasarse mucho de SD_LOG_MAX_BYTES entre comprobaciones.
+        static uint16_t sizeCheckCounter = 0;
+        if (++sizeCheckCounter >= 200) {
+            sizeCheckCounter = 0;
+            rotateSDLogIfNeeded();
+        }
+    }
+    xSemaphoreGive(sdMux);
 }
 
 // ── Helpers AT ────────────────────────────────────────────────────────────────
+// atMux: el módem (LTE/GPS/trips, su propia tarea — ver modemTask() al
+// final del archivo) y el portal OTA (/lbs/check, sigue en el core del
+// WebServer) pueden llegar a hablar por SerialAT casi a la vez — sin
+// serializar esto, dos diálogos AT entrelazados se corromperían mutuamente
+// (el mismo tipo de corrupción que ya costó tanto diagnosticar con
+// AT+CAOPEN este mismo mes). doLbsAttempt() es la ÚNICA vía por la que el
+// portal toca SerialAT, y solo a través de sendAT()/queryAT() — nunca
+// llama directo a TinyGsm/sslClient — así que basta con serializar aquí.
+static SemaphoreHandle_t atMux = NULL;
+
 bool sendAT(const char* cmd, const char* expect = "OK", uint32_t timeout = 5000) {
+    xSemaphoreTake(atMux, portMAX_DELAY);
     Serial.print(">> "); Serial.println(cmd);
     SerialAT.println(cmd);
     String buf;
     uint32_t t = millis();
-    while (millis() - t < timeout) {
+    bool ok = false, done = false;
+    while (!done && millis() - t < timeout) {
         while (SerialAT.available()) {
             char c = SerialAT.read(); Serial.write(c); buf += c;
         }
-        if (buf.indexOf(expect)  >= 0) return true;
-        if (buf.indexOf("ERROR") >= 0) { Serial.println("[FAIL]"); return false; }
+        if (buf.indexOf(expect)  >= 0) { ok = true; done = true; }
+        else if (buf.indexOf("ERROR") >= 0) { Serial.println("[FAIL]"); done = true; }
+        // Cede CPU en cada vuelta — sin esto, una espera larga (timeout de
+        // hasta 30s en algún AT+) es un bucle cerrado que nunca deja
+        // correr a la tarea IDLE del core, y el watchdog del ESP32 la
+        // reinicia en duro. Antes esto vivía en el loop() de Arduino
+        // (menos estricto con el watchdog); ahora que sendAT()/queryAT()
+        // corren en una tarea de FreeRTOS propia (modemTask(), compartiendo
+        // core con canTask()), hace falta ceder explícitamente. Visto en
+        // banco el 15/09/2026 (assert del task watchdog, IDLE0 sin
+        // resetear, justo con MODEM como tarea en ejecución).
+        if (!done) delay(1);
     }
-    Serial.println("[TIMEOUT]"); return false;
+    if (!done) Serial.println("[TIMEOUT]");
+    xSemaphoreGive(atMux);
+    return ok;
 }
 
 String queryAT(const char* cmd, const char* prefix, uint32_t timeout = 5000) {
+    xSemaphoreTake(atMux, portMAX_DELAY);
     Serial.print(">> "); Serial.println(cmd);
     SerialAT.println(cmd);
-    String buf;
+    String buf, result;
     uint32_t t = millis();
     while (millis() - t < timeout) {
         while (SerialAT.available()) {
@@ -197,10 +354,13 @@ String queryAT(const char* cmd, const char* prefix, uint32_t timeout = 5000) {
         int idx = buf.indexOf(prefix);
         if (idx >= 0) {
             int end = buf.indexOf('\n', idx);
-            return buf.substring(idx, end >= 0 ? end : buf.length());
+            result = buf.substring(idx, end >= 0 ? end : buf.length());
+            break;
         }
+        delay(1);  // ceder CPU — ver comentario equivalente en sendAT()
     }
-    return "";
+    xSemaphoreGive(atMux);
+    return result;
 }
 
 // ── HTTP genérico (usado por el envío de telemetría/viajes) ───────────────────
@@ -603,13 +763,18 @@ bool readNetworkTime() {
 
     // Visto en campo con este mismo SIM7000G: antes de que llegue NITZ real,
     // AT+CCLK? responde con el reloj de fábrica del módem sin resetear
-    // ("80/01/06,00:08:24+08" → año 2080 con el "2000+YY" de abajo) — un
-    // "+08" de zona con pinta perfectamente válida, así que sin este filtro
-    // se aceptaba como hora real y marcaba g_tzKnown=true a partir de un
-    // valor centinela, bloqueando el reintento igual que el bug original de
-    // GPS-vs-red que motivó g_tzKnown. Cualquier año pasado (a fecha de este
-    // firmware) es ese centinela, no una hora real.
-    if (t.year < 2024) return false;
+    // ("80/01/06,00:08:24+08" → año 2080 con el "2000+YY" de abajo, NO 1980
+    // — el "2000+YY" de arriba convierte el "80" de fábrica en un año
+    // FUTURO) — un "+08" de zona con pinta perfectamente válida, así que
+    // sin filtrar esto se aceptaba como hora real: marcaba g_tzKnown=true a
+    // partir de un valor centinela (bloqueando el reintento igual que el
+    // bug original de GPS-vs-red que motivó g_tzKnown) y, confirmado en
+    // campo el 15/09/2026, hacía fallar el POST a Supabase — con el reloj
+    // del módem en 2080 el handshake TLS no valida el certificado. El
+    // primer filtro puesto aquí ("< 2024") solo cubría años PASADOS y se
+    // le escapaba justo este centinela (2080 no es menor que 2024) — hace
+    // falta un rango con tope superior también, no solo un mínimo.
+    if (t.year < 2024 || t.year > 2034) return false;
 
     // Convertir a UTC para uso interno (trips/telemetría en Supabase usan
     // UTC), pero guardando el offset ("+08" = +2h) para poder volver a
@@ -1296,8 +1461,13 @@ static void offCanTripTick(bool busAlive) {
 // a haber movimiento real sin CAN — pensado para usar el dispositivo a
 // propósito en algo sin CAN (p.ej. una bici de prueba) sin generar una
 // falsa alarma de robo. El recorrido se graba igual en ambos casos.
-static bool     manualTripActive       = false;
-static uint32_t manualTripLastMovingMs = 0;
+// volatile: se leen/escriben tanto desde la tarea del módem (manualTripTick(),
+// updateTrip()) como desde los handlers /trip/start,/trip/stop,/trip/status
+// del portal OTA (otro core) — bool/uint32_t alineados son atómicos de por
+// sí en el ESP32 (mismo razonamiento que lastCanFrameMs), volatile solo
+// evita que el compilador los cachee en registro de un lado a otro.
+static volatile bool     manualTripActive       = false;
+static volatile uint32_t manualTripLastMovingMs = 0;
 
 // Igual que offCanTripTick(): se cierra solo tras MANUAL_TRIP_IDLE_TIMEOUT_MS
 // sin superar THEFT_SPEED_KMH, por si no se vuelve a tener alcance del AP
@@ -1577,11 +1747,13 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 // de nada que el módem no pueda hacer ya.
 static String logBufferText() {
     String body;
+    xSemaphoreTake(logMux, portMAX_DELAY);
     int startIdx = (logCount < LOG_BUF_LINES) ? 0 : logNext;
     for (int i = 0; i < logCount; i++) {
         body += logBuf[(startIdx + i) % LOG_BUF_LINES];
         body += "\n";
     }
+    xSemaphoreGive(logMux);
     if (body.length() == 0) body = "(sin lineas registradas todavia)";
     return body;
 }
@@ -1820,6 +1992,31 @@ static void otaStartAP() {
     otaServer.on("/log/view", HTTP_GET, []() {
         otaLastActivity = millis();
         otaServer.send(200, "text/plain", logBufferText());
+    });
+
+    // Log completo persistente en la SD (ver setupSDLog()) — a diferencia
+    // de /log/view (solo las últimas 40 líneas en RAM, se pierden al
+    // reiniciar), esto sobrevive a cortes de corriente y reinicios. Sirve
+    // siempre el archivo ACTIVO ahora mismo (g_sdLogPath — con fecha si ya
+    // se conoció la hora en este arranque, o el de reserva si no). Abre un
+    // handle de lectura aparte del de escritura (g_sdLogFile, siempre en
+    // FILE_APPEND) para no interferir con logLine() mientras se sirve.
+    otaServer.on("/log/sd", HTTP_GET, []() {
+        otaLastActivity = millis();
+        if (!g_sdReady) { otaServer.send(200, "text/plain", "(sin tarjeta SD o no se pudo montar)"); return; }
+        // sdMux tomado durante toda la lectura/envío, no solo al abrir —
+        // la tarea del módem podría escribir a mitad de streamFile() si no.
+        xSemaphoreTake(sdMux, portMAX_DELAY);
+        g_sdLogFile.flush();
+        File f = SD.open(g_sdLogPath, FILE_READ);
+        if (!f) {
+            xSemaphoreGive(sdMux);
+            otaServer.send(200, "text/plain", "(no se pudo abrir el log de la SD)");
+            return;
+        }
+        otaServer.streamFile(f, "text/plain");
+        f.close();
+        xSemaphoreGive(sdMux);
     });
 
     // Bloqueante (AT+SAPBR/AT+CPSI/AT+CLBS, hasta ~15s) — igual que el resto
@@ -2356,10 +2553,37 @@ void setup() {
     Serial.begin(115200); delay(1000);
     Serial.println("[BOOT] CanRider v2");
 
+    // modemTask() (más abajo) comparte el core 0 con canTask() y hace
+    // esperas largas DENTRO de TinyGsm (modem.gprsConnect() y similares,
+    // en networkSetup()) que no pasan por nuestro sendAT()/queryAT() — no
+    // podemos meterles un ceder-CPU porque son internas de la librería.
+    // Sin esto, el vigía de tareas (TWDT) reinicia el ESP32 en duro en
+    // cuanto esa espera interna tarda más de su plazo por defecto (visto
+    // en banco el 15/09/2026: "IDLE0 (CPU 0) did not reset the watchdog",
+    // con MODEM como tarea en ejecución, justo tras AT+CTZU).
+    // disableCore0WDT() (probado primero) quita el aviso pero deja un
+    // esp_task_wdt_reset(): task not found repitiéndose sin parar — algo
+    // sigue intentando resetear el watchdog de una tarea ya desuscrita en
+    // este core de ESP-IDF (5.4). En vez de desactivarlo, se reconfigura
+    // con un plazo mucho más generoso (2 min: de sobra para el peor caso
+    // visto de TinyGsm, muy por debajo de los 5 min de
+    // MODEM_HANG_RESET_MS) — sigue vigilando un cuelgue de verdad a bajo
+    // nivel, solo que sin dispararse por esperas largas pero normales.
+    esp_task_wdt_config_t wdtCfg = {
+        .timeout_ms    = 120000,
+        .idle_core_mask = (1 << 0) | (1 << 1),
+        .trigger_panic  = true,
+    };
+    esp_task_wdt_reconfigure(&wdtCfg);
+
     setupBoardBatteryADC();
+    setupSDLog();
 
     timeMux = xSemaphoreCreateMutex();
     canMux  = xSemaphoreCreateMutex();
+    atMux   = xSemaphoreCreateMutex();
+    logMux  = xSemaphoreCreateMutex();
+    sdMux   = xSemaphoreCreateMutex();
 
 #ifdef BOARD_POWERON_PIN
     pinMode(BOARD_POWERON_PIN, OUTPUT); digitalWrite(BOARD_POWERON_PIN, HIGH);
@@ -2388,23 +2612,51 @@ void setup() {
     setupOTA();
     stateAt = millis();
     outageStartMs = millis();
+    // MODEM (core 0, junto a CAN): todo el diálogo AT/HTTP/GPS/viajes es
+    // bloqueante (visto el 15/09/2026: un solo intento de networkSetup()
+    // puede tardar bien más de un minuto con el módem reintentando de
+    // verdad) — antes vivía dentro de loop() (core 1), compitiendo por el
+    // mismo hilo que el portal OTA (WiFi AP + WebServer). Con el módem
+    // reintentando sin parar, el portal se quedaba sin atender: subía el
+    // AP pero no cargaba nada, o ni siquiera llegaba a subir (ver
+    // otaSuppressed/canBusAlive() en otaLoop() más abajo). Sacándolo a su
+    // propia tarea, loop() (core 1) queda libre para atender el portal
+    // siempre, pase lo que pase con el módem. wifiFallbackLoop() se mueve
+    // con él — comparte tripState/pendingTripBody con el propio estado del
+    // módem (ambos pueden cerrar/actualizar el mismo viaje) y mantenerlos
+    // en el mismo hilo evita tener que proteger eso también con mutex.
+    // 8192B de pila — mismo tamaño que la tarea de loop() por defecto de
+    // Arduino-ESP32, que es donde vivía todo esto hasta ahora sin
+    // desbordarse nunca.
+    xTaskCreatePinnedToCore(modemTask, "MODEM", 8192, NULL, 1, NULL, 0);
 }
 
 // ── Loop principal (Core 1) ───────────────────────────────────────────────────
+// Solo el portal OTA — nunca debe poder bloquearse por culpa del módem
+// (ver comentario junto a xTaskCreatePinnedToCore(modemTask...) en setup()).
 void loop() {
-    otaLoop();          // no bloqueante; no hace nada salvo que el AP OTA esté activo
+    otaLoop();
+}
+
+// ── Módem/telemetría/viajes (Core 0) ─────────────────────────────────────────
+void modemTask(void*) {
+  for (;;) {
     wifiFallbackLoop();  // no bloqueante; siempre intentando WiFi de fondo (ver comentario arriba)
     switch (state) {
 
-    case MODEM_BOOT:
+    case MODEM_BOOT: {
         if (millis() - stateAt < 8000) break;
-        for (int i = 0; i < 15; i++) {
-            if (sendAT("AT", "OK", 1000)) { state = NET_SETUP; return; }
+        bool gotAT = false;
+        for (int i = 0; i < 15 && !gotAT; i++) {
+            if (sendAT("AT", "OK", 1000)) { state = NET_SETUP; gotAT = true; break; }
             delay(300);
         }
-        Serial.println("[ERROR] Módem no responde");
-        state = ERROR_WAIT; stateAt = millis();
+        if (!gotAT) {
+            Serial.println("[ERROR] Módem no responde");
+            state = ERROR_WAIT; stateAt = millis();
+        }
         break;
+    }
 
     case NET_SETUP: {
         logLine("[STATE] NET_SETUP");
@@ -2503,9 +2755,9 @@ void loop() {
     case ERROR_WAIT:
         while (SerialAT.available()) Serial.write(SerialAT.read());
         // El WiFi ya se gestiona de fondo (wifiFallbackLoop() al principio
-        // de loop()), independiente de esto — la LTE sigue reintentando
-        // igual aquí aunque el WiFi esté conectado, para que esté lista en
-        // cuanto el WiFi deje de estar al alcance.
+        // de esta misma tarea), independiente de esto — la LTE sigue
+        // reintentando igual aquí aunque el WiFi esté conectado, para que
+        // esté lista en cuanto el WiFi deje de estar al alcance.
         if (millis() - stateAt > RETRY_WAIT_MS) {
             bool atDead     = netAtFailStreak >= MODEM_AT_DEAD_STREAK;
             bool longOutage = millis() - outageStartMs > MODEM_HANG_RESET_MS;
@@ -2530,4 +2782,11 @@ void loop() {
         }
         break;
     }
+    // Cede CPU entre vueltas — igual de barato que el propio loop() de
+    // Arduino (que ya cedía solo, entre llamadas): sin esto, un estado que
+    // no bloquea nunca (RUNNING la mayoría de ciclos, con el early "break"
+    // de millis() < nextPost) giraría a tope sin ceder, muerto de hambre
+    // de vigilante de watchdog en este core.
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
 }
