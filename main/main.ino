@@ -233,24 +233,22 @@ static void rotateSDLogIfNeeded() {
     }
 }
 
-static void logLine(const char* fmt, ...) {
-    char msg[LOG_LINE_MAXLEN];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, args);
-    va_end(args);
-
-    char tmp[LOG_LINE_MAXLEN];
+// Reutilizado por logLine() y por el volcado de diálogo AT a la SD (ver
+// sdRawWrite()/sendAT()/queryAT() más abajo) — misma conversión UTC->hora
+// local (con el offset de red, incluye DST) que usa txSignalByte() para
+// la trama de reloj del CAN, incluyendo el tiempo transcurrido desde la
+// captura — sin esto, toda línea entre dos sincronizaciones de hora
+// reales (de red o GPS) sale con el MISMO timestamp, por muy separadas
+// que estén de verdad (visto en banco el 15/09/2026: varios minutos de
+// reintentos de módem con timestamps idénticos al segundo, justo cuando
+// más falta hacía distinguirlos). Sin hora real, "+segundos desde el
+// arranque" no sustituye a una fecha, pero distingue intentos separados
+// por segundos de los separados por horas — de sobra para leer el log
+// después.
+static String timestampPrefix() {
+    char buf[20];
     TimeRef t = snapshotTime();
     if (t.valid) {
-        // Misma conversión UTC->hora local (con el offset de red, incluye
-        // DST) que usa txSignalByte() para la trama de reloj del CAN,
-        // incluyendo el tiempo transcurrido desde la captura — sin esto,
-        // toda línea de log entre dos sincronizaciones de hora reales
-        // (de red o GPS) sale con el MISMO timestamp, por muy separadas
-        // que estén de verdad (visto en banco el 15/09/2026: varios
-        // minutos de reintentos de módem con timestamps idénticos al
-        // segundo, justo cuando más falta hacía distinguirlos).
         uint32_t elapsedSec = (millis() - t.capturedAt) / 1000;
         int32_t localSec = (int32_t)t.hour * 3600 + (int32_t)t.min * 60 + t.sec
                           + (int32_t)elapsedSec + t.utcOffsetMin * 60;
@@ -259,19 +257,47 @@ static void logLine(const char* fmt, ...) {
         while (localSec >= 86400) { localSec -= 86400; dayDelta++; }
         uint16_t y = t.year; uint8_t mo = t.month, d = t.day;
         if (dayDelta != 0) shiftDate(y, mo, d, dayDelta);
-        snprintf(tmp, sizeof(tmp), "%02d/%02d/%02d %02d:%02d:%02d %s",
+        snprintf(buf, sizeof(buf), "%02d/%02d/%02d %02d:%02d:%02d",
                  d, mo, y % 100,
-                 (int)(localSec / 3600), (int)((localSec / 60) % 60), (int)(localSec % 60),
-                 msg);
+                 (int)(localSec / 3600), (int)((localSec / 60) % 60), (int)(localSec % 60));
     } else {
-        // Sin hora real (de red ni GPS) — exactamente el caso del 15/09/2026
-        // con el módem sin responder: antes esto salía sin ninguna marca de
-        // tiempo, imposible saber cuánto duró cada reintento al releer el
-        // log después. "+segundos desde el arranque" no sustituye a una
-        // fecha real, pero para eso ya sirve de sobra: distingue intentos
-        // separados por segundos de los separados por horas.
-        snprintf(tmp, sizeof(tmp), "[+%lus] %s", (unsigned long)(millis() / 1000UL), msg);
+        snprintf(buf, sizeof(buf), "[+%lus]", (unsigned long)(millis() / 1000UL));
     }
+    return String(buf);
+}
+
+// Escribe texto ya formado (varias líneas incluidas) directamente en el
+// archivo activo de la SD — a diferencia de logLine(), no pasa por el
+// buffer en RAM (pensado para líneas de estado cortas, no para el
+// diálogo AT completo) ni fuerza su propio timestamp por llamada: quien
+// llama decide cuánto agrupar en una sola escritura. Usado por sendAT()/
+// queryAT() para que el diálogo AT completo —justo lo que más se ha
+// necesitado esta noche para depurar y que antes solo iba a Serial—
+// también quede en la tarjeta.
+static void sdRawWrite(const String& s) {
+    xSemaphoreTake(sdMux, portMAX_DELAY);
+    if (g_sdReady) {
+        g_sdLogFile.print(s);
+        g_sdLogFile.flush();
+        static uint16_t sizeCheckCounter = 0;
+        if (++sizeCheckCounter >= 50) {  // más frecuente que en logLine(): el diálogo AT genera muchas más líneas
+            sizeCheckCounter = 0;
+            rotateSDLogIfNeeded();
+        }
+    }
+    xSemaphoreGive(sdMux);
+}
+
+static void logLine(const char* fmt, ...) {
+    char msg[LOG_LINE_MAXLEN];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+
+    TimeRef t = snapshotTime();
+    char tmp[LOG_LINE_MAXLEN];
+    snprintf(tmp, sizeof(tmp), "%s %s", timestampPrefix().c_str(), msg);
 
     Serial.println(tmp);
     xSemaphoreTake(logMux, portMAX_DELAY);
@@ -336,7 +362,12 @@ bool sendAT(const char* cmd, const char* expect = "OK", uint32_t timeout = 5000)
         // resetear, justo con MODEM como tarea en ejecución).
         if (!done) delay(1);
     }
+    const char* outcome = ok ? "OK" : (buf.indexOf("ERROR") >= 0 ? "[FAIL]" : "[TIMEOUT]");
     if (!done) Serial.println("[TIMEOUT]");
+    // Diálogo AT completo también a la SD (ver sdRawWrite()) — antes solo
+    // iba a Serial, justo lo que más se ha necesitado esta noche para
+    // depurar y que se perdía en cada reinicio.
+    sdRawWrite(timestampPrefix() + " >> " + cmd + "\n" + buf + "\n" + outcome + "\n");
     xSemaphoreGive(atMux);
     return ok;
 }
@@ -359,6 +390,7 @@ String queryAT(const char* cmd, const char* prefix, uint32_t timeout = 5000) {
         }
         delay(1);  // ceder CPU — ver comentario equivalente en sendAT()
     }
+    sdRawWrite(timestampPrefix() + " >> " + cmd + "\n" + buf + "\n");
     xSemaphoreGive(atMux);
     return result;
 }
@@ -1418,11 +1450,13 @@ static void checkRemoteCommand() {
     sanitized.replace("\n", " | ");
     String patchBody = "{\"done\":true,\"result\":\"" + sanitized + "\"}";
     String patchPath = "/rest/v1/device_commands?id=eq." + String(id);
+    Serial.print("[CMD] patchBody="); Serial.println(patchBody);  // sin truncar, para comparar contra el error si lo hay
     if (!sim7000Request("PATCH", patchPath, patchBody, status, respBody) || status >= 300) {
         // Antes esto se ignoraba del todo — el comando se quedaba
         // pendiente sin ningún aviso, y solo lastAttemptedIdAt (arriba)
         // evita que se reintente cada 60s indefinidamente.
-        logLine("[CMD] PATCH \"hecho\" fallo (status=%d), id=%ld sigue pendiente", status, id);
+        logLine("[CMD] PATCH \"hecho\" fallo (status=%d) id=%ld: %s",
+                status, id, respBody.substring(0, 90).c_str());
     }
 }
 
