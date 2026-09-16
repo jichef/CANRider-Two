@@ -74,8 +74,10 @@ CREATE TABLE IF NOT EXISTS telemetry (
     board_battery_voltage  float,
     board_battery_level    int,
 
-    -- Señal de red (AT+CSQ → dBm)
+    -- Señal de red (AT+CSQ → dBm) y tecnología radio actual (AT+CPSI,
+    -- p.ej. "GSM" o "LTE CAT-M1") — ver readNetworkType() en main.ino.
     signal_strength     smallint,
+    network_type        text,
 
     -- CAN: estado del pack EV (únicas señales que el firmware escribe hoy)
     moto_battery        int,            -- SoC (%) — modo A del BMS (0x540)
@@ -94,7 +96,8 @@ ALTER TABLE telemetry
   ADD COLUMN IF NOT EXISTS bms_charging        float,
   ADD COLUMN IF NOT EXISTS board_battery_voltage float,
   ADD COLUMN IF NOT EXISTS board_battery_level   int,
-  ADD COLUMN IF NOT EXISTS board_on_usb          boolean;
+  ADD COLUMN IF NOT EXISTS board_on_usb          boolean,
+  ADD COLUMN IF NOT EXISTS network_type          text;
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_motorcycle_ts
     ON telemetry (motorcycle_id, timestamp DESC);

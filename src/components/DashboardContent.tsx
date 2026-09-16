@@ -107,6 +107,20 @@ function SignalIcon({ connectionType, dbm, size = 12 }: { connectionType?: strin
   return <SignalZero size={size} />;
 }
 
+// network_type viene tal cual de AT+CPSI (ver readNetworkType() en
+// main.ino): "GSM", "LTE CAT-M1", "NOSERVICE" sin registro, etc. — se
+// simplifica a la etiqueta que de verdad importa en el badge de la
+// cabecera. Sin dato (telemetría de antes de este campo, o aún sin
+// primera lectura) se asume LTE, que era la etiqueta fija de siempre.
+function cellularLabel(networkType?: string | null) {
+  if (!networkType) return 'LTE';
+  const t = networkType.toUpperCase();
+  if (t.includes('LTE')) return 'LTE';
+  if (t.includes('GSM') || t.includes('EDGE') || t.includes('GPRS')) return '2G';
+  if (t.includes('WCDMA') || t.includes('UMTS') || t.includes('HSDPA') || t.includes('HSUPA')) return '3G';
+  return networkType;
+}
+
 function timeAgo(isoString?: string | null) {
   if (!isoString) return null;
   const diffMs = Date.now() - new Date(isoString).getTime();
@@ -752,7 +766,7 @@ export default function DashboardContent() {
             }`}>
               <SignalIcon connectionType={telemetry.connection_type} dbm={telemetry.signal_strength} />
               <span className="text-[10px] md:text-xs font-bold uppercase tracking-wider">
-                {telemetry.connection_type === 'wifi' ? 'WiFi' : 'LTE'}
+                {telemetry.connection_type === 'wifi' ? 'WiFi' : cellularLabel(telemetry.network_type)}
               </span>
             </div>
           )}

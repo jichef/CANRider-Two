@@ -910,6 +910,11 @@ void readGPS() {
     t.capturedAt = millis(); t.valid = true;
     storeTime(t);
 }
+// AT+CPSI todavía no se usa en el A7670G (no hace falta el vaivén 2G/LTE
+// que sí tiene el SIM7000G en esta zona, ver comentario de networkSetup())
+// — placeholder para que buildTelemetrySnapshot() pueda llamarlo sin
+// ifdef propio.
+static String readNetworkType() { return ""; }
 #else // SIM7000G
 
 // Respaldo cuando no hay fix GPS: posición aproximada por triangulación de
@@ -1049,6 +1054,33 @@ void readGPS() {
     t.sec   = f[2].substring(12, 14).toInt();
     t.capturedAt = millis(); t.valid = true;
     storeTime(t);
+}
+
+// AT+CPSI? -> "+CPSI: <tecnología>,<estado>,..." — el primer campo es la
+// tecnología de acceso radio actual ("GSM", "LTE CAT-M1", "NOSERVICE" sin
+// registro, etc). Throttlado a NETWORK_TYPE_REFRESH_MS en vez de pedirse
+// en cada ciclo de ~15s: el propio comando puede tardar hasta 5s si el
+// módem no responde rápido, y en la práctica la tecnología no cambia de
+// un ciclo a otro (ver el comentario de networkSetup() sobre por qué este
+// SIM7000G acaba prácticamente siempre acampado en GSM en esta zona —
+// LTE Cat-M1 registra pero el contexto de datos falla siempre aquí). Si
+// la consulta falla se devuelve el último valor conocido en vez de vacío,
+// para no parpadear en el portal por un timeout puntual.
+#define NETWORK_TYPE_REFRESH_MS 60000UL
+static String   g_networkType   = "";
+static uint32_t g_networkTypeAt = 0;
+static String readNetworkType() {
+    if (g_networkType.length() && millis() - g_networkTypeAt < NETWORK_TYPE_REFRESH_MS)
+        return g_networkType;
+    String resp = queryAT("AT+CPSI?", "+CPSI:", 5000);
+    int colon = resp.indexOf(':');
+    if (colon < 0) return g_networkType;
+    int comma = resp.indexOf(',', colon);
+    if (comma < 0) return g_networkType;
+    String rat = resp.substring(colon + 2, comma);
+    rat.trim();
+    if (rat.length()) { g_networkType = rat; g_networkTypeAt = millis(); }
+    return g_networkType;
 }
 #endif
 
@@ -2442,6 +2474,10 @@ static TelemetrySnapshot buildTelemetrySnapshot(const char* connectionType) {
     }
     if (rssi != INT16_MIN) {
         body += ",\"signal_strength\":" + String(rssi);
+    }
+    {
+        String netType = readNetworkType();
+        if (netType.length()) body += ",\"network_type\":\"" + netType + "\"";
     }
 
     // La CPX reporta el SoC por 0x540 (moto_battery) o 0x541
