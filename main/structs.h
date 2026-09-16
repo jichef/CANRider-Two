@@ -71,6 +71,8 @@ struct TripState {
     float    lastLat     = 0, lastLon = 0;
     bool     hasLastPos  = false;
     int      sy, sm, sd, sh, smin, ss;
+    uint32_t lastMovingMs    = 0;  // último ciclo con velocidad GPS real -> cierre por inactividad (ver TRIP_IDLE_TIMEOUT_MS)
+    uint32_t lastCheckpointMs = 0; // último checkpoint mandado por LTE -> throttle en shouldSendTripCheckpoint()
     float    trackLat[MAX_TRIP_POINTS];
     float    trackLon[MAX_TRIP_POINTS];
     float    trackSpeed[MAX_TRIP_POINTS];

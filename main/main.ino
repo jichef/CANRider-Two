@@ -1491,6 +1491,18 @@ static void checkRemoteCommand() {
 
 #define CAN_ALIVE_TIMEOUT_MS 8000UL   // sin ninguna trama CAN durante esto = moto apagada
 
+// Además de "moto apagada" (CAN en silencio), un viaje también se da por
+// terminado si pasa esto sin velocidad GPS real — pensado para cuando el
+// CAN se queda vivo (contacto puesto, ralentí) sin que la moto se mueva,
+// p.ej. aparcada un buen rato con el contacto dado antes de girar la
+// llave del todo. Sin esto, ese tipo de parada mantenía el viaje "abierto"
+// indefinidamente en vez de cerrarse con datos limpios; visto también en
+// banco (15-16/09/2026): con el transceptor CAN puesto pero sin bus real
+// conectado, ruido eléctrico en el RX puede mantener busAlive() vivo sin
+// fin — esto al menos limita el daño a tramos de TRIP_IDLE_TIMEOUT_MS en
+// vez de un único viaje gigante que nunca cierra.
+#define TRIP_IDLE_TIMEOUT_MS 180000UL  // 3 min sin movimiento real (con CAN vivo) -> se cierra solo
+
 // GPS moviéndose de verdad (no ruido de posición en reposo) mientras el bus
 // CAN está en silencio (moto apagada, ver canBusAlive()) no tiene una
 // explicación normal: la moto no se mueve sola apagada. Es la firma de que
@@ -1681,14 +1693,32 @@ static String buildTripBody(const TimeRef& t, float soc) {
 // solo cambia parámetros locales entre llamadas, sin HTTPTERM/HTTPINIT —
 // ver la sección HTTP POST más arriba), así que un checkpoint de viaje
 // cada ~15s no paga una reconexión completa: se manda también por LTE, no
-// solo por WiFi. SIM7000G: cada llamada SÍ abre una conexión TLS desde
-// cero (sim7000Request()), así que ahí los checkpoints intermedios se
-// limitan a WiFi para no multiplicar ese coste durante todo el viaje — el
-// cierre final se sigue intentando por cualquiera de los dos, como pediste.
+// solo por WiFi.
+//
+// SIM7000G: antes esto limitaba los checkpoints intermedios a WiFi —
+// pensado para no multiplicar el coste de abrir una conexión TLS entera
+// (sim7000Request(), sin sesión persistente) en cada ciclo. Pero en un
+// despliegue sin WiFi de telemetría (este), eso significaba que NINGÚN
+// checkpoint salía nunca: el viaje entero se jugaba a un único POST de
+// cierre al apagar la moto, y si justo ahí no había cobertura (p.ej. un
+// garaje/sótano bajo tierra), el viaje se perdía por completo salvo que
+// volviera la señal antes de que pendingTripBody se perdiera en un
+// reinicio (no sobrevive a uno, solo vive en RAM). Ahora se manda
+// también por LTE, pero no en cada ciclo de ~15s (duplicaría la conexión
+// TLS de la telemetría normal durante todo el viaje, en un módem que ya
+// de por sí tiene sus propios problemas de estabilidad de red) — como
+// mucho una vez cada TRIP_CHECKPOINT_MIN_MS. Así, aunque el cierre final
+// falle sin cobertura, Supabase ya tiene casi todo el recorrido guardado.
+#define TRIP_CHECKPOINT_MIN_MS 60000UL
 #if defined(MODEM_A7670G)
 static bool shouldSendTripCheckpoint() { return true; }
 #else
-static bool shouldSendTripCheckpoint() { return wifiConnected(); }
+static bool shouldSendTripCheckpoint() {
+    if (wifiConnected()) return true;
+    if (millis() - tripState.lastCheckpointMs < TRIP_CHECKPOINT_MIN_MS) return false;
+    tripState.lastCheckpointMs = millis();
+    return true;
+}
 #endif
 
 // Devuelve true si el viaje acaba de terminar (se usó postTripUpdate() por
@@ -1731,6 +1761,8 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         tripState.lastLon    = lon;
         tripState.sy = t.year; tripState.sm = t.month; tripState.sd = t.day;
         tripState.sh = t.hour; tripState.smin = t.min; tripState.ss = t.sec;
+        tripState.lastMovingMs    = millis();  // se asume moviéndose al empezar, para no cerrar por inactividad antes del primer fix GPS
+        tripState.lastCheckpointMs = 0;        // fuerza que el checkpoint inicial de abajo no se throttle nunca
         tripState.trackCount = 0;
         if (hasGpsPos) {
             tripState.trackLat[0]       = lat;
@@ -1746,8 +1778,9 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         // entrar en la cochera justo cuando se corta la conexión), Supabase
         // ya tiene el viaje con los puntos que sí llegaron a salir, en vez
         // de no tener nada hasta un cierre final que a lo mejor no llega
-        // nunca. Ver shouldSendTripCheckpoint(): en A7670G esto va también
-        // por LTE (sesión persistente, barato); en SIM7000G solo por WiFi.
+        // nunca. Ver shouldSendTripCheckpoint(): el checkpoint inicial
+        // siempre se manda (tripState.lastCheckpointMs se acaba de resetear
+        // arriba), tanto en A7670G como en SIM7000G.
         if (shouldSendTripCheckpoint()) postTripUpdate(buildTripBody(t, soc));
         return false;
     }
@@ -1755,6 +1788,13 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     if (!tripState.active) return false;
 
     if (speed > tripState.maxSpeed) tripState.maxSpeed = speed;
+
+    // Mismo umbral y mismo criterio que offCanTripTick()/manualTripTick():
+    // solo se refresca con movimiento GPS real confirmado, para no confundir
+    // jitter de posición en parado (típico en interior/zona urbana) con
+    // movimiento de verdad y así no reiniciar el cierre por inactividad sin
+    // motivo.
+    if (hasGpsPos && speed >= THEFT_SPEED_KMH) tripState.lastMovingMs = millis();
 
     if (hasGpsPos && tripState.hasLastPos)
         tripState.distanceKm += haversineKm(tripState.lastLat, tripState.lastLon, lat, lon);
@@ -1770,10 +1810,13 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         tripState.trackCount++;
     }
 
-    if (!busAlive) {
+    bool idleTooLong = (millis() - tripState.lastMovingMs) > TRIP_IDLE_TIMEOUT_MS;
+    if (!busAlive || idleTooLong) {
         String body = buildTripBody(t, soc);
         Serial.print("[TRIP] Fin: "); Serial.println(body);
-        logLine("[TRIP] Fin, dist=%.2fkm maxV=%.0f", tripState.distanceKm, tripState.maxSpeed);
+        logLine("[TRIP] Fin (%s), dist=%.2fkm maxV=%.0f",
+                busAlive ? "sin movimiento" : "CAN apagado",
+                tripState.distanceKm, tripState.maxSpeed);
         if (!postTripUpdate(body)) {
             Serial.println("[TRIP] Error al guardar viaje, se reintentará");
             pendingTripBody = body;
@@ -1784,8 +1827,9 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 
     // Checkpoint intermedio (mismo tripId → upsert sobre la misma fila),
     // igual que el inicial: ver shouldSendTripCheckpoint(). Si falla, no
-    // se reintenta aparte — el siguiente checkpoint, ~15s después y con
-    // más track acumulado, lo sustituye sin más.
+    // se reintenta aparte — el siguiente checkpoint (próximo ciclo en
+    // A7670G/WiFi, o hasta TRIP_CHECKPOINT_MIN_MS después en SIM7000G por
+    // LTE), con más track acumulado, lo sustituye sin más.
     if (shouldSendTripCheckpoint()) {
         if (!postTripUpdate(buildTripBody(t, soc)))
             Serial.println("[TRIP] Checkpoint intermedio no enviado, se reintenta en el siguiente ciclo");
