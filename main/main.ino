@@ -1606,6 +1606,32 @@ static bool flushPendingTrip() {
     return false;
 }
 
+// Al arrancar, tripState siempre empieza inactivo (vive solo en RAM, ver
+// TripState) — si el reinicio anterior pilló un viaje a mitad (reflasheo,
+// hard-reset del módem, corte de alimentación...) esa fila se quedó para
+// siempre con in_progress=true en Supabase sin nadie que la cierre: esta
+// sesión nueva no tiene forma de saber que ese viaje existió, así que no
+// puede cerrarlo desde tripState como a uno normal. Se limpia aquí, PERO
+// solo una vez por arranque real del ESP32 (g_staleTripCleanupDone), no en
+// cada reconexión de red — eso pasa muchas veces por hora sin reiniciar,
+// y si hay un viaje DE VERDAD en curso cuando la red se cae a mitad de
+// trayecto, esto no debe tocarlo (tripState.active sigue en true, ajeno a
+// esta limpieza).
+#if defined(MODEM_SIM7000G)
+static bool g_staleTripCleanupDone = false;
+static void cleanupStaleTrips() {
+    if (g_staleTripCleanupDone) return;
+    int status; String respBody;
+    String path = "/rest/v1/trips?motorcycle_id=eq." VEHICLE_ID "&in_progress=eq.true";
+    if (sim7000Request("PATCH", path, "{\"in_progress\":false}", status, respBody) && status < 300) {
+        g_staleTripCleanupDone = true;
+        logLine("[TRIP] Viajes huérfanos de una sesión anterior cerrados (in_progress)");
+    }
+}
+#else
+static void cleanupStaleTrips() {}
+#endif
+
 static bool canBusAlive() {
     uint32_t last = lastCanFrameMs;   // volatile, lectura atómica
     if (last == 0) return false;      // nunca se ha visto ninguna trama desde el arranque
@@ -2837,6 +2863,7 @@ void modemTask(void*) {
             logLine("[STATE] RUNNING");
             httpFails = 0; state = RUNNING; nextPost = millis();
             outageStartMs = millis();
+            cleanupStaleTrips();
         } else {
             state = ERROR_WAIT; stateAt = millis();
         }
