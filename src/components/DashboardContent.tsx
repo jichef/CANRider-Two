@@ -406,6 +406,41 @@ export default function DashboardContent() {
     fetchTrips(tripPage);
   }, [fetchTrips, tripPage]);
 
+  // Los checkpoints intermedios del firmware actualizan la fila del viaje
+  // en curso cada ~15s (A7670G/WiFi) o ~60s (SIM7000G por LTE) — sin esto,
+  // el historial solo reflejaría ese progreso al recargar la página o
+  // cambiar de página. Un viaje NUEVO solo se inserta en caliente si
+  // estamos viendo la página más reciente (los checkpoints intermedios de
+  // un viaje que ya estaba en la lista sí se reflejan en cualquier página).
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('realtime_trips')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'trips' },
+        (payload) => {
+          if (payload.eventType === 'DELETE') return; // deleteTrip() ya lo gestiona localmente
+          const row = payload.new as any;
+          if (payload.eventType === 'INSERT') {
+            if (tripPage !== 0) return;
+            setTripCount((c) => c + 1);
+            setTrips((prev) => [row, ...prev].slice(0, TRIPS_PER_PAGE));
+            return;
+          }
+          setTrips((prev) => {
+            const idx = prev.findIndex((t) => t.id === row.id);
+            if (idx === -1) return prev;
+            const next = [...prev];
+            next[idx] = row;
+            return next;
+          });
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [supabase, tripPage]);
+
   // Municipio/calle aproximados a partir de las coordenadas (Nominatim,
   // OpenStreetMap — gratis, sin API key). Solo se repite la consulta si la
   // moto se ha movido más de ~80m o han pasado más de 60s desde la última
@@ -946,11 +981,19 @@ export default function DashboardContent() {
                         }`}
                       >
                         <div className="space-y-1 text-left">
-                          <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
-                            isSelected ? 'text-cyan-400' : 'text-zinc-500'
-                          }`}>
-                            {date} · {startTime}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black tracking-wider uppercase transition-colors ${
+                              isSelected ? 'text-cyan-400' : 'text-zinc-500'
+                            }`}>
+                              {date} · {startTime}
+                            </span>
+                            {trip.in_progress && (
+                              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                EN CURSO
+                              </span>
+                            )}
+                          </div>
                           <div className="flex items-center gap-4">
                             <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                               <Navigation size={12} className={isSelected ? 'text-cyan-400' : 'text-cyan-500'} />

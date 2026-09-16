@@ -231,12 +231,42 @@ CREATE TABLE IF NOT EXISTS trips (
     start_battery_level   float,       -- SoC al inicio (%)
     end_battery_level     float,       -- SoC al final (%)
     consumption           float,       -- start_battery_level − end_battery_level (%)
-    track                 jsonb        -- [[lat,lon,velocidad_kmh], ...] — traza real del recorrido
+    track                 jsonb,       -- [[lat,lon,velocidad_kmh], ...] — traza real del recorrido
+    in_progress           boolean     NOT NULL DEFAULT true  -- true mientras el viaje se sigue actualizando por checkpoints, false en el cierre final (ver updateTrip()/buildTripBody() en main.ino)
 );
 
 -- Por si la tabla ya existía de una versión anterior sin esta columna:
 ALTER TABLE trips
   ADD COLUMN IF NOT EXISTS track jsonb;
+ALTER TABLE trips
+  ADD COLUMN IF NOT EXISTS in_progress boolean NOT NULL DEFAULT true;
+
+-- Backfill de una sola vez: todo lo que ya existía en la tabla antes de
+-- este flag (16/09/2026) se guardó siempre como un único POST de cierre —
+-- los checkpoints intermedios no llegaban a intentarse en el hardware
+-- desplegado hasta ese día (ver el fix de shouldSendTripCheckpoint() en
+-- main.ino) — así que ya está completo, no "en curso". El corte por fecha
+-- (en vez de "UPDATE ... WHERE in_progress = true" a secas) hace que
+-- repetir este script más adelante no le borre el estado a un viaje que
+-- sí esté en curso de verdad en ese momento.
+UPDATE trips SET in_progress = false
+  WHERE start_time < '2026-09-16T16:00:00+00:00' AND in_progress = true;
+
+-- El portal se suscribe a cambios en tiempo real de esta tabla (para que
+-- el flag in_progress y el resto de datos del viaje en curso se reflejen
+-- en el historial sin recargar la página) — hace falta la tabla en la
+-- publicación de Realtime de Supabase. Guardado con comprobación previa
+-- porque ALTER PUBLICATION ... ADD TABLE falla si ya estaba añadida (p.ej.
+-- si ya se había activado a mano desde Database > Replication).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'trips'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE trips;
+  END IF;
+END $$;
 
 -- Por si la tabla ya existía de la versión anterior con otros tipos u
 -- otras columnas (ver comentario de la sección de limpieza más arriba):

@@ -1646,9 +1646,10 @@ static float haversineKm(float lat1, float lon1, float lat2, float lon2) {
 
 // Construye el JSON del viaje EN CURSO o recién cerrado, con "end_time" =
 // el instante actual t. Se usa tanto para los checkpoints intermedios como
-// para el cierre final — la única diferencia entre ambos es si busAlive
-// sigue activo o no al llamar a esto, no el formato del cuerpo.
-static String buildTripBody(const TimeRef& t, float soc) {
+// para el cierre final; inProgress marca cuál de los dos es (portal: para
+// distinguir un viaje que se sigue actualizando de uno ya terminado, sin
+// tener que adivinarlo por si end_time es reciente o no).
+static String buildTripBody(const TimeRef& t, float soc, bool inProgress) {
     uint32_t durMin = (millis() - tripState.startMs) / 60000UL;
 
     char startISO[21], endISO[21], durStr[12];
@@ -1669,6 +1670,7 @@ static String buildTripBody(const TimeRef& t, float soc) {
     body += ",\"start_battery_level\":"   + String(tripState.startSoc, 1);
     body += ",\"end_battery_level\":"     + String(soc, 1);
     body += ",\"consumption\":"           + String(tripState.startSoc - soc, 1);
+    body += ",\"in_progress\":"           + String(inProgress ? "true" : "false");
 
     // Traza real del recorrido: [lat, lon, velocidad, segundos desde el
     // inicio, batería en ese punto] — el offset en segundos (no un
@@ -1781,7 +1783,7 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
         // nunca. Ver shouldSendTripCheckpoint(): el checkpoint inicial
         // siempre se manda (tripState.lastCheckpointMs se acaba de resetear
         // arriba), tanto en A7670G como en SIM7000G.
-        if (shouldSendTripCheckpoint()) postTripUpdate(buildTripBody(t, soc));
+        if (shouldSendTripCheckpoint()) postTripUpdate(buildTripBody(t, soc, true));
         return false;
     }
 
@@ -1812,7 +1814,7 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
 
     bool idleTooLong = (millis() - tripState.lastMovingMs) > TRIP_IDLE_TIMEOUT_MS;
     if (!busAlive || idleTooLong) {
-        String body = buildTripBody(t, soc);
+        String body = buildTripBody(t, soc, false);
         Serial.print("[TRIP] Fin: "); Serial.println(body);
         logLine("[TRIP] Fin (%s), dist=%.2fkm maxV=%.0f",
                 busAlive ? "sin movimiento" : "CAN apagado",
@@ -1831,7 +1833,7 @@ bool updateTrip(bool busAlive, float speed, float soc, float lat, float lon,
     // A7670G/WiFi, o hasta TRIP_CHECKPOINT_MIN_MS después en SIM7000G por
     // LTE), con más track acumulado, lo sustituye sin más.
     if (shouldSendTripCheckpoint()) {
-        if (!postTripUpdate(buildTripBody(t, soc)))
+        if (!postTripUpdate(buildTripBody(t, soc, true)))
             Serial.println("[TRIP] Checkpoint intermedio no enviado, se reintenta en el siguiente ciclo");
     }
 
