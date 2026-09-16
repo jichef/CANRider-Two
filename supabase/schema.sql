@@ -108,12 +108,14 @@ CREATE POLICY "insert anon"
     ON telemetry FOR INSERT
     WITH CHECK (true);
 
--- Lectura pública (anon) para que el portal web funcione sin login.
--- Cambia a auth.role() = 'authenticated' si añades login al portal.
+-- El portal ya tiene login (Supabase Auth, ver src/middleware.ts) — solo
+-- un usuario autenticado puede leer telemetría. El firmware NUNCA
+-- necesita leer esta tabla (solo inserta), así que no le afecta.
 DROP POLICY IF EXISTS "select anon" ON telemetry;
-CREATE POLICY "select anon"
+DROP POLICY IF EXISTS "select authenticated" ON telemetry;
+CREATE POLICY "select authenticated"
     ON telemetry FOR SELECT
-    USING (true);
+    USING (auth.role() = 'authenticated');
 
 -- Triggers de la versión anterior sobre telemetry/trips (por ejemplo, uno
 -- que mantenía is_trip_active) — se eliminan ANTES de quitar las columnas
@@ -299,8 +301,13 @@ ALTER TABLE trips ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "insert anon" ON trips;
 CREATE POLICY "insert anon" ON trips FOR INSERT WITH CHECK (true);
 
+-- El portal ya tiene login (Supabase Auth, ver src/middleware.ts) — solo
+-- un usuario autenticado puede leer el historial de viajes. El firmware
+-- nunca lee esta tabla (solo inserta/actualiza su propio viaje), así que
+-- esto no le afecta.
 DROP POLICY IF EXISTS "select anon" ON trips;
-CREATE POLICY "select anon" ON trips FOR SELECT USING (true);
+DROP POLICY IF EXISTS "select authenticated" ON trips;
+CREATE POLICY "select authenticated" ON trips FOR SELECT USING (auth.role() = 'authenticated');
 
 -- Faltaba esta: el propio firmware asume que existe (Prefer: resolution=
 -- merge-duplicates en cada checkpoint intermedio del viaje, ver
@@ -318,11 +325,11 @@ DROP POLICY IF EXISTS "update anon" ON trips;
 CREATE POLICY "update anon" ON trips FOR UPDATE USING (true) WITH CHECK (true);
 
 -- Permite borrar viajes desde el portal (botón de la papelera en el
--- historial) — mismo nivel de acceso que insert/select de arriba, ya
--- abierto con la anon key: este proyecto no tiene autenticación de
--- usuario, así que no hay un "propietario" distinto que distinguir.
+-- historial) — el firmware nunca borra un viaje, solo el portal (con
+-- login), así que esto va a authenticated igual que el SELECT de arriba.
 DROP POLICY IF EXISTS "delete anon" ON trips;
-CREATE POLICY "delete anon" ON trips FOR DELETE USING (true);
+DROP POLICY IF EXISTS "delete authenticated" ON trips;
+CREATE POLICY "delete authenticated" ON trips FOR DELETE USING (auth.role() = 'authenticated');
 
 
 -- ─────────────────────────────────────────────────────────────────────────
@@ -362,12 +369,20 @@ CREATE INDEX IF NOT EXISTS idx_device_commands_pending
 
 ALTER TABLE device_commands ENABLE ROW LEVEL SECURITY;
 
--- El portal inserta el comando con la anon key.
+-- Solo el portal inserta comandos (el firmware únicamente los lee/marca
+-- hechos, nunca crea uno) — con login ya en el portal, esto pasa a
+-- authenticated. No le afecta al firmware, que no inserta aquí.
 DROP POLICY IF EXISTS "insert anon" ON device_commands;
-CREATE POLICY "insert anon" ON device_commands FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "insert authenticated" ON device_commands;
+CREATE POLICY "insert authenticated" ON device_commands FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
--- El portal necesita leer el resultado, y el firmware necesita leer qué
--- comando hay pendiente — mismo acceso público de siempre, sin login.
+-- El firmware necesita leer qué comando hay pendiente con la anon key
+-- (checkRemoteCommand() en main.ino) — esta SÍ se queda anon a la fuerza,
+-- no hay forma de que un ESP32 desatendido haga login interactivo. Deja
+-- visible con la anon key la cola de comandos/resultados (p.ej. la
+-- posición de un lbs_check) — menos sensible que trips/telemetry, pero
+-- queda como hueco conocido mientras el firmware no tenga otra forma de
+-- autenticarse.
 DROP POLICY IF EXISTS "select anon" ON device_commands;
 CREATE POLICY "select anon" ON device_commands FOR SELECT USING (true);
 
@@ -382,9 +397,12 @@ CREATE POLICY "update anon" ON device_commands FOR UPDATE USING (true) WITH CHEC
 -- siempre — sin política de DELETE, esos DELETE llevaban fallando en
 -- silencio (200 OK, 0 filas afectadas) desde que se añadió esta tabla.
 -- Detectado el 15/09/2026: una fila de una prueba del 14/09 seguía
--- pendiente 24h después, reejecutándose cada 60s sin parar.
+-- pendiente 24h después, reejecutándose cada 60s sin parar. El firmware
+-- nunca borra aquí (solo el portal), así que esto también pasa a
+-- authenticated con el login.
 DROP POLICY IF EXISTS "delete anon" ON device_commands;
-CREATE POLICY "delete anon" ON device_commands FOR DELETE USING (true);
+DROP POLICY IF EXISTS "delete authenticated" ON device_commands;
+CREATE POLICY "delete authenticated" ON device_commands FOR DELETE USING (auth.role() = 'authenticated');
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Fin. Si el editor de Supabase dice "Success. No rows returned" al final,

@@ -24,9 +24,11 @@ import {
   X,
   RadioTower,
   RefreshCw,
+  LogOut,
 } from 'lucide-react';
 
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 import { AreaChart, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -135,6 +137,12 @@ export default function DashboardContent() {
   // con inicializador perezoso crea el cliente una sola vez por instancia
   // del componente y mantiene la misma referencia mientras esté montado.
   const [supabase] = useState(() => createClient());
+  const router = useRouter();
+  const handleLogout = async () => {
+    await supabase?.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
   const [telemetry, setTelemetry] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
   const TRIPS_PER_PAGE = 5;
@@ -784,6 +792,14 @@ export default function DashboardContent() {
               <span>{new Date(telemetry.timestamp).toLocaleTimeString('es-ES')}</span>
             </div>
           )}
+
+          <button
+            onClick={handleLogout}
+            title="Cerrar sesión"
+            className={`p-2 rounded-xl border border-white/10 text-zinc-500 hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/10 transition-colors ${telemetry?.timestamp ? '' : 'ml-auto'}`}
+          >
+            <LogOut size={14} />
+          </button>
         </header>
 
         {/* Alerta de posible sustracción — moving_without_can (main.ino:
